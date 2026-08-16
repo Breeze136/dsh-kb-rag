@@ -1,0 +1,7 @@
+# dsh-kb-rag bundle patch: inserts the Host plugin row into the profile.
+# When installed via `dsh plugin --profile <name> add dsh-kb-rag`, this layer
+# activates automatically; users may also copy this insert into their own
+# cordis.patch.yml (the package must be resolvable from the profile root).
+- insert:
+    - id: kb-rag
+      name: 'dsh-kb-rag'

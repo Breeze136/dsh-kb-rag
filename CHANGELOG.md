@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.4] - 声明 dsh.bundle，一键安装即激活
+
+- package.json 增加 `dsh.bundle.patch` 声明并随包分发 `cordis.patch.yml`（插入 `kb-rag` 行）
+- 用户现在只需 `dsh plugin --profile <name> add dsh-kb-rag` 即可安装并自动激活为 profile layer（无需手改 cordis.patch.yml）
+- 增加 `exports` 入口（`./cordis.patch.yml`、`./package.json`）
+
 ## [1.0.3] - README 全英文化
 
 - 仓库 README.md 与 npm-package/README.md 全部译为英文（代码与功能不变）

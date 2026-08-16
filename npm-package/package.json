@@ -1,12 +1,20 @@
 {
   "name": "dsh-kb-rag",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Local literature knowledge-base RAG tools for DSH: hybrid retrieval + rerank + cited answers over a SQLite index (bundled Python engine).",
   "type": "module",
   "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
   "files": [
     "lib/index.js",
     "kb_engine.py",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
@@ -28,6 +36,11 @@
     "type": "git",
     "url": "git+https://github.com/Breeze136/kb-rag.git",
     "directory": "npm-package"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
