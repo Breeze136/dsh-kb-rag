@@ -35,6 +35,27 @@ DSH 模型 ──工具调用──▶ 插件 Host(JS 薄层) ──JSON行协�
 2. 把 `kb_engine.py` 放到 DSH 会话工作区根目录
 3. 用 `cordis_define` 加载 `plugin/host.js` 与 `plugin/client.js`，运行后直接对话即可（首次检索会弹出"查询范围"选择）
 
+## npm 静态包（给其他 Harness 用户）
+
+已发布到 npm：**`dsh-kb-rag`**（[npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)）。任何 DSH 部署可直接安装使用：
+
+1. 在 DSH 部署目录安装（或写进部署 package.json dependencies）：
+
+   ```bash
+   npm install dsh-kb-rag
+   ```
+
+2. 在该部署的 cordis 组合（cordis.yml / 预设）中加载：
+
+   ```yaml
+   plugins:
+     dsh-kb-rag: {}
+   ```
+
+3. 启动/重载 DSH，8 个工具自动注册。注意：DSH 插件加载器按包名从部署 node_modules 解析，**不会自动下载未安装的包**——第 1 步必须先执行一次。
+
+静态包自带 `kb_engine.py`（随包分发，无需手动放置）；启动时自动检测 Python 依赖，缺失时在宿主日志打印 `pip install` 命令。完整说明见 [npm-package/README.md](npm-package/README.md)。
+
 ## 工具速查
 
 | 工具 | 功能 | 典型说法 |
@@ -83,6 +104,7 @@ kb-rag/
 ├─ plugin/
 │  ├─ host.js            # DSH 插件 Host 半（8 个工具 + 守护进程 + RPC）
 │  └─ client.js          # DSH 插件 Client 半（工具来源卡片，可选）
+├─ npm-package/          # npm 静态包 dsh-kb-rag（lib/index.js + kb_engine.py）
 ├─ docs/DESIGN.md        # 设计文档（分块/检索/协议细节）
 ├─ QUICKSTART.md         # 五分钟上手
 ├─ CHANGELOG.md

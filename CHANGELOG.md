@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1] - npm 静态包补丁
+
+- 静态包启动时自动检测 Python 依赖（pymupdf/faiss-cpu/sentence-transformers/torch），缺失时在宿主日志打印对应 `pip install` 命令（不阻塞加载）
+- npm-package/README 增加"其他 Harness 用户安装指引"（部署目录 npm install + cordis 组合加载两步）
+- 仓库 README 增加 npm 静态包一节与目录结构更新
+
 ## [1.0.0] - 2026-xx-xx（发布版）
 
 初始发布：本地文献知识库 RAG（DSH 插件 + Python 引擎）。

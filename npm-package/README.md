@@ -36,6 +36,27 @@ plugins:
 
 或通过 cordis-plugin-loader 按包名解析加载。加载后模型会话自动获得上述 8 个工具。
 
+### 其他 Harness 用户安装指引
+
+任何 DSH 部署都可以直接使用本包（加载器按包名从部署的 node_modules 解析，与官方静态插件一致）：
+
+1. 在 **DSH 部署目录**里安装（或把 `dsh-kb-rag` 写进部署的 package.json dependencies）：
+
+   ```bash
+   npm install dsh-kb-rag
+   ```
+
+2. 在该部署的 **cordis 组合**（cordis.yml 或 agent 预设）中加一行：
+
+   ```yaml
+   plugins:
+     dsh-kb-rag: {}
+   ```
+
+3. 启动/重载 DSH，8 个工具自动注册，无需其他配置。
+
+注意：DSH 的插件加载器**不会**在启动时自动从 npm 下载未安装的包——安装（第 1 步）必须先在部署目录执行一次。
+
 ## 依赖要求
 
 - Node.js ≥ 18（宿主进程）
@@ -44,6 +65,9 @@ plugins:
 ```bash
 pip install pymupdf faiss-cpu sentence-transformers
 ```
+
+插件**启动时会自动检测**这些 Python 依赖：缺失时在宿主日志中打印缺失模块与对应的
+`pip install` 命令（不会自动联网安装，也不会阻塞插件加载）。
 
 嵌入模型 `BAAI/bge-small-zh-v1.5`、精排模型 `BAAI/bge-reranker-base` 首次使用时自动下载
 （本地 HF 缓存；国内网络可用 `HF_ENDPOINT=https://hf-mirror.com`）。
