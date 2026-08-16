@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.3] - README 全英文化
+
+- 仓库 README.md 与 npm-package/README.md 全部译为英文（代码与功能不变）
+
 ## [1.0.2] - npm 文档补丁
 
 - README 增加 npm 版本/下载量、GitHub release、MIT 徽章
