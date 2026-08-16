@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.5] - 安全文档入包 + 移除遗留 shell 调用
+
+- 删除 plugin/host.js 中遗留的 `cmd /c start` 打开文件 RPC（唯一变量路径进 shell 的点）
+- 新增 SECURITY.md（执行模型/spawn 清单/读写边界/模型下载说明）并随 npm 包分发
+- npm-package README 增加 Security 一节
+
 ## [1.0.4] - 声明 dsh.bundle，一键安装即激活
 
 - package.json 增加 `dsh.bundle.patch` 声明并随包分发 `cordis.patch.yml`（插入 `kb-rag` 行）

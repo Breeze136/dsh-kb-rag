@@ -96,6 +96,11 @@ Data persists in the session workspace `/.kb` by default; every tool accepts `kb
 - The engine runs as a resident subprocess via the bundled `kb_engine.py` (JSON-lines protocol) and exits when the session ends.
 - On restricted networks (no HF / pip access), prepare the model cache and Python dependencies beforehand.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the complete execution model: what the plugin spawns, reads, writes,
+and downloads — and why automated scanners flag process-spawning plugins as "shell".
+
 ## License
 
 MIT
