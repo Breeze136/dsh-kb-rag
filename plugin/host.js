@@ -217,23 +217,6 @@ return {
     }
     checkPythonDeps()
 
-    harness.handle('kb-open-file', async (args) => {
-      const path = args && typeof args.path === 'string' ? args.path : ''
-      if (path.length === 0) return { ok: false, error: 'empty path' }
-      try {
-        const handle = subprocess.spawn({
-          argv: ['cmd', '/c', 'start', '', path],
-          cwd: sandboxPolicy !== undefined && typeof sandboxPolicy.workspaceRoot === 'string' ? sandboxPolicy.workspaceRoot : '.',
-          stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 }, stderr: { maxBytes: 4096 } },
-          graceMs: 3000,
-        })
-        const outcome = await handle.done
-        return { ok: outcome.exitCode === 0, exitCode: outcome.exitCode }
-      } catch (e) {
-        return { ok: false, error: String(e && e.message || e).slice(0, 300) }
-      }
-    })
-
     const kbRootOf = (args, exec) => typeof args.kb_root === 'string' && args.kb_root.length > 0 ? args.kb_root : workspaceOf(exec) + '/.kb'
     const renderJson = (_args, value) => [{ type: 'text', text: JSON.stringify(value) }]
 
