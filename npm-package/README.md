@@ -1,5 +1,10 @@
 # dsh-kb-rag
 
+[![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
+[![GitHub release](https://img.shields.io/github/v/release/Breeze136/kb-rag)](https://github.com/Breeze136/kb-rag/releases)
+[![MIT](https://img.shields.io/github/license/Breeze136/kb-rag)](LICENSE)
+
 DSH 静态插件（Host 端）：本地文献知识库 RAG。轻量、快速、精确，检索 + 关联查询，省 token。
 
 把 PDF / TXT / MD / DOCX 或整个文件夹、以及 Zotero 文献库导入本地知识库（工作区 `/.kb`），

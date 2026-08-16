@@ -1,5 +1,10 @@
 # kb-rag — 本地文献知识库 RAG（DSH 插件版）
 
+[![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
+[![GitHub release](https://img.shields.io/github/v/release/Breeze136/kb-rag)](https://github.com/Breeze136/kb-rag/releases)
+[![MIT](https://img.shields.io/github/license/Breeze136/kb-rag)](LICENSE)
+
 > 一次入库，永久检索；只把最相关的三句话送进 LLM，每个结论带精确溯源。
 
 kb-rag 是一个面向 **DSH（DeepSeek Harness）** 的轻量本地数据库 RAG 插件：把 PDF/Zotero 文献建成带章节结构与向量索引的 SQLite 知识库，提供混合检索 + 精排 + 带溯源问答的完整工作流。全部索引、嵌入与精排模型本地运行，零 API 费用、零上传。
