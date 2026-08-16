@@ -5,95 +5,95 @@
 [![GitHub release](https://img.shields.io/github/v/release/Breeze136/kb-rag)](https://github.com/Breeze136/kb-rag/releases)
 [![MIT](https://img.shields.io/github/license/Breeze136/kb-rag)](LICENSE)
 
-DSH 静态插件（Host 端）：本地文献知识库 RAG。轻量、快速、精确，检索 + 关联查询，省 token。
+Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-把 PDF / TXT / MD / DOCX 或整个文件夹、以及 Zotero 文献库导入本地知识库（工作区 `/.kb`），
-用 **BM25 + FAISS 向量 + bge-reranker 精排** 做混合检索，供模型带着精确来源作答。
+Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
+and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
 
-## 功能（8 个模型工具）
+## Features (8 model tools)
 
-| 工具 | 用途 |
+| Tool | Purpose |
 | --- | --- |
-| `kb_ingest` | 入库文件/文件夹（PDF/TXT/MD/DOCX，递归扫描），增量、去重、按章节切分 + 向量化 |
-| `kb_zotero` | 把本地 Zotero 文献库（带 PDF 附件）批量迁移入库 |
-| `kb_search` | 混合检索 Top-N 片段 + 精确来源（标题/作者/年份/期刊/DOI/章节/得分） |
-| `kb_rag` | 检索证据片段（默认 Top-3）供模型直接作答，每句标注引用编号 |
-| `kb_scope` | 设置/查看查询范围（kb / both / web）与严格模式 |
-| `kb_stats` | 文档数、分块数、向量数、最近入库列表 |
-| `kb_dedup` | 清理重复文献（保留最早一份） |
-| `kb_clear` | 清空全部文献与索引（必须显式 `confirm: true`） |
+| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking + vectorization |
+| `kb_zotero` | Batch-migrate a local Zotero library (items with PDF attachments) into the KB |
+| `kb_search` | Hybrid search Top-N snippets + exact sources (title/authors/year/journal/DOI/section/score) |
+| `kb_rag` | Retrieve evidence snippets (Top-3 by default) for the model to answer directly, with citation numbers per claim |
+| `kb_scope` | Set/view query scope (kb / both / web) and strict mode |
+| `kb_stats` | Doc/chunk/vector counts and recent ingest list |
+| `kb_dedup` | Remove duplicate documents (keeps the earliest) |
+| `kb_clear` | Wipe all documents and indexes (requires explicit `confirm: true`) |
 
-来源引用格式：有 DOI → `[作者, 年份, 期刊](https://doi.org/DOI)`（可点击）；无 DOI → `[作者, 年份, 文件名]`。
-每次问答末尾会附"建议补充入库"提示；严格模式（strict）下答案仅基于库内证据。
+Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (clickable); without DOI → `[authors, year, filename]`.
+Every answer ends with a "suggested additions" note; in strict mode the answer stays within KB evidence only.
 
-## 安装与启用
+## Install & Enable
 
 ```bash
 npm install dsh-kb-rag
 ```
 
-在部署的 cordis 组合（cordis.yml / 预设）中加载本包：
+Load the package in your deployment's cordis composition (cordis.yml / preset):
 
 ```yaml
 plugins:
   dsh-kb-rag: {}
 ```
 
-或通过 cordis-plugin-loader 按包名解析加载。加载后模型会话自动获得上述 8 个工具。
+Or let cordis-plugin-loader resolve it by package name. After loading, model sessions get the 8 tools above automatically.
 
-### 其他 Harness 用户安装指引
+### Guide for other Harness users
 
-任何 DSH 部署都可以直接使用本包（加载器按包名从部署的 node_modules 解析，与官方静态插件一致）：
+Any DSH deployment can use this package directly (the loader resolves package names from the deployment's node_modules, same as official static plugins):
 
-1. 在 **DSH 部署目录**里安装（或把 `dsh-kb-rag` 写进部署的 package.json dependencies）：
+1. Install in the **DSH deployment directory** (or add `dsh-kb-rag` to the deployment's package.json dependencies):
 
    ```bash
    npm install dsh-kb-rag
    ```
 
-2. 在该部署的 **cordis 组合**（cordis.yml 或 agent 预设）中加一行：
+2. Add one line to that deployment's **cordis composition** (cordis.yml or agent preset):
 
    ```yaml
    plugins:
      dsh-kb-rag: {}
    ```
 
-3. 启动/重载 DSH，8 个工具自动注册，无需其他配置。
+3. Start/reload DSH — the 8 tools register automatically, no other configuration.
 
-注意：DSH 的插件加载器**不会**在启动时自动从 npm 下载未安装的包——安装（第 1 步）必须先在部署目录执行一次。
+Note: the DSH plugin loader does **not** auto-download uninstalled packages at startup — the install (step 1) must run once in the deployment directory first.
 
-## 依赖要求
+## Requirements
 
-- Node.js ≥ 18（宿主进程）
-- Python 3.9+ 及以下包（首次检索/入库时若缺会提示安装）：
+- Node.js ≥ 18 (host process)
+- Python 3.9+ with the packages below (if missing at first search/ingest, you will be prompted to install them):
 
 ```bash
 pip install pymupdf faiss-cpu sentence-transformers
 ```
 
-插件**启动时会自动检测**这些 Python 依赖：缺失时在宿主日志中打印缺失模块与对应的
-`pip install` 命令（不会自动联网安装，也不会阻塞插件加载）。
+The plugin **auto-checks these Python dependencies at startup**: if anything is missing it prints the module and the corresponding
+`pip install` command to the host log (it does not auto-install from the network and does not block plugin loading).
 
-嵌入模型 `BAAI/bge-small-zh-v1.5`、精排模型 `BAAI/bge-reranker-base` 首次使用时自动下载
-（本地 HF 缓存；国内网络可用 `HF_ENDPOINT=https://hf-mirror.com`）。
+The embedding model `BAAI/bge-small-zh-v1.5` and reranker `BAAI/bge-reranker-base` download automatically on first use
+(local HF cache; on restricted networks set `HF_ENDPOINT=https://hf-mirror.com`).
 
-- 对等依赖：`@deepseek-ai/cordis` ^4、`@deepseek-ai/dsh-tools`（宿主工具注册接口）。
+- Peer dependencies: `@deepseek-ai/cordis` ^4, `@deepseek-ai/dsh-tools` (host tool registration API).
 
-## 用法示例
+## Usage Examples
 
-1. 入库：`kb_ingest(paths=["papers/", "notes.md"])`
-2. Zotero：`kb_zotero(dry_run=true)` 预览后去掉 dry_run 正式迁移
-3. 检索：`kb_search(query="attention is all you need", top_k=5, filters={year: ">=2018"})`
-4. 问答：`kb_rag(query="Transformer 的位置编码有哪几种？", strict=true)`
-5. 范围：`kb_scope(scope="both")`；查看库内有什么：`kb_stats()`
+1. Ingest: `kb_ingest(paths=["papers/", "notes.md"])`
+2. Zotero: `kb_zotero(dry_run=true)` to preview, then drop dry_run for the real migration
+3. Search: `kb_search(query="attention is all you need", top_k=5, filters={year: ">=2018"})`
+4. QA: `kb_rag(query="What positional encodings does the Transformer use?", strict=true)`
+5. Scope: `kb_scope(scope="both")`; see what's in the library: `kb_stats()`
 
-数据默认持久化在会话工作区 `/.kb`，各工具可用 `kb_root` 覆盖。
+Data persists in the session workspace `/.kb` by default; every tool accepts `kb_root` to override.
 
-## 注意
+## Notes
 
-- 本包为 Host 端静态插件（工具全部在服务端执行），**刻意不含浏览器 UI / 管理面板**：一切操作与查看经由对话和工具返回完成（检索结果内置 DOI 链接渲染），这是定位选择，不是缺失。
-- 引擎通过随包分发的 `kb_engine.py` 以常驻子进程运行（JSON-line 协议），会话结束自动退出。
-- 网络受限环境（无法访问 HF / pip）需提前准备模型缓存与 Python 依赖。
+- This is a Host-side static plugin (all tools run server-side) and **deliberately ships no browser UI / management panel**: every operation and inspection happens through conversation and tool returns (search results render with clickable DOI links) — a positioning choice, not a gap.
+- The engine runs as a resident subprocess via the bundled `kb_engine.py` (JSON-lines protocol) and exits when the session ends.
+- On restricted networks (no HF / pip access), prepare the model cache and Python dependencies beforehand.
 
 ## License
 
