@@ -180,6 +180,48 @@ function apply(ctx) {
     }
   });
 
+  // 启动时自动检测 Python 依赖（pymupdf / faiss / sentence-transformers / torch），
+  // 缺失时在宿主日志里打印安装命令；不阻塞插件加载。
+  function checkPythonDeps() {
+    let python = "python";
+    const probe = subprocess.resolveExecutable("python").catch(function () { /* keep bare name */ }).then(function (resolved) {
+      if (typeof resolved === "string" && resolved.length > 0) python = resolved;
+      let handle;
+      try {
+        handle = subprocess.spawn({
+          argv: [python, "-c", "import fitz, faiss, sentence_transformers, torch"],
+          cwd: ENGINE_DIR,
+          stdio: {
+            stdin: "ignore",
+            stdout: { maxBytes: 4096 },
+            stderr: { maxBytes: 16384 },
+          },
+          graceMs: 3000,
+        });
+      } catch (e) {
+        console.error("[kb-rag] dependency check failed to spawn:", String(e && e.message || e));
+        return;
+      }
+      handle.done.then(function (out) {
+        if (out.exitCode === 0) {
+          console.log("[kb-rag] Python dependencies OK");
+          return;
+        }
+        const err = handle.collected.stderr !== undefined ? handle.collected.stderr.readFrom(0).text : "";
+        const missing = [];
+        if (String(err).includes("fitz")) missing.push("pymupdf");
+        if (String(err).includes("faiss")) missing.push("faiss-cpu");
+        if (String(err).includes("sentence_transformers")) missing.push("sentence-transformers");
+        if (String(err).includes("torch")) missing.push("torch");
+        console.error("[kb-rag] Python dependencies missing: " + (missing.length > 0 ? missing.join(", ") : "unknown module"));
+        console.error("[kb-rag] Install with: pip install " + (missing.length > 0 ? missing.join(" ") : "pymupdf faiss-cpu sentence-transformers"));
+        console.error("[kb-rag] " + String(err).trim().split("\n").slice(-2).join(" | ").slice(0, 500));
+      });
+    });
+    probe.catch(function () { /* ignore */ });
+  }
+  checkPythonDeps();
+
   const kbRootOf = (args, exec) => typeof args.kb_root === "string" && args.kb_root.length > 0 ? args.kb_root : workspaceOf(exec) + "/.kb";
   const renderJson = (_args, value) => [{ type: "text", text: JSON.stringify(value) }];
 
