@@ -1,0 +1,36 @@
+{
+  "name": "dsh-kb-rag",
+  "version": "1.0.0",
+  "description": "Local literature knowledge-base RAG tools for DSH: hybrid retrieval + rerank + cited answers over a SQLite index (bundled Python engine).",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib/index.js",
+    "kb_engine.py",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "rag",
+    "knowledge-base",
+    "literature",
+    "zotero",
+    "sqlite",
+    "embedding",
+    "rerank"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Breeze136/kb-rag.git",
+    "directory": "npm-package"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  }
+}
