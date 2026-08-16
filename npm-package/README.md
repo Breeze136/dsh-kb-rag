@@ -91,7 +91,7 @@ pip install pymupdf faiss-cpu sentence-transformers
 
 ## 注意
 
-- 本包为 Host 端静态插件（工具全部在服务端执行），不含浏览器 UI。
+- 本包为 Host 端静态插件（工具全部在服务端执行），**刻意不含浏览器 UI / 管理面板**：一切操作与查看经由对话和工具返回完成（检索结果内置 DOI 链接渲染），这是定位选择，不是缺失。
 - 引擎通过随包分发的 `kb_engine.py` 以常驻子进程运行（JSON-line 协议），会话结束自动退出。
 - 网络受限环境（无法访问 HF / pip）需提前准备模型缓存与 Python 依赖。
 
