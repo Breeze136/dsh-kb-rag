@@ -1,0 +1,6 @@
+PyMuPDF>=1.24
+numpy>=1.24
+faiss-cpu>=1.8
+sentence-transformers>=3.0
+# 可选（DOCX 原生解析；缺失时引擎自动回退 zip+regex 提取）
+# python-docx>=1.1

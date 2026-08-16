@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 知识库数据（勿提交）
+.kb/
+*.sqlite
+*.sqlite-journal
+
+# 系统
+.DS_Store
+Thumbs.db

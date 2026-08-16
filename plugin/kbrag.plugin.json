@@ -1,0 +1,24 @@
+{
+  "name": "kb-rag",
+  "version": "1.0.0",
+  "description": "Local literature knowledge-base RAG for DSH: hybrid retrieval + rerank + cited answers over a SQLite index.",
+  "kind": "dsh-dynamic-plugin",
+  "idPrefix": "kbrag",
+  "code": {
+    "host": "plugin/host.js",
+    "client": "plugin/client.js"
+  },
+  "engine": {
+    "file": "kb_engine.py",
+    "placeAt": "<session-workspace>/kb_engine.py",
+    "commands": ["ingest", "search", "rag", "stats", "zotero", "dedup", "clear", "serve"]
+  },
+  "tools": ["kb_ingest", "kb_zotero", "kb_search", "kb_rag", "kb_scope", "kb_dedup", "kb_clear", "kb_stats"],
+  "requirements": ["PyMuPDF>=1.24", "numpy>=1.24", "faiss-cpu>=1.8", "sentence-transformers>=3.0"],
+  "models": {
+    "embed": "BAAI/bge-small-zh-v1.5",
+    "rerank": "BAAI/bge-reranker-base"
+  },
+  "dataDir": ".kb",
+  "license": "MIT"
+}
