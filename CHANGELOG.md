@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2] - npm 文档补丁
+
+- README 增加 npm 版本/下载量、GitHub release、MIT 徽章
+- 新增"设计原则"一节：刻意零 UI（无管理面板/前端状态/客户端依赖，一切经由对话与工具返回完成，检索结果内置 DOI 链接渲染）、垂直学术文献、留在甜区
+- 同步更新 awesome 列表两处 PR 的定位描述
+
 ## [1.0.1] - npm 静态包补丁
 
 - 静态包启动时自动检测 Python 依赖（pymupdf/faiss-cpu/sentence-transformers/torch），缺失时在宿主日志打印对应 `pip install` 命令（不阻塞加载）
