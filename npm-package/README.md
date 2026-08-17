@@ -26,7 +26,7 @@ and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answer
 | `kb_clear` | Wipe all documents and indexes (requires explicit `confirm: true`) |
 
 Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (clickable); without DOI → `[authors, year, filename]`.
-Every answer ends with a "suggested additions" note; in strict mode the answer stays within KB evidence only.
+`kb_search`/`kb_rag` also return a **related-literature list** (same authors / same journal / nearby year / thematically similar) that the answer's "suggested additions" cites. Every answer ends with that note; in strict mode the answer stays within KB evidence only.
 
 ## Install & Enable
 
