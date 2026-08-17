@@ -251,6 +251,22 @@ function apply(ctx) {
         lines.push("无 DOI · score " + r.score + " · 文件：" + String(r.file || ""));
       }
     });
+    if (Array.isArray(value.related) && value.related.length > 0) {
+      lines.push("");
+      lines.push("**关联文献（可作补充建议）**");
+      value.related.forEach(function (r) {
+        const doi = typeof r.doi === "string" && r.doi.length > 0 ? r.doi : null;
+        const t = doi !== null
+          ? "[" + String(r.title || r.file || "") + "](https://doi.org/" + doi + ")"
+          : String(r.title || r.file || "");
+        const meta = [
+          typeof r.authors === "string" && r.authors.length > 0 ? String(r.authors).split(";").map(function (s) { return s.trim(); }).filter(Boolean).slice(0, 2).join("; ") : null,
+          r.year,
+          r.journal,
+        ].filter(Boolean).join(" · ");
+        lines.push("- " + t + (meta.length > 0 ? " — " + meta : "") + "（" + String(r.reason || "内容相关") + " · score " + r.score + "）");
+      });
+    }
     return [{ type: "text", text: lines.join("\n") }];
   };
 
@@ -294,6 +310,7 @@ function apply(ctx) {
       snippet: { type: "integer", description: "片段长度字符数（默认 400）。" },
       mode: { type: "string", enum: ["keyword", "vector", "hybrid"], description: "检索模式（默认 hybrid）。" },
       rerank: { type: "boolean", description: "是否启用 bge-reranker-base 精排（默认 true）。" },
+      related: { type: "boolean", description: "true 时附带 related 关联文献列表（同作者/同期刊/年份相近/主题相似，默认 true，供补充建议引用）。" },
       strict: { type: "boolean", description: "严格模式：true 时答案仅基于本次检索结果，禁止补充库外知识/常识外延（默认继承 kb_scope 的 strict 设置）。" },
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
@@ -308,6 +325,7 @@ function apply(ctx) {
         snippet: args.snippet,
         mode: args.mode,
         rerank: args.rerank,
+        related: args.related,
         filters: args.filters,
         kb_root: kbRootOf(args, exec),
       }, exec);
@@ -317,11 +335,12 @@ function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: "kb_rag",
-    description: "在知识库中检索证据片段（混合检索 + bge-reranker 精排，默认 Top-3）供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出并说明来源。答案末尾可附一句补充说明：若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。",
+    description: "在知识库中检索证据片段（混合检索 + bge-reranker 精排，默认 Top-3）供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出并说明来源。答案末尾的补充建议优先参考 related 关联文献列表（同作者/同期刊/年份相近/主题相似的库内文献）：若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。",
     parameters: {
       query: { type: "string", required: true, description: "自然语言问题（中英文均可）。" },
       top_k: { type: "integer", description: "证据条数（默认 3，上限 10）。" },
       rerank: { type: "boolean", description: "是否启用精排（默认 true）。" },
+      related: { type: "boolean", description: "true 时附带 related 关联文献列表供补充建议引用（默认 true）。" },
       strict: { type: "boolean", description: "严格模式：true 时仅基于 evidence 作答，禁止库外知识补充（默认继承 kb_scope 的 strict 设置）。" },
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
@@ -334,6 +353,7 @@ function apply(ctx) {
         query: args.query,
         top_k: args.top_k,
         rerank: args.rerank,
+        related: args.related,
         filters: args.filters,
         kb_root: kbRootOf(args, exec),
       }, exec);
