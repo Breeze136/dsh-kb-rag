@@ -5,6 +5,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/Breeze136/kb-rag)](https://github.com/Breeze136/kb-rag/releases)
 [![MIT](https://img.shields.io/github/license/Breeze136/kb-rag)](LICENSE)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
+[![dsh.so security](https://www.dsh.so/badges/kb-rag.svg)](https://www.dsh.so/artifact/kb-rag/)
 
 > Ingest once, search forever. Only the most relevant few sentences ever reach the LLM — and every claim carries exact provenance.
 
@@ -49,24 +50,29 @@ See [QUICKSTART.md](QUICKSTART.md). Core three steps:
 
 ## npm Static Package (for other Harness users)
 
-Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)). Any DSH deployment can install it directly:
+Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)), and indexed on the [dsh.so registry](https://www.dsh.so/artifact/kb-rag/) (security scan: **passed**).
 
-1. Install in the DSH deployment directory (or add to the deployment's package.json dependencies):
+### Option 1 — one command (recommended, DSH profiles)
 
-   ```bash
-   npm install dsh-kb-rag
-   ```
+The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
-2. Load it in that deployment's cordis composition (cordis.yml / preset):
+```bash
+dsh plugin --profile <name> add dsh-kb-rag
+```
 
-   ```yaml
-   plugins:
-     dsh-kb-rag: {}
-   ```
+Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Then restart DSH and open a new session — the 8 tools register automatically.
 
-3. Start/reload DSH and the 8 tools register automatically. Note: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages — step 1 must run first.
+### Option 2 — plugin marketplace (no terminal)
 
-The static package ships its own `kb_engine.py` (no manual placement needed); on startup it auto-checks Python dependencies and prints the `pip install` command to the host log if anything is missing. See [npm-package/README.md](npm-package/README.md) for full details.
+Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (we are in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
+
+### Option 3 — manual
+
+1. `npm install dsh-kb-rag` in the deployment/profile directory
+2. Activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json (or copy the bundled `cordis.patch.yml` insert into your own patch layer)
+3. Restart DSH and open a new session
+
+Notes: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages. The package ships its own `kb_engine.py` (no manual placement needed); on startup it auto-checks Python dependencies and prints the `pip install` command if anything is missing. See [npm-package/README.md](npm-package/README.md) for full details.
 
 ## Tool Reference
 
