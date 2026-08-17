@@ -9,6 +9,13 @@
 
 > Ingest once, search forever. Only the most relevant few sentences ever reach the LLM — and every claim carries exact provenance.
 
+## Who it's for
+
+Graduate students and PhD researchers. An idea strikes, and you *know* it's somewhere in your
+library — but which paper said it, and where? kb-rag makes the whole pile queryable: hybrid
+retrieval + reranking associate the right passages, every answer lands on a clickable DOI (or the
+exact file), and the reply tells you what your library is still missing. **Think it → find it → cite it.**
+
 kb-rag is a lightweight local database-RAG plugin for **DSH (DeepSeek Harness)**: it turns PDF/Zotero literature into a SQLite knowledge base with section structure and vector indexes, providing the full hybrid search + rerank + cited-QA workflow. All indexing, embedding, and reranking run locally — zero API cost, zero upload.
 
 ## Features
