@@ -426,6 +426,7 @@ def rerank(query, texts):
 
 
 def cmd_ingest(req):
+    _REL_CENTROID.clear()
     t0 = time.time()
     kb_root = req.get("kb_root") or ".kb"
     force = bool(req.get("force"))
@@ -698,11 +699,118 @@ def rrf_fuse(kw_ranked, v_ranked):
     return sorted(fused.items(), key=lambda x: x[1], reverse=True)
 
 
-def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_flag=True):
+# ------------------------------------------------------- related literature
+
+# (kb_root, doc_id) -> centroid vector (float32 array); cleared on any ingest mutation.
+_REL_CENTROID = {}
+
+
+def _author_tokens(authors):
+    return {t.lower() for t in re.split(r"[;,/&]+", authors or "") if t.strip() and
+            len(t.strip()) > 1 and not t.strip().lower() in ("et al", "al", "and")}
+
+
+def _doc_centroid(db, kb_key, doc_id):
+    key = (kb_key, doc_id)
+    if key in _REL_CENTROID:
+        return _REL_CENTROID[key]
+    rows = db.execute(
+        "SELECT v.vec FROM chunks c JOIN vecs v ON v.chunk_id = c.id "
+        "WHERE c.doc_id = ?", (doc_id,)).fetchall()
+    mats = []
+    for r in rows:
+        arr = unpack_vec(r["vec"])
+        if arr.shape[0] > 0:
+            mats.append(arr)
+    if not mats:
+        return None
+    import numpy as np
+    c = np.vstack(mats).mean(axis=0).astype("float32")
+    _REL_CENTROID[key] = c
+    return c
+
+
+def related_docs(db, kb_key, seed_doc_ids, related_k=5):
+    """Metadata + centroid-similarity association over the docs not already in results."""
+    if not seed_doc_ids:
+        return []
+    import numpy as np
+    seeds = []
+    for did in seed_doc_ids:
+        c = _doc_centroid(db, kb_key, did)
+        if c is not None:
+            seeds.append(c)
+    seed_c = np.vstack(seeds).mean(axis=0) if seeds else None
+    seed_meta = {}
+    for r in db.execute(
+            "SELECT id, authors, journal, year FROM docs WHERE id IN (%s)"
+            % ",".join("?" * len(seed_doc_ids)), list(seed_doc_ids)).fetchall():
+        seed_meta[r["id"]] = r
+    seed_authors = set()
+    seed_journals = set()
+    seed_years = []
+    for sm in seed_meta.values():
+        seed_authors |= _author_tokens(sm["authors"])
+        if sm["journal"]:
+            seed_journals.add(sm["journal"].strip().lower())
+        try:
+            seed_years.append(int(sm["year"]))
+        except (TypeError, ValueError):
+            pass
+    cands = db.execute(
+        "SELECT id, title, authors, year, journal, doi, path FROM docs "
+        "WHERE id NOT IN (%s)" % ",".join("?" * len(seed_doc_ids)),
+        list(seed_doc_ids)).fetchall()
+    scored = []
+    for c in cands:
+        meta = 0.0
+        reasons = []
+        shared = _author_tokens(c["authors"]) & seed_authors
+        if shared:
+            meta += 2.0
+            reasons.append("同作者")
+        if c["journal"] and c["journal"].strip().lower() in seed_journals:
+            meta += 1.5
+            reasons.append("同期刊")
+        try:
+            cy = int(c["year"])
+            if seed_years:
+                dist = min(abs(cy - sy) for sy in seed_years)
+                meta += max(0.0, 1.0 - dist / 10.0)
+                if dist <= 3:
+                    reasons.append("年份相近")
+        except (TypeError, ValueError):
+            pass
+        vec = 0.0
+        if seed_c is not None:
+            cc = _doc_centroid(db, kb_key, c["id"])
+            if cc is not None:
+                vec = float(np.dot(seed_c, cc) / (np.linalg.norm(seed_c) * np.linalg.norm(cc) + 1e-9)) * 2.0
+                if vec > 0.7:
+                    reasons.append("主题相似")
+        score = round(meta + vec, 4)
+        if score <= 0:
+            continue
+        scored.append({
+            "file": Path(c["path"]).name,
+            "title": c["title"],
+            "authors": c["authors"],
+            "year": c["year"],
+            "journal": c["journal"],
+            "doi": c["doi"],
+            "score": score,
+            "reason": "、".join(reasons[:2]) if reasons else "内容相关",
+        })
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:related_k]
+
+
+def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_flag=True,
+                  related_flag=True, related_k=5):
     t0 = time.time()
     where, args = build_where(filters)
     rows = db.execute(
-        "SELECT c.id AS cid, c.text, c.section, c.weight, d.title, d.authors, "
+        "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, d.title, d.authors, "
         "d.year, d.journal, d.doi, d.path, d.kind, v.vec "
         "FROM chunks c JOIN docs d ON d.id = c.doc_id "
         "LEFT JOIN vecs v ON v.chunk_id = c.id" + where, args).fetchall()
@@ -718,7 +826,8 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     cache_key = None
     if use_cache:
         cache_key = hashlib.sha1(json.dumps(
-            [query, filters, top_k, snippet_w, mode, rerank_flag, _RERANK_NAME],
+            [query, filters, top_k, snippet_w, mode, rerank_flag, _RERANK_NAME,
+             related_flag, related_k],
             sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")).hexdigest()
         hit = db.execute("SELECT payload FROM cache WHERE key = ?", (cache_key,)).fetchone()
         if hit is not None:
@@ -791,6 +900,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             note += f"精排不可用({str(e)[:100]})；"
 
     results = []
+    seed_doc_ids = []
     for i, score in ranked[:top_k]:
         r = rows[i]
         results.append({
@@ -805,12 +915,21 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "score": round(score, 4),
             "snippet": make_snippet(r["text"], best_term[i] if best_term else None, snippet_w),
         })
+        if r["doc_id"] not in seed_doc_ids:
+            seed_doc_ids.append(r["doc_id"])
 
     resp = {"query": query, "scored": len(ranked), "top_k": top_k,
             "mode_used": mode_used, "reranker": reranker_used, "results": results,
             "note": (note + f"命中 {len(ranked)} 块，返回 Top-{len(results)}") if len(ranked) else (note or "无命中"),
             "cached": False,
             "ms": round((time.time() - t0) * 1000)}
+    if related_flag and results:
+        try:
+            kb_key = str(db.execute("PRAGMA database_list").fetchall()[0][2] or "kb")
+            if seed_doc_ids:
+                resp["related"] = related_docs(db, kb_key, seed_doc_ids, related_k)
+        except Exception as e:
+            resp["related_error"] = str(e)[:200]
     if use_cache and cache_key is not None and results:
         db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
                    (cache_key, json.dumps(resp, ensure_ascii=True), time.time()))
@@ -828,9 +947,12 @@ def cmd_search(req):
     mode = req.get("mode") or "hybrid"
     use_cache = req.get("cache") is not False
     rerank_flag = req.get("rerank") is not False
+    related_flag = req.get("related") is not False
+    related_k = min(max(int(req.get("related_k") or 5), 1), 10)
     db = connect(req.get("kb_root") or ".kb")
     try:
-        resp = _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_flag)
+        resp = _search_core(db, query, top_k, snippet_w, filters, mode, use_cache,
+                            rerank_flag, related_flag, related_k)
         db.commit()
     finally:
         db.close()
@@ -847,16 +969,20 @@ def cmd_rag(req):
     top_k = min(max(int(req.get("top_k") or 3), 1), 10)
     filters = req.get("filters") or {}
     rerank_flag = req.get("rerank") is not False
+    related_flag = req.get("related") is not False
+    related_k = min(max(int(req.get("related_k") or 5), 1), 10)
     db = connect(req.get("kb_root") or ".kb")
     try:
-        resp = _search_core(db, query, top_k, 600, filters, "hybrid", True, rerank_flag)
+        resp = _search_core(db, query, top_k, 600, filters, "hybrid", True,
+                            rerank_flag, related_flag, related_k)
         db.commit()
     finally:
         db.close()
     resp["ok"] = True
     resp["evidence"] = resp.pop("results")
     resp["guidance"] = ("基于 evidence 作答，每个事实标注来源编号 [n]（对应 evidence 下标）；"
-                        "资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出。")
+                        "资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出；"
+                        "答案末尾的补充建议可参考 related 关联文献列表（若相关）。")
     return resp
 
 
@@ -971,6 +1097,7 @@ def _zotero_meta(conn, parent_id):
 
 
 def cmd_zotero(req):
+    _REL_CENTROID.clear()
     """Migrate Zotero library entries with PDF attachments into the KB."""
     t0 = time.time()
     kb_root = req.get("kb_root") or ".kb"
@@ -1016,6 +1143,7 @@ def cmd_zotero(req):
 
 
 def cmd_dedup(req):
+    _REL_CENTROID.clear()
     """Remove docs whose sha256 duplicates an earlier doc (keeps lowest id)."""
     t0 = time.time()
     db = connect(req.get("kb_root") or ".kb")
@@ -1054,6 +1182,7 @@ def cmd_dedup(req):
 
 
 def cmd_clear(req):
+    _REL_CENTROID.clear()
     """Wipe every doc/chunk/vector/cache row; destructive, requires confirm: true."""
     t0 = time.time()
     if req.get("confirm") is not True:

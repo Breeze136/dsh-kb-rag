@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.0] - 关联文献（未发布）
+
+- kb_search / kb_rag 新增 related 关联文献列表（同作者/同期刊/年份相近/主题相似，基于元数据 + 文档向量质心余弦，默认开启，可用 related=false 关闭）
+- 检索渲染新增"关联文献（可作补充建议）"区块；kb_rag 的补充建议优先引用 related 列表
+- 文档质心缓存随入库/去重/清空/Zotero 变更自动失效
+
 ## [1.0.7] - 仓库更名 dsh-kb-rag
 
 - GitHub 仓库 Breeze136/kb-rag → Breeze136/dsh-kb-rag（搜索"dsh-kb-rag"时精确匹配同名仓库、提升发现性；旧链接 301 重定向）
