@@ -43,4 +43,4 @@ third-party code — automated scans are not a guarantee; read the source.
 
 ## Reporting
 
-Issues: <https://github.com/Breeze136/kb-rag/issues>
+Issues: <https://github.com/Breeze136/dsh-kb-rag/issues>
