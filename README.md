@@ -28,6 +28,7 @@ kb-rag is a lightweight local database-RAG plugin for **DSH (DeepSeek Harness)**
 - **Query cache**: same query+filters never recompute; any ingest invalidates it
 - **Citation standard**: with DOI → markdown link; without DOI → `[authors, year, filename]`
 - **Scope & strict mode**: closed-KB / KB+web / web-only; strict mode forbids outside-knowledge extrapolation
+- **Related literature**: every search also returns associated papers (same authors / same journal / nearby year / thematically similar), so one query surfaces the surrounding literature — and the answer's "suggested additions" cites them
 - **Engine daemon**: models load once, sub-second hot queries; crash self-heal; auto-reclaim on plugin stop
 
 ## Design Principles
