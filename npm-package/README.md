@@ -5,6 +5,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/Breeze136/kb-rag)](https://github.com/Breeze136/kb-rag/releases)
 [![MIT](https://img.shields.io/github/license/Breeze136/kb-rag)](LICENSE)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
+[![dsh.so security](https://www.dsh.so/badges/kb-rag.svg)](https://www.dsh.so/artifact/kb-rag/)
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
@@ -29,39 +30,31 @@ Every answer ends with a "suggested additions" note; in strict mode the answer s
 
 ## Install & Enable
 
+### Option 1 — one command (recommended, DSH profiles)
+
+The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
+
+```bash
+dsh plugin --profile <name> add dsh-kb-rag
+```
+
+Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Then restart DSH and open a new session — the 8 tools register automatically.
+
+### Option 2 — plugin marketplace (no terminal)
+
+Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (listed in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
+
+### Option 3 — manual
+
 ```bash
 npm install dsh-kb-rag
 ```
 
-Load the package in your deployment's cordis composition (cordis.yml / preset):
-
-```yaml
-plugins:
-  dsh-kb-rag: {}
-```
-
-Or let cordis-plugin-loader resolve it by package name. After loading, model sessions get the 8 tools above automatically.
+Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
 
 ### Guide for other Harness users
 
-Any DSH deployment can use this package directly (the loader resolves package names from the deployment's node_modules, same as official static plugins):
-
-1. Install in the **DSH deployment directory** (or add `dsh-kb-rag` to the deployment's package.json dependencies):
-
-   ```bash
-   npm install dsh-kb-rag
-   ```
-
-2. Add one line to that deployment's **cordis composition** (cordis.yml or agent preset):
-
-   ```yaml
-   plugins:
-     dsh-kb-rag: {}
-   ```
-
-3. Start/reload DSH — the 8 tools register automatically, no other configuration.
-
-Note: the DSH plugin loader does **not** auto-download uninstalled packages at startup — the install (step 1) must run once in the deployment directory first.
+The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
 
 ## Requirements
 

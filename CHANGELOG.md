@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.6] - 安装指引现代化 + dsh.so 徽章
+
+- README 安装说明改为以 `dsh plugin --profile <name> add dsh-kb-rag` 一键流程为首选（pnpm 要求注明），补充插件市场（dsh-plugin-registry）与手动三种路径
+- 增加 dsh.so 安全徽章（扫描状态 passed）；仓库已被 dsh.so 注册表收录（artifact: kb-rag）
+
 ## [1.0.5] - 安全文档入包 + 移除遗留 shell 调用
 
 - 删除 plugin/host.js 中遗留的 `cmd /c start` 打开文件 RPC（唯一变量路径进 shell 的点）
