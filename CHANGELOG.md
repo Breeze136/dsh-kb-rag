@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.7] - 仓库更名 dsh-kb-rag
+
+- GitHub 仓库 Breeze136/kb-rag → Breeze136/dsh-kb-rag（搜索"dsh-kb-rag"时精确匹配同名仓库、提升发现性；旧链接 301 重定向）
+- 更新全部内部引用（README/SECURITY/package.json repository 字段）
+- 同步更新两个 awesome 列表条目链接
+
 ## [1.0.6] - 安装指引现代化 + dsh.so 徽章
 
 - README 安装说明改为以 `dsh plugin --profile <name> add dsh-kb-rag` 一键流程为首选（pnpm 要求注明），补充插件市场（dsh-plugin-registry）与手动三种路径
