@@ -245,6 +245,9 @@ function apply(ctx) {
       lines.push("");
       lines.push((i + 1) + ". " + t + (rest.length > 0 ? " — " + rest : ""));
       lines.push("> " + String(r.snippet || "").slice(0, 280).replace(/\n/g, " "));
+      if (typeof r.figure === "string" && r.figure.length > 0) {
+        lines.push("↳ 图注坐标: " + String(r.figure).slice(0, 220));
+      }
       if (doi !== null) {
         lines.push("[DOI " + doi + "](https://doi.org/" + doi + ")" + " · score " + r.score);
       } else {

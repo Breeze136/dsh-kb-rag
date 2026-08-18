@@ -31,6 +31,7 @@ import re
 import sqlite3
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 VERSION = "3.0.0"
@@ -288,21 +289,88 @@ def _docx_fallback(path):
         return ""
 
 
+_TITLE_BAD = {"untitled", "无标题", "标题", "作者", "author", "unknown", "论文",
+              "document", "无题", "title", "untitled document"}
+_AUTHOR_BAD = {"作者", "author", "unknown", "authors", "none", "佚名"}
+_WORD_PREFIX_RE = re.compile(r"^microsoft\s+word\s*[-–—:：]?\s*", re.I)
+_HEAD_SKIP_RE = re.compile(
+    r"^(?:abstract\b|introduction\b|doi\b|https?://|www\.|"
+    r"fig(?:ure)?\.?\s*\d|table\.?\s*\d|scheme\.?\s*\d|"
+    r"corresponding\s+author|received\b|accepted\b|published\b|"
+    r"issn\b|isbn\b|copyright\b|©|journal\s+of\b|vol(?:ume)?\.?\s*\d)",
+    re.I)
+_DIGITONLY_LINE = re.compile(r"^[\d\s\-–—.,;:()\[\]{}]+$")
+
+
+def _usable_title(s):
+    s = (s or "").strip()
+    if not s or s.lower() in _TITLE_BAD:
+        return None
+    s = _WORD_PREFIX_RE.sub("", s).strip()
+    if not s or s.lower() in _TITLE_BAD:
+        return None
+    words = [w for w in s.split() if re.search(r"[A-Za-z]", w)]
+    if len(words) < 2 and not re.search(r"[A-Za-z]{4,}", s):
+        return None
+    if _DIGITONLY_LINE.match(s):
+        return None
+    return s
+
+
+def _first_page_title(text):
+    """Conservative first-page title heuristic: the first plausible prose line."""
+    if not text:
+        return None
+    for line in text[:3000].split("\n")[:14]:
+        l = " ".join(line.split())
+        if not (10 <= len(l) <= 320):
+            continue
+        if _HEAD_SKIP_RE.match(l) or _DIGITONLY_LINE.match(l):
+            continue
+        words = [w for w in l.split() if re.search(r"[A-Za-z]", w)]
+        if len(words) >= 2 or re.search(r"[A-Za-z]{4,}", l):
+            return l
+    return None
+
+
+def _clean_authors(s):
+    if not s:
+        return None
+    s = re.sub(r"\s+", " ", s).strip().strip(".,;:")
+    if not s or s.lower() in _AUTHOR_BAD:
+        return None
+    return s or None
+
+
+def _clean_year(value):
+    try:
+        y = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1900 <= y <= datetime.now().year + 1:
+        return y
+    return None
+
+
 def extract_meta(path, text, pdf_meta=None):
     title = authors = journal = doi = None
     year = None
     if pdf_meta:
-        title = (pdf_meta.get("title") or "").strip() or None
-        authors = (pdf_meta.get("author") or "").strip() or None
+        title = _usable_title(pdf_meta.get("title"))
+        authors = _clean_authors(pdf_meta.get("author"))
+        m = re.search(r"(?:D:)?(19|20)\d{2}", pdf_meta.get("creationDate") or "")
+        year = _clean_year(m.group(0)[-4:] if m else None)
     if not title:
-        title = Path(path).stem
+        title = _first_page_title(text)
+    if not title:
+        title = _usable_title(Path(path).stem) or Path(path).stem
     head = text[:3000]
     m = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", head)
     if m:
         doi = m.group(0).rstrip(".,;")
-    m = re.search(r"\b(19|20)\d{2}\b", head)
-    if m:
-        year = int(m.group(0))
+    if year is None:
+        m = re.search(r"\b(19|20)\d{2}\b", head)
+        year = _clean_year(m.group(0)) if m else None
     return title, authors, year, journal, doi
 
 
@@ -699,8 +767,28 @@ def rrf_fuse(kw_ranked, v_ranked):
     return sorted(fused.items(), key=lambda x: x[1], reverse=True)
 
 
-# ------------------------------------------------------- related literature
+# ------------------------------------------------------- caption association
 
+_FIGREF_RE = re.compile(r"(?:fig(?:ure|s)?\.?\s*|图\s*)(\d+)([a-zA-Z])?(?!\d)", re.I)
+_CAPTION_NUM_RE = re.compile(r"\d+")
+
+
+def _doc_captions(db, doc_id):
+    """{figure_number: caption_text} for one doc, from 'Figure/Table' chunks."""
+    caps = {}
+    for r in db.execute(
+            "SELECT text FROM chunks WHERE doc_id = ? AND section = 'Figure/Table'",
+            (doc_id,)).fetchall():
+        m = CAPTION_RE.match(r["text"])
+        if not m:
+            continue
+        n = _CAPTION_NUM_RE.search(m.group(1))
+        if n:
+            caps[n.group(0)] = r["text"]
+    return caps
+
+
+# ------------------------------------------------------- related literature
 # (kb_root, doc_id) -> centroid vector (float32 array); cleared on any ingest mutation.
 _REL_CENTROID = {}
 
@@ -901,9 +989,10 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
 
     results = []
     seed_doc_ids = []
+    caption_cache = {}
     for i, score in ranked[:top_k]:
         r = rows[i]
-        results.append({
+        entry = {
             "file": Path(r["path"]).name,
             "path": r["path"],
             "title": r["title"],
@@ -914,7 +1003,17 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "section": r["section"],
             "score": round(score, 4),
             "snippet": make_snippet(r["text"], best_term[i] if best_term else None, snippet_w),
-        })
+        }
+        if r["section"] != "Figure/Table":
+            fm = _FIGREF_RE.search(r["text"])
+            if fm:
+                if r["doc_id"] not in caption_cache:
+                    caption_cache[r["doc_id"]] = _doc_captions(db, r["doc_id"])
+                caps = caption_cache[r["doc_id"]]
+                if fm.group(1) in caps:
+                    entry["figure"] = "Fig. %s%s — %s" % (
+                        fm.group(1), fm.group(2) or "", caps[fm.group(1)][:140])
+        results.append(entry)
         if r["doc_id"] not in seed_doc_ids:
             seed_doc_ids.append(r["doc_id"])
 
