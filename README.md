@@ -1,5 +1,10 @@
 # kb-rag — Local Literature Knowledge-Base RAG (DSH Plugin)
 
+<p align="center">
+  <b>把脑子里的模糊记忆,变成一条能点开的文献坐标。</b><br/>
+  <i>Turn a fuzzy memory into an exact passage / figure — one-click DOI to source.</i>
+</p>
+
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![GitHub release](https://img.shields.io/github/v/release/Breeze136/dsh-kb-rag)](https://github.com/Breeze136/dsh-kb-rag/releases)
