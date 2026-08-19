@@ -252,6 +252,9 @@ function apply(ctx) {
         lines.push("[DOI " + doi + "](https://doi.org/" + doi + ")" + " · score " + r.score);
       } else {
         lines.push("无 DOI · score " + r.score + " · 文件：" + String(r.file || ""));
+        if (typeof r.search === "string" && r.search.length > 0) {
+          lines.push("↳ 搜索串（Scholar 可复制）: " + String(r.search).slice(0, 200));
+        }
       }
     });
     if (Array.isArray(value.related) && value.related.length > 0) {
