@@ -1074,6 +1074,11 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                 if fm.group(1) in caps:
                     entry["figure"] = "Fig. %s%s — %s" % (
                         fm.group(1), fm.group(2) or "", caps[fm.group(1)][:140])
+        if not r["doi"]:
+            first_author = (r["authors"] or "").split(";")[0].split(",")[0].strip()
+            search_parts = [r["title"], first_author,
+                            str(r["year"]) if r["year"] else ""]
+            entry["search"] = " ".join(p for p in search_parts if p)
         results.append(entry)
         if r["doc_id"] not in seed_doc_ids:
             seed_doc_ids.append(r["doc_id"])
