@@ -292,12 +292,20 @@ def _docx_fallback(path):
 _TITLE_BAD = {"untitled", "无标题", "标题", "作者", "author", "unknown", "论文",
               "document", "无题", "title", "untitled document"}
 _AUTHOR_BAD = {"作者", "author", "unknown", "authors", "none", "佚名"}
-_WORD_PREFIX_RE = re.compile(r"^microsoft\s+word\s*[-–—:：]?\s*", re.I)
+_WORD_PREFIX_RE = re.compile(r"^microsoft\s+(?:word|powerpoint|excel)\s*[-–—:：]?\s*", re.I)
+_JUNK_TITLE_RE = re.compile(
+    r"(^|/)(preprint|manuscript|submission|document\d*|latest corrections|formatted)\b|"
+    r"\.(docx?|pptx?|tex|cls|pdf)$|"
+    r"^arxiv\s*:|^template\s+for|^article\s+type\s*:?|^sample\b.*\barticle\b|"
+    r"^intechopen|^page\s+\d+\s+of|^[\w\-]+\.(docx?|pptx?|tex)$",
+    re.I)
 _HEAD_SKIP_RE = re.compile(
     r"^(?:abstract\b|introduction\b|doi\b|https?://|www\.|"
     r"fig(?:ure)?\.?\s*\d|table\.?\s*\d|scheme\.?\s*\d|"
     r"corresponding\s+author|received\b|accepted\b|published\b|"
-    r"issn\b|isbn\b|copyright\b|©|journal\s+of\b|vol(?:ume)?\.?\s*\d)",
+    r"issn\b|isbn\b|copyright\b|©|journal\s+of\b|vol(?:ume)?\.?\s*\d|"
+    r"arxiv\s*:|template\s+for|manuscript|sample\b|article\s+type|"
+    r"page\s+\d+\s+of|intechopen|submitted|preprint)",
     re.I)
 _DIGITONLY_LINE = re.compile(r"^[\d\s\-–—.,;:()\[\]{}]+$")
 
@@ -308,6 +316,8 @@ def _usable_title(s):
         return None
     s = _WORD_PREFIX_RE.sub("", s).strip()
     if not s or s.lower() in _TITLE_BAD:
+        return None
+    if _JUNK_TITLE_RE.search(s):
         return None
     words = [w for w in s.split() if re.search(r"[A-Za-z]", w)]
     if len(words) < 2 and not re.search(r"[A-Za-z]{4,}", s):
