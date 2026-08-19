@@ -256,7 +256,11 @@ def read_document(path):
         doc = fitz.open(str(path))
         try:
             text = "\n".join(page.get_text() for page in doc)
-            meta = doc.metadata
+            meta = dict(doc.metadata or {})
+            # First-page signals for reliable identifier extraction.
+            p1 = doc[0].get_text()
+            meta["_page1_text"] = p1
+            meta["_page1_title"] = _largest_font_title(doc[0])
         finally:
             doc.close()
         return text or "", meta
@@ -278,6 +282,32 @@ def read_document(path):
     raise ValueError(f"unsupported file type: {ext}")
 
 
+def _largest_font_title(page):
+    """The real title is usually the largest-font line(s) near the top of page 1."""
+    try:
+        d = page.get_text("dict")
+    except Exception:
+        return None
+    lines = []
+    for block in d.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = line.get("spans") or []
+            if not spans:
+                continue
+            size = max(s["size"] for s in spans)
+            txt = "".join(s["text"] for s in spans).strip()
+            if txt:
+                lines.append((size, txt))
+    if not lines:
+        return None
+    top = lines[:15]
+    maxsize = max(s for s, _ in top)
+    cands = [t for s, t in top if abs(s - maxsize) < 0.5 and len(t) >= 8]
+    return " ".join(cands) if cands else None
+
+
 def _docx_fallback(path):
     import zipfile
     try:
@@ -297,7 +327,8 @@ _JUNK_TITLE_RE = re.compile(
     r"(^|/)(preprint|manuscript|submission|document\d*|latest corrections|formatted)\b|"
     r"\.(docx?|pptx?|tex|cls|pdf)$|"
     r"^arxiv\s*:|^template\s+for|^article\s+type\s*:?|^sample\b.*\barticle\b|"
-    r"^intechopen|^page\s+\d+\s+of|^[\w\-]+\.(docx?|pptx?|tex)$",
+    r"^intechopen|^page\s+\d+\s+of|^[\w\-]+\.(docx?|pptx?|tex)$|"
+    r"^[\w]+(_[\w]+)+$|^doi\s*:",
     re.I)
 _HEAD_SKIP_RE = re.compile(
     r"^(?:abstract\b|introduction\b|doi\b|https?://|www\.|"
@@ -362,25 +393,45 @@ def _clean_year(value):
     return None
 
 
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
+_ARXIV_RE = re.compile(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:\s*)(\d{4}\.\d{4,5})", re.I)
+
+
 def extract_meta(path, text, pdf_meta=None):
     title = authors = journal = doi = None
     year = None
+    page1 = ""
     if pdf_meta:
         title = _usable_title(pdf_meta.get("title"))
         authors = _clean_authors(pdf_meta.get("author"))
         m = re.search(r"(?:D:)?(19|20)\d{2}", pdf_meta.get("creationDate") or "")
         year = _clean_year(m.group(0)[-4:] if m else None)
+        page1 = pdf_meta.get("_page1_text") or ""
+        if not title:
+            ft = _usable_title(pdf_meta.get("_page1_title"))
+            if ft and not _HEAD_SKIP_RE.match(ft) and not _JUNK_TITLE_RE.search(ft):
+                title = ft
     if not title:
-        title = _first_page_title(text)
+        title = _first_page_title(page1 or text)
     if not title:
         title = _usable_title(Path(path).stem) or Path(path).stem
-    head = text[:3000]
-    m = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", head)
+
+    # Identifier extraction, scoped to the title page and stopping at the
+    # bibliography: a DOI here is the paper's own, not a reference's.
+    scope = page1 or text[:3000]
+    m = re.search(r"\breferences\b|\bbibliography\b", scope, re.I)
     if m:
-        doi = m.group(0).rstrip(".,;")
+        scope = scope[:m.start()]
+    md = re.search(r"doi:\s*(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", scope, re.I) or _DOI_RE.search(scope)
+    if md:
+        doi = md.group(1).rstrip(".,;")
+    if not doi:
+        ma = _ARXIV_RE.search(page1 or text[:3000])
+        if ma:
+            doi = "10.48550/arXiv." + ma.group(1)
     if year is None:
-        m = re.search(r"\b(19|20)\d{2}\b", head)
-        year = _clean_year(m.group(0)) if m else None
+        my = re.search(r"\b(19|20)\d{2}\b", scope)
+        year = _clean_year(my.group(0)) if my else None
     return title, authors, year, journal, doi
 
 
