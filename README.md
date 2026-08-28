@@ -55,7 +55,16 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 
 ## Quick Start
 
-See [QUICKSTART.md](QUICKSTART.md). Core three steps:
+See [QUICKSTART.md](QUICKSTART.md). One-click from a clone:
+
+```bash
+git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
+./scripts/install.sh        # Windows: install.cmd (or scripts\install.ps1)
+```
+
+The installer chains everything: Python deps (`--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activate (`--profile <name>`) → optional `--models` pre-download (`HF_ENDPOINT` respected). `--dry-run` rehearses without installing.
+
+Manual three steps:
 
 1. Install Python dependencies (see requirements.txt)
 2. Place `kb_engine.py` at the DSH session workspace root
@@ -73,7 +82,12 @@ The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activate
 dsh plugin --profile <name> add dsh-kb-rag
 ```
 
-Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Then restart DSH and open a new session — the 8 tools register automatically.
+Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
+
+- **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; normally it only logs the command).
+- **Bundled installer**: run `scripts/install.ps1` / `scripts/install.sh` shipped inside the package (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
+
+Then restart DSH and open a new session — the 8 tools register automatically.
 
 ### Option 2 — plugin marketplace (no terminal)
 
@@ -85,7 +99,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 2. Activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json (or copy the bundled `cordis.patch.yml` insert into your own patch layer)
 3. Restart DSH and open a new session
 
-Notes: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages. The package ships its own `kb_engine.py` (no manual placement needed); on startup it auto-checks Python dependencies and prints the `pip install` command if anything is missing. See [npm-package/README.md](npm-package/README.md) for full details.
+Notes: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages. The package ships its own `kb_engine.py` (no manual placement needed); on startup it auto-checks Python dependencies and prints the `pip install` command if anything is missing — with `KB_AUTO_PIP=1` set it installs them itself. The bundled `scripts/install.ps1` / `scripts/install.sh` (also shipped in the npm package) do the whole chain in one shot. See [npm-package/README.md](npm-package/README.md) for full details.
 
 ## Tool Reference
 
@@ -126,16 +140,21 @@ Notes: the DSH plugin loader resolves package names from the deployment's node_m
 | `KB_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | Embedding model (auto-downloaded to HF cache on first use) |
 | `KB_RERANK_MODEL` | `BAAI/bge-reranker-base` | Reranker model |
 | `HF_ENDPOINT` | none | Set `https://hf-mirror.com` on restricted networks |
+| `KB_AUTO_PIP` | `0` | `1` = plugin pip-installs missing Python deps at startup (fixed argv; default just logs the command) |
 
 ## Repository Layout
 
 ```
 kb-rag/
+├─ install.cmd             # Windows one-click entry (double-click)
+├─ scripts/
+│  ├─ install.ps1          # One-click installer (Windows PowerShell)
+│  └─ install.sh           # One-click installer (macOS/Linux/Git Bash)
 ├─ kb_engine.py          # Python search engine (CLI + serve protocol)
 ├─ plugin/
 │  ├─ host.js            # DSH plugin Host half (8 tools + daemon + RPC)
 │  └─ client.js          # DSH plugin Client half (tool source cards, optional)
-├─ npm-package/          # npm static package dsh-kb-rag (lib/index.js + kb_engine.py)
+├─ npm-package/          # npm static package dsh-kb-rag (lib/index.js + kb_engine.py + scripts/)
 ├─ docs/DESIGN.md        # Design doc (chunking/search/protocol details)
 ├─ QUICKSTART.md         # Five-minute start
 ├─ CHANGELOG.md

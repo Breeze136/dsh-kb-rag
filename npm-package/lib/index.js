@@ -155,6 +155,12 @@ function apply(ctx) {
   }
 
   async function runEngine(command, payload, exec) {
+    await depsGate; // 等 startup 探测 / KB_AUTO_PIP 自动安装结束（一次性，后续调用零开销）
+    if (Array.isArray(depStatus.missing) && depStatus.missing.length > 0) {
+      throw new Error("kb-rag 缺少 Python 依赖: " + depStatus.missing.join(", ")
+        + "。修复方式（任选其一）：① 在宿主终端执行 python -m pip install " + depStatus.missing.join(" ")
+        + "；② 设置环境变量 KB_AUTO_PIP=1 后重启 DSH，插件将自动安装；③ 运行随包安装脚本 scripts/install.sh 或 scripts/install.ps1。");
+    }
     const root = workspaceOf(exec);
     if (daemon !== null && daemon.root !== root) {
       const old = daemon;
@@ -180,47 +186,112 @@ function apply(ctx) {
     }
   });
 
-  // 启动时自动检测 Python 依赖（pymupdf / faiss / sentence-transformers / torch），
-  // 缺失时在宿主日志里打印安装命令；不阻塞插件加载。
-  function checkPythonDeps() {
-    let python = "python";
-    const probe = subprocess.resolveExecutable("python").catch(function () { /* keep bare name */ }).then(function (resolved) {
-      if (typeof resolved === "string" && resolved.length > 0) python = resolved;
-      let handle;
-      try {
-        handle = subprocess.spawn({
-          argv: [python, "-c", "import fitz, faiss, sentence_transformers, torch"],
-          cwd: ENGINE_DIR,
-          stdio: {
-            stdin: "ignore",
-            stdout: { maxBytes: 4096 },
-            stderr: { maxBytes: 16384 },
-          },
-          graceMs: 3000,
-        });
-      } catch (e) {
-        console.error("[kb-rag] dependency check failed to spawn:", String(e && e.message || e));
-        return;
-      }
-      handle.done.then(function (out) {
-        if (out.exitCode === 0) {
-          console.log("[kb-rag] Python dependencies OK");
-          return;
-        }
-        const err = handle.collected.stderr !== undefined ? handle.collected.stderr.readFrom(0).text : "";
-        const missing = [];
-        if (String(err).includes("fitz")) missing.push("pymupdf");
-        if (String(err).includes("faiss")) missing.push("faiss-cpu");
-        if (String(err).includes("sentence_transformers")) missing.push("sentence-transformers");
-        if (String(err).includes("torch")) missing.push("torch");
-        console.error("[kb-rag] Python dependencies missing: " + (missing.length > 0 ? missing.join(", ") : "unknown module"));
-        console.error("[kb-rag] Install with: pip install " + (missing.length > 0 ? missing.join(" ") : "pymupdf faiss-cpu sentence-transformers"));
-        console.error("[kb-rag] " + String(err).trim().split("\n").slice(-2).join(" | ").slice(0, 500));
-      });
-    });
-    probe.catch(function () { /* ignore */ });
+  // 启动时自动检测 Python 依赖（pymupdf / faiss-cpu / sentence-transformers / torch）。
+  // 探测用 importlib.util.find_spec 一次性拿完整缺失清单（裸 import 链会在首个缺失处中断，只能看到一个）。
+  // 默认只在宿主日志打印安装命令；设置环境变量 KB_AUTO_PIP=1 时自动执行 pip 安装（固定 argv，不进 shell）。
+  // depsGate：首次工具调用先等探测/自动安装结束；确认缺失时直接返回可操作的错误，而不是让引擎子进程反复崩。
+  const depStatus = { probed: false, missing: null };
+  let depsGateResolve = null;
+  const depsGate = new Promise(function (resolve) { depsGateResolve = resolve; });
+  const autoPipEnabled = function () {
+    try { return typeof process !== "undefined" && process.env && process.env.KB_AUTO_PIP === "1"; }
+    catch (e) { return false; }
+  };
+
+  const DEP_PROBE_CODE = "import importlib.util, json; print(json.dumps([p for m, p in "
+    + "(('fitz','pymupdf'),('faiss','faiss-cpu'),('sentence_transformers','sentence-transformers'),('torch','torch'))"
+    + " if importlib.util.find_spec(m) is None]))";
+
+  function readCollected(handle) {
+    const out = { stdout: "", stderr: "" };
+    try { if (handle.collected.stdout !== undefined) out.stdout = handle.collected.stdout.readFrom(0).text; } catch (e) { /* ignore */ }
+    try { if (handle.collected.stderr !== undefined) out.stderr = handle.collected.stderr.readFrom(0).text; } catch (e) { /* ignore */ }
+    return out;
   }
-  checkPythonDeps();
+
+  async function resolvePython() {
+    try {
+      const resolved = await subprocess.resolveExecutable("python");
+      if (typeof resolved === "string" && resolved.length > 0) return resolved;
+    } catch (e) {
+      console.error("[kb-rag] resolveExecutable python failed, using bare name:", String(e));
+    }
+    return "python";
+  }
+
+  async function probeMissing(python) {
+    let handle;
+    try {
+      handle = subprocess.spawn({
+        argv: [python, "-c", DEP_PROBE_CODE],
+        cwd: ENGINE_DIR,
+        stdio: { stdin: "ignore", stdout: { maxBytes: 65536 }, stderr: { maxBytes: 16384 } },
+        graceMs: 5000,
+      });
+    } catch (e) {
+      console.error("[kb-rag] dependency probe failed to spawn:", String(e && e.message || e));
+      return null;
+    }
+    const out = await handle.done;
+    if (out.exitCode !== 0) return null;
+    try {
+      return JSON.parse(readCollected(handle).stdout.trim().split("\n").pop());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function ensurePythonDeps() {
+    const python = await resolvePython();
+    const missing = await probeMissing(python);
+    depStatus.probed = true;
+    if (missing === null) {
+      console.error("[kb-rag] dependency probe inconclusive; proceeding without gate");
+      return;
+    }
+    depStatus.missing = missing;
+    if (missing.length === 0) {
+      console.log("[kb-rag] Python dependencies OK");
+      return;
+    }
+    const installCmd = python + " -m pip install --disable-pip-version-check " + missing.join(" ");
+    if (!autoPipEnabled()) {
+      console.error("[kb-rag] Python dependencies missing: " + missing.join(", "));
+      console.error("[kb-rag] Install with: " + installCmd);
+      console.error("[kb-rag] (or set KB_AUTO_PIP=1 and restart DSH to let the plugin install them)");
+      return;
+    }
+    console.log("[kb-rag] KB_AUTO_PIP=1 — auto-installing: " + missing.join(", "));
+    let handle;
+    try {
+      handle = subprocess.spawn({
+        argv: [python, "-m", "pip", "install", "--disable-pip-version-check"].concat(missing),
+        cwd: ENGINE_DIR,
+        stdio: { stdin: "ignore", stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } },
+        graceMs: 1800000,
+      });
+    } catch (e) {
+      console.error("[kb-rag] auto pip install failed to spawn:", String(e && e.message || e));
+      return;
+    }
+    const out = await handle.done;
+    if (out.exitCode !== 0) {
+      const err = readCollected(handle).stderr;
+      console.error("[kb-rag] auto pip install failed (exit " + out.exitCode + "): " + String(err).trim().slice(-500));
+      return;
+    }
+    const still = await probeMissing(python);
+    depStatus.missing = Array.isArray(still) ? still : [];
+    if (depStatus.missing.length === 0) console.log("[kb-rag] auto pip install OK — dependencies ready");
+    else console.error("[kb-rag] still missing after install: " + depStatus.missing.join(", ") + " — manual: " + installCmd);
+  }
+
+  ensurePythonDeps().catch(function (e) {
+    console.error("[kb-rag] dependency check error:", String(e));
+  }).then(function () {
+    if (depsGateResolve !== null) depsGateResolve();
+  });
+
 
   const kbRootOf = (args, exec) => typeof args.kb_root === "string" && args.kb_root.length > 0 ? args.kb_root : workspaceOf(exec) + "/.kb";
   const renderJson = (_args, value) => [{ type: "text", text: JSON.stringify(value) }];
