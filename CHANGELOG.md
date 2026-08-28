@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0] - 一键安装补全
+
+- **一键安装脚本**：新增 `scripts/install.ps1`（Windows）与 `scripts/install.sh`（macOS/Linux/Git Bash）+ `install.cmd` 双击入口，一条链完成：Python ≥3.9 定位 → pip 依赖安装（`--mirror` 镜像、`--user` 回退、`--with-docx` 可选）→ 引擎 stats 冒烟测试 → Node/pnpm 检查（缺 pnpm 自动 `npm i -g`）→ `dsh plugin --profile <name> add dsh-kb-rag` 安装并激活 → 可选 `--models` 预下载模型（尊重 `HF_ENDPOINT`/`KB_EMBED_MODEL`/`KB_RERANK_MODEL`）；`--dry-run` 全流程演练，幂等可重跑
+- **npm bin 入口**：新增 `install.mjs`（`"bin": { "dsh-kb-rag-install": "./install.mjs" }`），`npx --yes --package dsh-kb-rag dsh-kb-rag-install --profile <name>` 一行装环境；入口按平台分发 ps1/sh，并统一 bash 风格参数（Windows 自动翻译）
+- **KB_AUTO_PIP=1 可选自动装依赖**：插件启动探测到缺失时默认仍只打印命令（安全默认不变）；设 `KB_AUTO_PIP=1` 后自动执行 `python -m pip install`（固定 argv，不进 shell，尊重 `PIP_INDEX_URL`），装完二次探测确认
+- **修复依赖探测缺陷**：裸 `import` 链在首个缺失模块即中断（最多报 1 个）；改用 `importlib.util.find_spec` 一次性给出**完整缺失清单**
+- **可操作的工具错误**：依赖缺失且未自动安装时，工具调用直接返回中文修复指引（手动 pip / KB_AUTO_PIP / 安装脚本三条路径），不再让引擎子进程崩出裸 ImportError；首次工具调用先等探测/自动安装结束（一次性门控，后续零开销）
+- npm 包随包分发安装脚本（`scripts/install.ps1|sh` 进 files 清单），手动 `npm install` 用户可从 `node_modules/dsh-kb-rag/scripts/` 一键补环境
+- SECURITY.md 更新：spawn 点清单 2→3（新增可选 pip 安装点）、网络节补 KB_AUTO_PIP/PIP_INDEX_URL/安装脚本行为；`package.json` 仍声明零 install scripts
+- 文档：QUICKSTART 以一键安装为第 0 节首选路径；README（Quick Start / Option 1 / 配置表 KB_AUTO_PIP / 目录结构）与 npm-package README 同步
+
 ## [1.2.0] - 标识符阶梯 + 元数据增强 + 图注坐标
 
 - **标识符阶梯**：首页限定 DOI（References 之前截断，避免抓参考文献的 DOI）+ arXiv ID 归一化为可解析 DOI（`10.48550/arXiv.xxxx`）+ 最大字号行提取真实标题
