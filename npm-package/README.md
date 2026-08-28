@@ -44,7 +44,7 @@ Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependenc
 - **One-shot installer (npx)**: run the installer shipped inside the package without installing anything first:
 
 ```bash
-npx --yes --package dsh-kb-rag dsh-kb-rag-install --profile <name>
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
 ```
 
   Or, when the package is already installed, run the bundled script directly:
