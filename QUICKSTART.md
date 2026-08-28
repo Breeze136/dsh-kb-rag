@@ -1,6 +1,31 @@
 # QUICKSTART — 五分钟上手
 
-## 1. 环境要求
+## 0. 一键安装（推荐）
+
+从仓库根目录运行一条命令，脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活：
+
+```bash
+git clone https://github.com/Breeze136/dsh-kb-rag.git
+cd dsh-kb-rag
+
+# Windows（双击 install.cmd 或）：
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
+# macOS / Linux / Git Bash：
+./scripts/install.sh
+```
+
+常用参数（两种脚本等价）：`--profile <name>` / `-Profile` 指定 DSH profile；`--mirror <url>` / `-Mirror` 走 pip 镜像；`--models` / `-Models` 顺带预下载模型；`--with-docx` / `-WithDocx` 装可选的 DOCX 原生解析；`--dry-run` / `-DryRun` 只演练不安装。受限网络示例：
+
+```bash
+./scripts/install.sh --profile myprofile --models --mirror https://pypi.tuna.tsinghua.edu.cn/simple
+export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $env:HF_ENDPOINT）
+```
+
+装完重启 DSH、开新会话即可，跳到下面第 4 节「第一次使用」。
+
+不想跑脚本？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
+
+## 1. 环境要求（手动安装路线）
 
 - Python 3.10+（本机为 3.12）
 - DSH 会话（插件运行环境）
@@ -14,11 +39,11 @@ pip install python-docx
 模型（bge-small-zh-v1.5、bge-reranker-base）首次使用时自动从 HuggingFace 下载到本地缓存；
 网络受限时先执行 `set HF_ENDPOINT=https://hf-mirror.com`（Windows）再运行。
 
-## 2. 放置引擎
+## 2. 放置引擎（手动安装路线）
 
 把 `kb_engine.py` 复制到你的 DSH 会话工作区根目录（插件会按会话工作区自动定位）。
 
-## 3. 加载 DSH 插件
+## 3. 加载 DSH 插件（手动安装路线）
 
 在 DSH 会话中调用 `cordis_define`：
 
@@ -28,7 +53,7 @@ pip install python-docx
 
 或者：直接在对话里说"加载 kb-rag 插件，代码在工作区 kb-rag/plugin/ 下"，让模型代劳。
 
-## 4. 第一次使用
+## 4. 第一次使用（两种路线通用）
 
 1. 首次检索会自动弹出**查询范围**选择（封闭库 / 库+全网 / 仅全网）
 2. 入库：
@@ -50,5 +75,6 @@ pip install python-docx
 ## 6. 常见问题
 
 - **首次检索慢（~15s）**：模型加载（守护进程只加载一次，后续亚秒级）
+- **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`，或设 `KB_AUTO_PIP=1` 重启 DSH 自动装，或重跑一键安装脚本（幂等）
 - **Zotero 报 missing**：附件文件本体缺失（未下载），正常跳过
 - **工具输出不是卡片**：部分 DSH 界面不渲染自定义卡片，不影响使用——点击靠答复中的 DOI 链接与文件名

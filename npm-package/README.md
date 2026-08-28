@@ -38,7 +38,23 @@ The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activate
 dsh plugin --profile <name> add dsh-kb-rag
 ```
 
-Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Then restart DSH and open a new session — the 8 tools register automatically.
+Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
+
+- **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv; off by default, normally it only logs the command).
+- **Bundled installer**: run the installer shipped inside the package:
+
+```powershell
+# Windows (from the deployment/profile directory where you installed the package)
+powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scripts\install.ps1
+```
+```bash
+# macOS / Linux / Git Bash
+./node_modules/dsh-kb-rag/scripts/install.sh
+```
+
+  It chains Python deps (`-Mirror` / `--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activation (`-Profile` / `--profile`) → optional model pre-download (`-Models` / `--models`). Add `-DryRun` / `--dry-run` to rehearse.
+
+Then restart DSH and open a new session — the 8 tools register automatically.
 
 ### Option 2 — plugin marketplace (no terminal)
 
@@ -59,14 +75,18 @@ The DSH plugin loader resolves package names from the deployment's node_modules,
 ## Requirements
 
 - Node.js ≥ 18 (host process)
-- Python 3.9+ with the packages below (if missing at first search/ingest, you will be prompted to install them):
+- Python 3.9+ with the packages below (auto-detected at startup; see the paragraph after this list):
 
 ```bash
 pip install pymupdf faiss-cpu sentence-transformers
 ```
 
-The plugin **auto-checks these Python dependencies at startup**: if anything is missing it prints the module and the corresponding
-`pip install` command to the host log (it does not auto-install from the network and does not block plugin loading).
+The plugin **auto-checks these Python dependencies at startup** and reports the complete missing list.
+By default it prints the module and the corresponding `pip install` command to the host log (it does
+not auto-install and does not block plugin loading). Set `KB_AUTO_PIP=1` to let it pip-install the
+missing packages itself (fixed argv, PyPI — or `PIP_INDEX_URL` if configured); if deps are missing
+and not auto-installed, tool calls return an actionable error with the exact fix instead of an
+opaque engine crash.
 
 The embedding model `BAAI/bge-small-zh-v1.5` and reranker `BAAI/bge-reranker-base` download automatically on first use
 (local HF cache; on restricted networks set `HF_ENDPOINT=https://hf-mirror.com`).
