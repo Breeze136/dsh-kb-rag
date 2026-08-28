@@ -1,9 +1,12 @@
 {
   "name": "dsh-kb-rag",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Local literature knowledge-base RAG tools for DSH: hybrid retrieval + rerank + cited answers over a SQLite index (bundled Python engine).",
   "type": "module",
   "main": "lib/index.js",
+  "bin": {
+    "dsh-kb-rag-install": "./install.mjs"
+  },
   "exports": {
     ".": {
       "default": "./lib/index.js"
@@ -13,8 +16,11 @@
   },
   "files": [
     "lib/index.js",
+    "install.mjs",
     "kb_engine.py",
     "cordis.patch.yml",
+    "scripts/install.ps1",
+    "scripts/install.sh",
     "README.md",
     "SECURITY.md",
     "LICENSE"
