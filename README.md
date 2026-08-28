@@ -58,7 +58,7 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 See [QUICKSTART.md](QUICKSTART.md). One command via npx:
 
 ```bash
-npx --yes --package dsh-kb-rag dsh-kb-rag-install --profile <name>
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
 ```
 
 Or one-click from a clone:
@@ -91,7 +91,7 @@ dsh plugin --profile <name> add dsh-kb-rag
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
 
 - **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; normally it only logs the command).
-- **One-shot installer**: `npx --yes --package dsh-kb-rag dsh-kb-rag-install` runs the bundled `scripts/install.ps1` / `scripts/install.sh` (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
+- **One-shot installer**: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` runs the bundled `scripts/install.ps1` / `scripts/install.sh` (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
 
 Then restart DSH and open a new session — the 8 tools register automatically.
 

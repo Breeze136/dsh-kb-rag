@@ -5,8 +5,10 @@
 **方式 A · npx 一行（最快，需已装 Node）**：
 
 ```bash
-npx --yes --package dsh-kb-rag dsh-kb-rag-install --profile <name>
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
 ```
+
+> **怎么查自己的 profile 名**：就是你启动 DSH 时用的名字——`dsh web` 启动就是 `web`；不确定时看 `~/.dsh/profiles/`（Windows：`C:\Users\<你>\.dsh\profiles\`）下的文件夹名，那就是 profile 名。不带 `--profile` 会走默认部署目录，但显式写更稳。
 
 脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活。（Windows 下参数会自动翻译，统一用 `--profile` / `--mirror` / `--models` 风格即可。）
 
