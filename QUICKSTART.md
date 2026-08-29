@@ -82,6 +82,6 @@ pip install python-docx
 ## 6. 常见问题
 
 - **首次检索慢（~15s）**：模型加载（守护进程只加载一次，后续亚秒级）
-- **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`，或设 `KB_AUTO_PIP=1` 重启 DSH 自动装，或重跑一键安装脚本（幂等）
+- **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`，或设 `KB_AUTO_PIP=1` 重启 DSH 自动装，或重跑一键安装（`npx dsh-kb-rag-install`，幂等）
 - **Zotero 报 missing**：附件文件本体缺失（未下载），正常跳过
 - **工具输出不是卡片**：部分 DSH 界面不渲染自定义卡片，不影响使用——点击靠答复中的 DOI 链接与文件名
