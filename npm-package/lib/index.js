@@ -159,7 +159,7 @@ function apply(ctx) {
     if (Array.isArray(depStatus.missing) && depStatus.missing.length > 0) {
       throw new Error("kb-rag 缺少 Python 依赖: " + depStatus.missing.join(", ")
         + "。修复方式（任选其一）：① 在宿主终端执行 python -m pip install " + depStatus.missing.join(" ")
-        + "；② 设置环境变量 KB_AUTO_PIP=1 后重启 DSH，插件将自动安装；③ 运行随包安装脚本 scripts/install.sh 或 scripts/install.ps1。");
+        + "；② 设置环境变量 KB_AUTO_PIP=1 后重启 DSH，插件将自动安装；③ 运行一键安装命令 npx dsh-kb-rag-install（或随包脚本 scripts/install.sh / scripts/install.ps1）。");
     }
     const root = workspaceOf(exec);
     if (daemon !== null && daemon.root !== root) {

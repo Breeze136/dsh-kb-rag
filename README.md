@@ -55,14 +55,20 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 
 ## Quick Start
 
-See [QUICKSTART.md](QUICKSTART.md). One-click from a clone:
+See [QUICKSTART.md](QUICKSTART.md). One command, no clone needed (Node ≥ 18):
+
+```bash
+npx dsh-kb-rag-install --profile <name>
+```
+
+The CLI chains everything: Python deps (`--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activate → optional `--models` pre-download (`HF_ENDPOINT` respected). `--dry-run` rehearses without installing.
+
+From a clone, the same chain via platform scripts:
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 ./scripts/install.sh        # Windows: install.cmd (or scripts\install.ps1)
 ```
-
-The installer chains everything: Python deps (`--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activate (`--profile <name>`) → optional `--models` pre-download (`HF_ENDPOINT` respected). `--dry-run` rehearses without installing.
 
 Manual three steps:
 
@@ -74,7 +80,15 @@ Manual three steps:
 
 Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)), and indexed on the [dsh.so registry](https://www.dsh.so/artifact/kb-rag/) (security scan: **passed**).
 
-### Option 1 — one command (recommended, DSH profiles)
+### Option 1 — one command (recommended)
+
+```bash
+npx dsh-kb-rag-install --profile <name>
+```
+
+The `dsh-kb-rag-install` CLI (declared as `bin` in this package) does the whole chain: Python deps → engine smoke test → pnpm (auto-installed if missing) → `dsh plugin add` install + activation; `--models` pre-downloads, `--mirror` sets a pip mirror, `--dry-run` rehearses. Idempotent.
+
+### Option 2 — dsh plugin add (DSH profiles)
 
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
@@ -84,16 +98,16 @@ dsh plugin --profile <name> add dsh-kb-rag
 
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
 
-- **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; normally it only logs the command).
-- **Bundled installer**: run `scripts/install.ps1` / `scripts/install.sh` shipped inside the package (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
+- **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; without it the plugin only logs the command).
+- **Bundled installer**: run `scripts/install.ps1` / `scripts/install.sh` shipped inside the package (`node_modules/dsh-kb-rag/scripts/`) — the same chain as the npx CLI.
 
 Then restart DSH and open a new session — the 8 tools register automatically.
 
-### Option 2 — plugin marketplace (no terminal)
+### Option 3 — plugin marketplace (no terminal)
 
 Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (we are in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
 
-### Option 3 — manual
+### Option 4 — manual
 
 1. `npm install dsh-kb-rag` in the deployment/profile directory
 2. Activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json (or copy the bundled `cordis.patch.yml` insert into your own patch layer)
@@ -154,7 +168,7 @@ kb-rag/
 ├─ plugin/
 │  ├─ host.js            # DSH plugin Host half (8 tools + daemon + RPC)
 │  └─ client.js          # DSH plugin Client half (tool source cards, optional)
-├─ npm-package/          # npm static package dsh-kb-rag (lib/index.js + kb_engine.py + scripts/)
+├─ npm-package/          # npm static package dsh-kb-rag (lib/index.js + bin/install.js + kb_engine.py + scripts/)
 ├─ docs/DESIGN.md        # Design doc (chunking/search/protocol details)
 ├─ QUICKSTART.md         # Five-minute start
 ├─ CHANGELOG.md

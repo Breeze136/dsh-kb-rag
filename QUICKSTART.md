@@ -2,7 +2,14 @@
 
 ## 0. 一键安装（推荐）
 
-从仓库根目录运行一条命令，脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活：
+最短路径——一条命令，无需克隆仓库（Node ≥ 18）：
+
+```bash
+npx dsh-kb-rag-install --profile <name>
+# 加 --models 顺带预下载模型；--mirror <url> 走 pip 镜像；--dry-run 先演练
+```
+
+从克隆的仓库安装，效果相同：
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git
@@ -14,16 +21,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
 ./scripts/install.sh
 ```
 
-常用参数（两种脚本等价）：`--profile <name>` / `-Profile` 指定 DSH profile；`--mirror <url>` / `-Mirror` 走 pip 镜像；`--models` / `-Models` 顺带预下载模型；`--with-docx` / `-WithDocx` 装可选的 DOCX 原生解析；`--dry-run` / `-DryRun` 只演练不安装。受限网络示例：
+两种入口做同一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活 →（可选）模型预下载。脚本另支持 `--with-docx` 装可选的 DOCX 原生解析。受限网络示例：
 
 ```bash
-./scripts/install.sh --profile myprofile --models --mirror https://pypi.tuna.tsinghua.edu.cn/simple
-export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $env:HF_ENDPOINT）
+npx dsh-kb-rag-install --profile myprofile --models --mirror https://pypi.tuna.tsinghua.edu.cn/simple
+# 模型镜像：Windows 先 set HF_ENDPOINT=https://hf-mirror.com（macOS/Linux: export）再运行
 ```
 
 装完重启 DSH、开新会话即可，跳到下面第 4 节「第一次使用」。
 
-不想跑脚本？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
+不想跑安装命令？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
 
 ## 1. 环境要求（手动安装路线）
 
