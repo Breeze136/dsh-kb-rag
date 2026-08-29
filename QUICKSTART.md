@@ -69,7 +69,7 @@ pip install python-docx
 2. 入库：
    - 文件夹："把 `PDF file test` 入库" → kb_ingest
    - Zotero："同步 Zotero" → kb_zotero（自动定位 zotero.sqlite）
-3. 提问："BiFeO3 畴壁导电机制是什么？" → kb_rag（自动带引用）
+3. 提问："石墨烯是怎么用化学气相沉积合成的？" → kb_rag（自动带引用）
 
 ## 5. 常用操作
 

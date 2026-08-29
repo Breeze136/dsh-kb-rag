@@ -265,7 +265,7 @@ cat <<NEXT
   1. 重启 DSH，打开一个新会话 —— 8 个 kb_* 工具自动注册
   2. 首次检索会弹出查询范围选择（封闭库 / 库+全网 / 仅全网）
   3. 入库：对话里说“把 <文献目录> 入库”（kb_ingest）或“同步 Zotero”（kb_zotero）
-  4. 提问：“BiFeO3 畴壁导电机制是什么？”（kb_rag，自动带 DOI 引用）
+  4. 提问：“石墨烯是怎么用化学气相沉积合成的？”（kb_rag，自动带 DOI 引用）
 
 受限网络提示：pip 加速   ./scripts/install.sh --mirror https://pypi.tuna.tsinghua.edu.cn/simple
               模型镜像   export HF_ENDPOINT=https://hf-mirror.com
