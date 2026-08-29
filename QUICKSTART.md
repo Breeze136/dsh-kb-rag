@@ -35,6 +35,15 @@ export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $en
 
 不想跑脚本？也可以 `dsh plugin --profile web add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
 
+### 升级到最新版
+
+```bash
+npm cache clean --force   # 清掉 latest 元数据缓存（避免拉到旧版）
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
+```
+
+> 想钉死某个版本：`npx --yes --package dsh-kb-rag@<版本> -c "dsh-kb-rag-install --profile web"`。升级完同样要重启 DSH、开新会话。
+
 ## 1. 环境要求（手动安装路线）
 
 - Python 3.10+（本机为 3.12）
