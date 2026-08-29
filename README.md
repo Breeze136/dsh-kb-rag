@@ -113,7 +113,7 @@ Notes: the DSH plugin loader resolves package names from the deployment's node_m
 |---|---|---|
 | kb_ingest | File/folder ingest (incremental + dedup) | "Ingest the papers directory" |
 | kb_zotero | Zotero migration (metadata + PDF) | "Sync Zotero" |
-| kb_search | Hybrid search + rerank, snippets + sources | "Search domain-wall conduction in BiFeO3" |
+| kb_search | Hybrid search + rerank, snippets + sources | "Search chemical vapor deposition of graphene" |
 | kb_rag | Evidence QA with enforced citations | "What is the domain-wall conduction mechanism?" |
 | kb_scope | Scope (closed-KB / KB+web / web-only) + strict mode | "Switch to strict mode" |
 | kb_dedup | Clean up existing duplicates | "Deduplicate" |
