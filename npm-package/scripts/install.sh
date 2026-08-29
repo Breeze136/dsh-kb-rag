@@ -210,7 +210,8 @@ if [ "$WANT_MODELS" -eq 1 ]; then
   else
     HF_NOTE=""
     [ -n "${HF_ENDPOINT:-}" ] && HF_NOTE="（HF_ENDPOINT=$HF_ENDPOINT）"
-    echo "$DIM  首次下载约数百 MB，取决于网络$HF_NOTE$RESET"
+    echo "$DIM  首次下载约 1.2GB（embed ~95MB + rerank ~1.1GB），慢网可能数分钟；Ctrl+C 可跳过（首次检索时自动重试）$HF_NOTE$RESET"
+    [ -z "${HF_ENDPOINT:-}" ] && warn "未设 HF_ENDPOINT；国内网络建议先 export HF_ENDPOINT=https://hf-mirror.com"
     if "$PYTHON" - "$EMBED_MODEL" "$RERANK_MODEL" <<'PYEOF'
 import os, sys
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")

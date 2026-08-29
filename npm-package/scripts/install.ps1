@@ -1,4 +1,4 @@
-﻿# dsh-kb-rag — one-click installer (Windows PowerShell 5.1+)
+# dsh-kb-rag — one-click installer (Windows PowerShell 5.1+)
 # 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (可选)模型预下载。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 [-Profile <name>] [-Mirror <url>] [-Models] [-WithDocx] [-DryRun] [-SkipPip] [-SkipNode] [-SkipDsh] [-Yes]
 # 环境变量：HF_ENDPOINT（模型镜像，如 https://hf-mirror.com）、KB_EMBED_MODEL、KB_RERANK_MODEL、PIP_INDEX_URL。
@@ -189,10 +189,12 @@ if ($SkipDsh) {
 
 if ($Models) {
   Write-Step ("可选：预下载模型 ($EmbedModel / $RerankModel)")
+  Write-Host "    首次下载约 1.2GB（embed ~95MB + rerank ~1.1GB），慢网可能数分钟；按 Ctrl+C 可跳过（不影响安装，首次检索时自动重试）。" -ForegroundColor DarkGray
   if ($DryRun) {
     Write-Warn2 "dry-run：跳过"
   } else {
     if ($env:HF_ENDPOINT) { Write-Host ("    HF_ENDPOINT=$($env:HF_ENDPOINT)") -ForegroundColor DarkGray }
+    if (-not $env:HF_ENDPOINT) { Write-Warn2 "未设 HF_ENDPOINT；国内网络建议先 set `$env:HF_ENDPOINT='https://hf-mirror.com'" }
     & $Py -c @"
 import os, sys
 os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '60')
