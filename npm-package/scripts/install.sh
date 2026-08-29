@@ -17,6 +17,18 @@ fail()   { printf '%s[XX]%s %s\n'  "$RED"    "$RESET" "$*"; }
 step()   { printf '\n%s== %s%s\n' "$BOLD$CYAN" "$*" "$RESET"; }
 die()    { fail "$*"; exit 1; }
 
+hf_cache_root() {
+  if [ -n "${HF_HOME:-}" ]; then printf '%s' "$HF_HOME"
+  elif [ -n "${HF_HUB_CACHE:-}" ]; then printf '%s' "$HF_HUB_CACHE"
+  else printf '%s' "${XDG_CACHE_HOME:-$HOME/.cache}/huggingface"; fi
+}
+model_cached() {
+  # HF cache dir is `hub/models--<org>--<name>` with model ID `/` -> `--`.
+  local dir
+  dir="$(hf_cache_root)/hub/models--$(printf '%s' "$1" | tr '/' '-')"
+  [ -e "$dir" ]
+}
+
 DRY_RUN=0; SKIP_PIP=0; SKIP_NODE=0; SKIP_DSH=0; WITH_DOCX=0; WANT_MODELS=0; ASSUME_YES=0
 PROFILE=""; MIRROR="${PIP_INDEX_URL:-}"
 EMBED_MODEL="${KB_EMBED_MODEL:-BAAI/bge-small-zh-v1.5}"
@@ -201,17 +213,27 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------- optional model pre-download
+# ---------------------------------------------------------------- model cache status + optional pre-download
 
-if [ "$WANT_MODELS" -eq 1 ]; then
-  step "可选：预下载模型 ($EMBED_MODEL / $RERANK_MODEL)"
+EMBED_CACHED=0; RERANK_CACHED=0
+model_cached "$EMBED_MODEL" && EMBED_CACHED=1
+model_cached "$RERANK_MODEL" && RERANK_CACHED=1
+
+if [ "$EMBED_CACHED" -eq 1 ] && [ "$RERANK_CACHED" -eq 1 ]; then
+  step "模型已在本机缓存，无需下载"
+  ok "embed: $EMBED_MODEL 已缓存"
+  ok "rerank: $RERANK_MODEL 已缓存"
+elif [ "$WANT_MODELS" -eq 1 ]; then
+  step "预下载模型 ($EMBED_MODEL / $RERANK_MODEL)"
+  [ "$EMBED_CACHED" -eq 1 ] && ok "embed 已缓存，跳过" || warn "embed 未缓存，将下载（约 95MB）"
+  [ "$RERANK_CACHED" -eq 1 ] && ok "rerank 已缓存，跳过" || warn "rerank 未缓存，将下载（约 1.1GB）"
+  echo "$DIM  慢网可能数分钟；Ctrl+C 可跳过（不影响安装，首次检索时自动重试）$RESET"
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "dry-run：跳过"
   else
     HF_NOTE=""
     [ -n "${HF_ENDPOINT:-}" ] && HF_NOTE="（HF_ENDPOINT=$HF_ENDPOINT）"
-    echo "$DIM  首次下载约 1.2GB（embed ~95MB + rerank ~1.1GB），慢网可能数分钟；Ctrl+C 可跳过（首次检索时自动重试）$HF_NOTE$RESET"
-    [ -z "${HF_ENDPOINT:-}" ] && warn "未设 HF_ENDPOINT；国内网络建议先 export HF_ENDPOINT=https://hf-mirror.com"
+    [ -n "${HF_ENDPOINT:-}" ] || warn "未设 HF_ENDPOINT；国内网络建议先 export HF_ENDPOINT=https://hf-mirror.com"
     if "$PYTHON" - "$EMBED_MODEL" "$RERANK_MODEL" <<'PYEOF'
 import os, sys
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
@@ -227,6 +249,9 @@ except Exception as e:
 PYEOF
     then ok "模型已就绪"; else warn "模型下载失败——不影响安装；首次检索时会自动重试（受限网络先 export HF_ENDPOINT=https://hf-mirror.com）"; fi
   fi
+else
+  step "模型状态"
+  warn "模型未全部缓存（首次检索时自动下载约 1.2GB）。想现在下载可加 --models；国内网络先 export HF_ENDPOINT=https://hf-mirror.com"
 fi
 
 # ---------------------------------------------------------------- summary

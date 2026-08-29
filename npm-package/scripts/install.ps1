@@ -1,4 +1,4 @@
-# dsh-kb-rag — one-click installer (Windows PowerShell 5.1+)
+﻿# dsh-kb-rag — one-click installer (Windows PowerShell 5.1+)
 # 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (可选)模型预下载。
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 [-Profile <name>] [-Mirror <url>] [-Models] [-WithDocx] [-DryRun] [-SkipPip] [-SkipNode] [-SkipDsh] [-Yes]
 # 环境变量：HF_ENDPOINT（模型镜像，如 https://hf-mirror.com）、KB_EMBED_MODEL、KB_RERANK_MODEL、PIP_INDEX_URL。
@@ -30,6 +30,18 @@ function Write-Step($msg)  { Write-Host ""; Write-Host ("== " + $msg) -Foregroun
 function Write-Ok($msg)    { Write-Host ("[OK] " + $msg) -ForegroundColor Green }
 function Write-Warn2($msg) { Write-Host ("[!!] " + $msg) -ForegroundColor Yellow }
 function Write-Fail($msg)  { Write-Host ("[XX] " + $msg) -ForegroundColor Red }
+
+function Get-HfCacheRoot() {
+  if ($env:HF_HOME) { return $env:HF_HOME }
+  if ($env:HF_HUB_CACHE) { return $env:HF_HUB_CACHE }
+  return Join-Path $env:USERPROFILE ".cache\huggingface"
+}
+
+function Test-ModelCached($model) {
+  # HF cache dir is `hub/models--<org>--<name>` with model ID `/` -> `--`.
+  $dir = Join-Path (Get-HfCacheRoot) ("hub\models--" + ($model -replace '/', '--'))
+  return (Test-Path $dir)
+}
 
 function Test-PythonVersion($exe) {
   try {
@@ -185,11 +197,20 @@ if ($SkipDsh) {
   }
 }
 
-# ---------------------------------------------------------------- optional model pre-download
+# ---------------------------------------------------------------- model cache status + optional pre-download
 
-if ($Models) {
-  Write-Step ("可选：预下载模型 ($EmbedModel / $RerankModel)")
-  Write-Host "    首次下载约 1.2GB（embed ~95MB + rerank ~1.1GB），慢网可能数分钟；按 Ctrl+C 可跳过（不影响安装，首次检索时自动重试）。" -ForegroundColor DarkGray
+$embedCached = Test-ModelCached $EmbedModel
+$rerankCached = Test-ModelCached $RerankModel
+
+if ($embedCached -and $rerankCached) {
+  Write-Step "模型已在本机缓存，无需下载"
+  Write-Ok ("embed: $EmbedModel 已缓存")
+  Write-Ok ("rerank: $RerankModel 已缓存")
+} elseif ($Models) {
+  Write-Step ("预下载模型 ($EmbedModel / $RerankModel)")
+  if (-not $embedCached) { Write-Warn2 "embed 未缓存，将下载（约 95MB）" } else { Write-Ok "embed 已缓存，跳过" }
+  if (-not $rerankCached) { Write-Warn2 "rerank 未缓存，将下载（约 1.1GB）" } else { Write-Ok "rerank 已缓存，跳过" }
+  Write-Host "    慢网可能数分钟；按 Ctrl+C 可跳过（不影响安装，首次检索时自动重试）。" -ForegroundColor DarkGray
   if ($DryRun) {
     Write-Warn2 "dry-run：跳过"
   } else {
@@ -208,6 +229,9 @@ except Exception as e:
     if ($LASTEXITCODE -eq 0) { Write-Ok "模型已就绪" }
     else { Write-Warn2 "模型下载失败——不影响安装；首次检索时会自动重试（受限网络先 `$env:HF_ENDPOINT='https://hf-mirror.com'）" }
   }
+} else {
+  Write-Step "模型状态"
+  Write-Warn2 "模型未全部缓存（首次检索时自动下载约 1.2GB）。想现在下载可加 --models；国内网络先 set `$env:HF_ENDPOINT='https://hf-mirror.com'"
 }
 
 # ---------------------------------------------------------------- summary
