@@ -24,6 +24,7 @@ class EngineClient:
         self.proc = None
         self.lock = asyncio.Lock()
         self.seq = 0
+        self._buf = b""
 
     async def ensure(self):
         if self.proc is not None and self.proc.returncode is None:
@@ -47,6 +48,17 @@ class EngineClient:
                 pass
             self.proc = None
 
+    async def _readline(self):
+        """Read one newline-delimited line with NO 64KB cap (engine responses can be large)."""
+        while b"\n" not in self._buf:
+            chunk = await self.proc.stdout.read(65536)
+            if not chunk:
+                line, self._buf = self._buf, b""
+                return line
+            self._buf += chunk
+        line, self._buf = self._buf.split(b"\n", 1)
+        return line
+
     async def call(self, command, payload):
         async with self.lock:
             await self.ensure()
@@ -62,7 +74,7 @@ class EngineClient:
                 raise RuntimeError("kb engine daemon write failed: %s" % e) from e
             while True:
                 try:
-                    line = await self.proc.stdout.readline()
+                    line = await self._readline()
                 except Exception as e:
                     await self._restart()
                     raise RuntimeError("kb engine daemon read failed: %s" % e) from e
@@ -123,6 +135,27 @@ def render_ingest(resp):
             lines.append("（共 %d 个文件，仅显示最近 %d 条；完整统计见 kb_stats）" % (len(files), len(tail)))
     if resp.get("note"):
         lines.append(str(resp["note"]))
+    return "\n".join(lines)
+
+
+def render_stats(resp):
+    """Compact kb_stats view: totals + recent tail, not the full recent list."""
+    if not isinstance(resp, dict):
+        return str(resp)
+    lines = []
+    lines.append("**知识库统计** · %s 文档 / %s 块 / %s 向量" % (
+        resp.get("docs", 0), resp.get("chunks", 0), resp.get("vectors", 0)))
+    if resp.get("db"):
+        lines.append("数据库：%s" % resp["db"])
+    recent = resp.get("recent") or []
+    if recent:
+        lines.append("")
+        lines.append("**最近入库**")
+        for r in recent[:10]:
+            name = str(r.get("file") or "").replace("\\", "/").split("/")[-1]
+            lines.append("- %s · %s · %s 块" % (name, r.get("year") or "-", r.get("chunks") or 0))
+        if len(recent) > 10:
+            lines.append("（共 %d 条，仅显示最近 10 条）" % len(recent))
     return "\n".join(lines)
 
 

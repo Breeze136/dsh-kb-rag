@@ -249,6 +249,23 @@ return {
       return [{ type: 'text', text: lines.join('\n') }]
     }
 
+    const renderStats = (_args, value) => {
+      if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
+      const lines = []
+      lines.push('**知识库统计** · ' + (value.docs || 0) + ' 文档 / ' + (value.chunks || 0) + ' 块 / ' + (value.vectors || 0) + ' 向量')
+      if (value.db) lines.push('数据库：' + value.db)
+      const recent = Array.isArray(value.recent) ? value.recent : []
+      if (recent.length > 0) {
+        lines.push('')
+        lines.push('**最近入库**')
+        recent.slice(0, 10).forEach(function (r) {
+          lines.push('- ' + String(r.file || '').split(/[\\/]/).pop() + ' · ' + (r.year || '-') + ' · ' + (r.chunks || 0) + ' 块')
+        })
+        if (recent.length > 10) lines.push('（共 ' + recent.length + ' 条，仅显示最近 10 条）')
+      }
+      return [{ type: 'text', text: lines.join('\n') }]
+    }
+
     const renderSources = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : [])
@@ -457,7 +474,7 @@ return {
       parameters: {
         kb_root: { type: 'string', description: '知识库目录（默认：工作区下的 .kb）。' },
       },
-      output: { schema: { type: 'json' }, render: renderJson },
+      output: { schema: { type: 'json' }, render: renderStats },
       execute(args, exec) {
         return runEngine('stats', { kb_root: kbRootOf(args, exec) }, exec)
       },
