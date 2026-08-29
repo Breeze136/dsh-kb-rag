@@ -1165,7 +1165,7 @@ def cmd_stats(req):
         vecs_n = db.execute("SELECT COUNT(*) AS n FROM vecs").fetchone()["n"]
         rows = db.execute(
             "SELECT path,title,authors,year,kind,chunk_count,indexed_at "
-            "FROM docs ORDER BY indexed_at DESC LIMIT 200").fetchall()
+            "FROM docs ORDER BY indexed_at DESC LIMIT 20").fetchall()
     finally:
         db.close()
     return {
@@ -1373,6 +1373,89 @@ def cmd_clear(req):
             "ms": round((time.time() - t0) * 1000)}
 
 
+# ---------------------------------------------------------------- fetch (download OA PDF by identifier)
+
+
+def _resolve_oa_pdf(ident):
+    """Return (pdf_url, base_name) for a DOI / arXiv ID, or (None, None).
+
+    arXiv -> arxiv.org/pdf/<id>; DOI -> Unpaywall best OA location.
+    Only open-access sources; no paywall/Sci-Hub."""
+    import urllib.parse
+    import urllib.request
+    ident = (ident or "").strip()
+    m = _ARXIV_RE.search(ident) or re.search(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", ident)
+    if m:
+        aid = m.group(1)
+        return "https://arxiv.org/pdf/" + aid, "arxiv_" + aid
+    md = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", ident)
+    doi = md.group(0).rstrip(".,;") if md else None
+    if not doi:
+        return None, None
+    try:
+        u = "https://api.unpaywall.org/v2/%s?email=kbrag.demo@gmail.com" % urllib.parse.quote(doi)
+        req = urllib.request.Request(u, headers={"User-Agent": "kb-rag/1.0"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        loc = d.get("best_oa_location") or {}
+        url = loc.get("url_for_pdf") or loc.get("url")
+        name = (d.get("title") or "paper")[:80]
+        return url, name
+    except Exception:
+        return None, None
+
+
+def _download_bytes(url):
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "application/pdf,*/*"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read()
+
+
+def cmd_fetch(req):
+    """Download open-access PDFs by DOI / arXiv ID into a local dir (pull-only)."""
+    import urllib.parse
+    t0 = time.time()
+    ids = req.get("identifiers") or []
+    if isinstance(ids, str):
+        ids = [i.strip() for i in re.split(r"[,\s;]+", ids) if i.strip()]
+    if not ids:
+        return {"ok": False, "error": "identifiers 必填：给一个 DOI 或 arXiv ID 列表"}
+    target = req.get("target_dir") or str(Path.home() / ".kb-rag" / "downloads")
+    Path(target).mkdir(parents=True, exist_ok=True)
+    files = []
+    for ident in ids:
+        entry = {"id": ident, "status": "failed", "path": None}
+        try:
+            url, name = _resolve_oa_pdf(ident)
+            if not url:
+                entry["error"] = "无开放获取 PDF（Unpaywall 未命中或非 DOI/arXiv）"
+            else:
+                data = _download_bytes(url)
+                if not data[:4].startswith(b"%PDF"):
+                    entry["error"] = "下载内容不是 PDF"
+                else:
+                    safe = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", "_", name or ident).strip("_")[:60]
+                    fname = safe + ".pdf"
+                    path = Path(target) / fname
+                    path.write_bytes(data)
+                    entry["status"] = "downloaded"
+                    entry["path"] = str(path)
+                    entry["bytes"] = len(data)
+        except Exception as e:
+            entry["error"] = f"{type(e).__name__}: {e}"[:200]
+        files.append(entry)
+    downloaded = sum(1 for f in files if f["status"] == "downloaded")
+    return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
+            "files": files,
+            "note": ("已下载 %d/%d 篇到 %s。Zotero 不会自动导入：请在 Zotero 里手动"
+                     "「文件 → 添加文件」或把该目录 PDF 拖入 Zotero 入库。"
+                     % (downloaded, len(ids), target)),
+            "ms": round((time.time() - t0) * 1000)}
+
+
 # ---------------------------------------------------------------- serve
 
 
@@ -1395,7 +1478,7 @@ def cmd_serve():
         rid = req.get("id")
         handler = {"ingest": cmd_ingest, "search": cmd_search, "rag": cmd_rag,
                    "stats": cmd_stats, "zotero": cmd_zotero,
-                   "dedup": cmd_dedup, "clear": cmd_clear}.get(req.get("command"))
+                   "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(req.get("command"))
         try:
             if handler is None:
                 raise ValueError(f"unknown command: {req.get('command')}")
@@ -1422,7 +1505,7 @@ def main():
         return 0
     handler = {"ingest": cmd_ingest, "search": cmd_search, "rag": cmd_rag,
                "stats": cmd_stats, "zotero": cmd_zotero,
-               "dedup": cmd_dedup, "clear": cmd_clear}.get(command)
+               "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(command)
     if handler is None:
         sys.stdout.write(json.dumps({"ok": False, "error": f"unknown command: {command}"}))
         return 1

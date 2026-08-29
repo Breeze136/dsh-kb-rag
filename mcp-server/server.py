@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest, render_stats
+from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest, render_stats, render_fetch
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -85,6 +85,12 @@ async def kb_dedup(kb_root: str = "") -> str:
 async def kb_clear(kb_root: str = "", confirm: bool = False) -> str:
     """清空知识库中的全部文献与索引（不可恢复）。必须显式传 confirm=true 才会执行，否则拒绝。"""
     return render_json(await engine.call("clear", {"kb_root": _root(kb_root), "confirm": confirm}))
+
+
+@mcp.tool()
+async def kb_fetch(identifiers: list[str], target_dir: str = "") -> str:
+    """按 DOI / arXiv ID 定点下载开放获取(OA)文献 PDF 到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。只下载 OA 文献，不碰付费墙/Sci-Hub。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。"""
+    return render_fetch(await engine.call("fetch", {"identifiers": identifiers, "target_dir": target_dir or None}))
 
 
 if __name__ == "__main__":
