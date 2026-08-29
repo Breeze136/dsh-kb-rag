@@ -58,7 +58,7 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 See [QUICKSTART.md](QUICKSTART.md). One command via npx:
 
 ```bash
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
 Or one-click from a clone:
@@ -85,7 +85,7 @@ Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.n
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
 ```bash
-dsh plugin --profile <name> add dsh-kb-rag
+dsh plugin --profile web add dsh-kb-rag
 ```
 
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:

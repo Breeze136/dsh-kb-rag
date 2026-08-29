@@ -35,7 +35,7 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
 ```bash
-dsh plugin --profile <name> add dsh-kb-rag
+dsh plugin --profile web add dsh-kb-rag
 ```
 
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
@@ -44,7 +44,7 @@ Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependenc
 - **One-shot installer (npx)**: run the installer shipped inside the package without installing anything first:
 
 ```bash
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
   Or, when the package is already installed, run the bundled script directly:

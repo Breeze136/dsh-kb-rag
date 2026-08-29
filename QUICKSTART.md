@@ -2,13 +2,13 @@
 
 ## 0. 一键安装（推荐）
 
-**方式 A · npx 一行（最快，需已装 Node）**：
+**方式 A · npx 一行（最快，需已装 Node，直接复制）**：
 
 ```bash
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-> **怎么查自己的 profile 名**：就是你启动 DSH 时用的名字——`dsh web` 启动就是 `web`；不确定时看 `~/.dsh/profiles/`（Windows：`C:\Users\<你>\.dsh\profiles\`）下的文件夹名，那就是 profile 名。不带 `--profile` 会走默认部署目录，但显式写更稳。
+> **`web` 就是最常见的 profile 名**（用 `dsh web` 启动就是它）。如果你的启动命令不同（如 `dsh myprofile`），把 `web` 换成你的名字即可；不确定时看 `~/.dsh/profiles/`（Windows：`C:\Users\<你>\.dsh\profiles\`）下的文件夹名。
 
 脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活。（Windows 下参数会自动翻译，统一用 `--profile` / `--mirror` / `--models` 风格即可。）
 
@@ -33,7 +33,7 @@ export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $en
 
 装完重启 DSH、开新会话即可，跳到下面第 4 节「第一次使用」。
 
-不想跑脚本？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
+不想跑脚本？也可以 `dsh plugin --profile web add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
 
 ## 1. 环境要求（手动安装路线）
 
