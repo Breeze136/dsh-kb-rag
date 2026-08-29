@@ -30,7 +30,17 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 
 ## Install & Enable
 
-### Option 1 — one command (recommended, DSH profiles)
+### Option 1 — one command (recommended)
+
+```bash
+npx dsh-kb-rag-install --profile <name>
+```
+
+That's the whole install. The `dsh-kb-rag-install` CLI (shipped in this package) chains: Python ≥3.9 detection → pip deps (`--mirror <url>` for a pip mirror, `--user` fallback, `--with-docx` optional) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin --profile <name> add dsh-kb-rag` → activation. Add `--models` to pre-download the embedding/reranker models (`HF_ENDPOINT` respected) and `--dry-run` to rehearse. Re-running is safe (idempotent).
+
+Equivalent long form: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"`.
+
+### Option 2 — dsh plugin add
 
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
@@ -52,15 +62,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scri
 ./node_modules/dsh-kb-rag/scripts/install.sh
 ```
 
-  It chains Python deps (`-Mirror` / `--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activation (`-Profile` / `--profile`) → optional model pre-download (`-Models` / `--models`). Add `-DryRun` / `--dry-run` to rehearse.
+  (The npx CLI in Option 1 is the same chain in a single cross-platform command.)
 
 Then restart DSH and open a new session — the 8 tools register automatically.
 
-### Option 2 — plugin marketplace (no terminal)
+### Option 3 — plugin marketplace (no terminal)
 
 Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (listed in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
 
-### Option 3 — manual
+### Option 4 — manual
 
 ```bash
 npm install dsh-kb-rag

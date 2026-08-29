@@ -22,6 +22,15 @@ This document lists exactly what it runs and touches, so you can verify it again
   `cmd`/`sh` command string. The missing-package list inserted into the pip argv comes from the
   plugin's own fixed module→package mapping, not from free-form user input.
 
+- The package also ships an **explicitly-invoked installer command**, `dsh-kb-rag-install`
+  (`bin/install.js`, declared in `bin`; also mirrored as `scripts/install.ps1` / `scripts/install.sh`
+  for repo users). It never runs on install — `package.json` still declares **no lifecycle install
+  scripts** (`preinstall`/`postinstall` etc.); the bin only executes when you run it yourself via
+  `npx dsh-kb-rag-install` (or the scripts directly). It spawns `python` (deps + engine smoke test),
+  and `npm`/`dsh` when those steps are enabled; the `--profile` value is validated against a
+  conservative charset before it is passed to a shell on Windows (npm/dsh there are `.cmd`
+  shims that require `shell: true`). Read it before running, same as any install script.
+
 ## What it reads and writes
 
 - **Reads**: only documents you explicitly ingest — the PDF/TXT/MD/DOCX paths passed to
