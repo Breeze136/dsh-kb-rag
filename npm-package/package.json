@@ -1,6 +1,6 @@
 {
   "name": "dsh-kb-rag",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Local literature knowledge-base RAG tools for DSH: hybrid retrieval + rerank + cited answers over a SQLite index (bundled Python engine).",
   "type": "module",
   "main": "lib/index.js",

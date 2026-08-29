@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1] - 安装器体验 + 隐私修正
+
+- **检测环境避免重复下载**：安装器先探测 embed/rerank 模型是否已在 HF 缓存，已缓存则打印"已缓存，跳过下载"；未缓存且未加 `--models` 时提示"首次检索自动下载"并给出镜像指引
+- **人类可读提醒**：模型下载前明示体积（embed ~95MB / rerank ~1.1GB）、Ctrl+C 可跳过、HF 镜像地址；未设 `HF_ENDPOINT` 时主动提醒国内镜像
+- **隐私修正**：安装脚本与文档中的示例从「BiFeO3 畴壁导电」改为中性的「石墨烯化学气相沉积合成」，移除作者研究领域信息
+- **编码修复**：install.ps1 恢复 UTF-8 BOM（Windows PowerShell 5.1 无 BOM 会把中文当 GBK 读导致脚本语法报错）
+- 文档：安装命令用 `web` 实值 profile（可直接复制，`dsh web` 启动即 `web`）
+
 ## [1.3.0] - 一键安装补全
 
 - **npm bin 入口 `dsh-kb-rag-install`**：新增 `install.mjs`（37 行薄分发器，`"bin": {"dsh-kb-rag-install": "./install.mjs"}`），一行装环境：`npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"`；按平台转发到 `scripts/install.ps1|sh`，Windows 自动把 bash 风格参数翻译成 PowerShell 风格（`--profile`→`-Profile`），用户全程只用一种参数写法；`engines: node>=18`
