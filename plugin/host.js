@@ -266,6 +266,21 @@ return {
       return [{ type: 'text', text: lines.join('\n') }]
     }
 
+    const renderFetch = (_args, value) => {
+      if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
+      const lines = []
+      lines.push('**下载完成** · ' + (value.downloaded || 0) + ' / ' + (value.total || 0) + ' 篇')
+      if (value.target) lines.push('保存到：' + value.target)
+      const files = Array.isArray(value.files) ? value.files : []
+      files.forEach(function (f) {
+        const icon = f.status === 'downloaded' ? '✓' : '✗'
+        const name = f.path ? String(f.path).split(/[\\/]/).pop() : String(f.id || '')
+        lines.push(icon + ' ' + name + (f.error ? ' · ' + String(f.error).slice(0, 90) : ''))
+      })
+      if (value.note) { lines.push(''); lines.push(String(value.note)) }
+      return [{ type: 'text', text: lines.join('\n') }]
+    }
+
     const renderSources = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : [])
@@ -452,6 +467,20 @@ return {
       },
     })
 
+    const kbFetch = harness.defineTool({
+      name: 'kb_fetch',
+      description: '按 DOI / arXiv ID 定点下载开放获取(OA)文献 PDF 到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。只下载 OA 文献，不碰付费墙/Sci-Hub。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。',
+      parameters: {
+        identifiers: { type: 'array', required: true, items: { type: 'string' }, description: 'DOI 或 arXiv ID 列表（如 10.1038/nature04233 或 arXiv:1503.03833）。' },
+        target_dir: { type: 'string', description: '下载目录（默认 ~/.kb-rag/downloads）。' },
+      },
+      output: { schema: { type: 'json' }, render: renderFetch },
+      timeoutMs: 300000,
+      execute(args, exec) {
+        return runEngine('fetch', { identifiers: args.identifiers, target_dir: args.target_dir }, exec)
+      },
+    })
+
     const kbScope = harness.defineTool({
       name: 'kb_scope',
       description: '设置/查看知识库查询范围与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false，允许模型在证据不足处用一般知识补充并说明）。用户说"封闭库/全网/都要/严格只按库内"等要求时，调本工具设定后再检索。',
@@ -486,8 +515,9 @@ return {
     ctx.effect(() => harness.registerTool(ctx, kbZotero))
     ctx.effect(() => harness.registerTool(ctx, kbDedup))
     ctx.effect(() => harness.registerTool(ctx, kbClear))
+    ctx.effect(() => harness.registerTool(ctx, kbFetch))
     ctx.effect(() => harness.registerTool(ctx, kbScope))
     ctx.effect(() => harness.registerTool(ctx, kbStats))
-    console.log('[kb-rag] tools registered (v1.0.0): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_scope / kb_stats')
+    console.log('[kb-rag] tools registered (v1.0.0): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats')
   },
 }

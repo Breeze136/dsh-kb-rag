@@ -138,6 +138,24 @@ def render_ingest(resp):
     return "\n".join(lines)
 
 
+def render_fetch(resp):
+    """Compact kb_fetch view: downloaded/total + per-file status + Zotero reminder."""
+    if not isinstance(resp, dict):
+        return str(resp)
+    lines = []
+    lines.append("**下载完成** · %s / %s 篇" % (resp.get("downloaded", 0), resp.get("total", 0)))
+    if resp.get("target"):
+        lines.append("保存到：%s" % resp["target"])
+    for f in resp.get("files") or []:
+        icon = "✓" if f.get("status") == "downloaded" else "✗"
+        name = str(f.get("path") or "").replace("\\", "/").split("/")[-1] if f.get("path") else str(f.get("id") or "")
+        lines.append("%s %s%s" % (icon, name, (" · " + str(f["error"])[:90]) if f.get("error") else ""))
+    if resp.get("note"):
+        lines.append("")
+        lines.append(str(resp["note"]))
+    return "\n".join(lines)
+
+
 def render_stats(resp):
     """Compact kb_stats view: totals + recent tail, not the full recent list."""
     if not isinstance(resp, dict):

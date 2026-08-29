@@ -23,6 +23,12 @@ exact file), and the reply tells you what your library is still missing. **Think
 
 kb-rag is a lightweight local database-RAG plugin for **DSH (DeepSeek Harness)**: it turns PDF/Zotero literature into a SQLite knowledge base with section structure and vector indexes, providing the full hybrid search + rerank + cited-QA workflow. All indexing, embedding, and reranking run locally — zero API cost, zero upload.
 
+## 核心卖点
+
+1. **检索准** — BM25 + bge-small 向量 + bge-reranker 三级混合检索，精排后命中相关性 0.99+（实测）；章节感知权重让"找机制"不会翻到致谢里。
+2. **引文联动** — 每个命中都是可点击坐标：DOI 一键跳原文，无 DOI 给可复制的 Scholar 搜索串；自动关联同作者/同期刊/主题相近的文献；正文引用的图自动挂图注坐标；答案末尾提示"库里还缺哪些文献"。
+3. **本地零成本** — 全本地嵌入与重排，零 API 费用、零上传，dsh.so 安全扫描 passed。
+
 ## Features
 
 - **8 model tools**: `kb_ingest` (file/folder ingest), `kb_zotero` (Zotero migration), `kb_search` (hybrid search), `kb_rag` (cited QA), `kb_scope` (scope/strict mode), `kb_dedup` (dedup), `kb_clear` (wipe), `kb_stats` (stats)
