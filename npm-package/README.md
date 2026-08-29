@@ -30,17 +30,7 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 
 ## Install & Enable
 
-### Option 1 — one command (recommended)
-
-```bash
-npx dsh-kb-rag-install --profile <name>
-```
-
-That's the whole install. The `dsh-kb-rag-install` CLI (shipped in this package) chains: Python ≥3.9 detection → pip deps (`--mirror <url>` for a pip mirror, `--user` fallback, `--with-docx` optional) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin --profile <name> add dsh-kb-rag` → activation. Add `--models` to pre-download the embedding/reranker models (`HF_ENDPOINT` respected) and `--dry-run` to rehearse. Re-running is safe (idempotent).
-
-Equivalent long form: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"`.
-
-### Option 2 — dsh plugin add
+### Option 1 — one command (recommended, DSH profiles)
 
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
 
@@ -51,7 +41,13 @@ dsh plugin --profile <name> add dsh-kb-rag
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
 
 - **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv; off by default, normally it only logs the command).
-- **Bundled installer**: run the installer shipped inside the package:
+- **One-shot installer (npx)**: run the installer shipped inside the package without installing anything first:
+
+```bash
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
+```
+
+  Or, when the package is already installed, run the bundled script directly:
 
 ```powershell
 # Windows (from the deployment/profile directory where you installed the package)
@@ -62,15 +58,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scri
 ./node_modules/dsh-kb-rag/scripts/install.sh
 ```
 
-  (The npx CLI in Option 1 is the same chain in a single cross-platform command.)
+  It chains Python deps (`-Mirror` / `--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activation (`-Profile` / `--profile`) → optional model pre-download (`-Models` / `--models`). Add `-DryRun` / `--dry-run` to rehearse. (Via `npx`, bash-style flags like `--profile` work on every OS — the entry translates them for Windows.)
 
 Then restart DSH and open a new session — the 8 tools register automatically.
 
-### Option 3 — plugin marketplace (no terminal)
+### Option 2 — plugin marketplace (no terminal)
 
 Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (listed in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
 
-### Option 4 — manual
+### Option 3 — manual
 
 ```bash
 npm install dsh-kb-rag
@@ -80,7 +76,7 @@ Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's p
 
 ### Guide for other Harness users
 
-The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart. To prepare the environment (Python deps, pnpm, activation) in one command from any directory: `npx dsh-kb-rag-install --profile <name>`.
+The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
 
 ## Requirements
 
@@ -117,7 +113,7 @@ Data persists in the session workspace `/.kb` by default; every tool accepts `kb
 
 - This is a Host-side static plugin (all tools run server-side) and **deliberately ships no browser UI / management panel**: every operation and inspection happens through conversation and tool returns (search results render with clickable DOI links) — a positioning choice, not a gap.
 - The engine runs as a resident subprocess via the bundled `kb_engine.py` (JSON-lines protocol) and exits when the session ends.
-- On restricted networks: install with `npx dsh-kb-rag-install --mirror https://pypi.tuna.tsinghua.edu.cn/simple` (or set `PIP_INDEX_URL`), and set `HF_ENDPOINT=https://hf-mirror.com` before the first search so the models download from the mirror. If you must stay fully offline, pre-populate the HF model cache and install the Python packages beforehand.
+- On restricted networks (no HF / pip access), prepare the model cache and Python dependencies beforehand.
 
 ## Security
 

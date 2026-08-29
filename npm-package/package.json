@@ -5,10 +5,7 @@
   "type": "module",
   "main": "lib/index.js",
   "bin": {
-    "dsh-kb-rag-install": "bin/install.js"
-  },
-  "engines": {
-    "node": ">=18"
+    "dsh-kb-rag-install": "./install.mjs"
   },
   "exports": {
     ".": {
@@ -19,7 +16,7 @@
   },
   "files": [
     "lib/index.js",
-    "bin/install.js",
+    "install.mjs",
     "kb_engine.py",
     "cordis.patch.yml",
     "scripts/install.ps1",
@@ -55,5 +52,8 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

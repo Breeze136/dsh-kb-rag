@@ -2,35 +2,38 @@
 
 ## 0. 一键安装（推荐）
 
-最短路径——一条命令，无需克隆仓库（Node ≥ 18）：
+**方式 A · npx 一行（最快，需已装 Node）**：
 
 ```bash
-npx dsh-kb-rag-install --profile <name>
-# 加 --models 顺带预下载模型；--mirror <url> 走 pip 镜像；--dry-run 先演练
+npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile <name>"
 ```
 
-从克隆的仓库安装，效果相同：
+> **怎么查自己的 profile 名**：就是你启动 DSH 时用的名字——`dsh web` 启动就是 `web`；不确定时看 `~/.dsh/profiles/`（Windows：`C:\Users\<你>\.dsh\profiles\`）下的文件夹名，那就是 profile 名。不带 `--profile` 会走默认部署目录，但显式写更稳。
+
+脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活。（Windows 下参数会自动翻译，统一用 `--profile` / `--mirror` / `--models` 风格即可。）
+
+**方式 B · 下载仓库后双击/运行脚本**：
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git
 cd dsh-kb-rag
 
 # Windows（双击 install.cmd 或）：
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File npm-package\scripts\install.ps1
 # macOS / Linux / Git Bash：
-./scripts/install.sh
+./npm-package/scripts/install.sh
 ```
 
-两种入口做同一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活 →（可选）模型预下载。脚本另支持 `--with-docx` 装可选的 DOCX 原生解析。受限网络示例：
+常用参数（两种脚本等价）：`--profile <name>` / `-Profile` 指定 DSH profile；`--mirror <url>` / `-Mirror` 走 pip 镜像；`--models` / `-Models` 顺带预下载模型；`--with-docx` / `-WithDocx` 装可选的 DOCX 原生解析；`--dry-run` / `-DryRun` 只演练不安装。受限网络示例：
 
 ```bash
-npx dsh-kb-rag-install --profile myprofile --models --mirror https://pypi.tuna.tsinghua.edu.cn/simple
-# 模型镜像：Windows 先 set HF_ENDPOINT=https://hf-mirror.com（macOS/Linux: export）再运行
+./npm-package/scripts/install.sh --profile myprofile --models --mirror https://pypi.tuna.tsinghua.edu.cn/simple
+export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $env:HF_ENDPOINT）
 ```
 
 装完重启 DSH、开新会话即可，跳到下面第 4 节「第一次使用」。
 
-不想跑安装命令？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
+不想跑脚本？也可以 `dsh plugin --profile <name> add dsh-kb-rag` 后，设置环境变量 `KB_AUTO_PIP=1` 重启 DSH，插件会自动 pip 安装缺失的 Python 依赖（默认关闭，仅打印安装命令）。
 
 ## 1. 环境要求（手动安装路线）
 
@@ -82,6 +85,6 @@ pip install python-docx
 ## 6. 常见问题
 
 - **首次检索慢（~15s）**：模型加载（守护进程只加载一次，后续亚秒级）
-- **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`，或设 `KB_AUTO_PIP=1` 重启 DSH 自动装，或重跑一键安装（`npx dsh-kb-rag-install`，幂等）
+- **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`，或设 `KB_AUTO_PIP=1` 重启 DSH 自动装，或重跑一键安装 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"`（幂等）
 - **Zotero 报 missing**：附件文件本体缺失（未下载），正常跳过
 - **工具输出不是卡片**：部分 DSH 界面不渲染自定义卡片，不影响使用——点击靠答复中的 DOI 链接与文件名
