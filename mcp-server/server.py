@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources
+from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -31,13 +31,13 @@ def _root(kb_root):
 @mcp.tool()
 async def kb_ingest(paths: list[str], kb_root: str = "", force: bool = False) -> str:
     """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。"""
-    return render_json(await engine.call("ingest", {"paths": paths, "kb_root": _root(kb_root), "force": force}))
+    return render_ingest(await engine.call("ingest", {"paths": paths, "kb_root": _root(kb_root), "force": force}))
 
 
 @mcp.tool()
 async def kb_zotero(zotero_db: str = "", kb_root: str = "", limit: int = 0, force: bool = False, dry_run: bool = False) -> str:
     """把本地 Zotero 文献库中带 PDF 附件的文献批量迁移到知识库。读取 zotero.sqlite（默认自动定位 ~/Zotero 等；找不到时用 zotero_db 显式指定），解析每篇元数据与 PDF 附件路径，逐篇解析入库并生成向量。已入库跳过、重复标记 duplicate（增量）。附件缺失标记 missing 跳过。dry_run=true 只列候选不写入。"""
-    return render_json(await engine.call("zotero", {
+    return render_ingest(await engine.call("zotero", {
         "zotero_db": zotero_db, "kb_root": _root(kb_root), "limit": limit or None,
         "force": force, "dry_run": dry_run}))
 

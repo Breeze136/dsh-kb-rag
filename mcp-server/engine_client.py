@@ -91,6 +91,41 @@ def render_json(resp):
     return json.dumps(resp, ensure_ascii=False, default=str, indent=2)
 
 
+def render_ingest(resp):
+    """Compact rolling view for ingest/zotero: one summary line + recent tail."""
+    if not isinstance(resp, dict):
+        return str(resp)
+    totals = resp.get("totals") or {}
+    files = resp.get("files") or []
+    lines = []
+    lines.append("**入库完成** · 新增 %s / 更新 %s / 跳过 %s / 重复 %s / 失败 %s" % (
+        totals.get("added", 0), totals.get("updated", 0), totals.get("skipped", 0),
+        totals.get("duplicates", 0), totals.get("errors", 0)))
+    total_ms = resp.get("ms", 0) or 0
+    timing = "%.1fs" % (total_ms / 1000) if total_ms >= 1000 else "%dms" % total_ms
+    extra = []
+    if resp.get("embedding"):
+        extra.append(str(resp["embedding"]))
+    if isinstance(totals.get("chunks"), int):
+        extra.append("%d 块 / %d 向量" % (totals["chunks"], totals.get("vectors", 0)))
+    lines.append("总耗时 %s%s" % (timing, (" · " + " · ".join(extra)) if extra else ""))
+    if files:
+        lines.append("")
+        lines.append("**最近入库（滚动）**")
+        tail = list(reversed(files[-8:]))
+        icon = {"added": "✓", "skipped": "·", "duplicate": "≈", "error": "✗", "missing": "✗"}
+        for f in tail:
+            name = str(f.get("path") or "").replace("\\", "/").split("/")[-1]
+            st = f.get("status", "·")
+            ms = f.get("ms", 0) or 0
+            lines.append("%s %s · %dms" % (icon.get(st, "·"), name, ms))
+        if len(files) > len(tail):
+            lines.append("（共 %d 个文件，仅显示最近 %d 条；完整统计见 kb_stats）" % (len(files), len(tail)))
+    if resp.get("note"):
+        lines.append(str(resp["note"]))
+    return "\n".join(lines)
+
+
 def render_sources(resp):
     """Render search/rag results as markdown (port of the DSH renderSources)."""
     if not isinstance(resp, dict):

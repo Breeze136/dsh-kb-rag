@@ -296,6 +296,35 @@ function apply(ctx) {
   const kbRootOf = (args, exec) => typeof args.kb_root === "string" && args.kb_root.length > 0 ? args.kb_root : workspaceOf(exec) + "/.kb";
   const renderJson = (_args, value) => [{ type: "text", text: JSON.stringify(value) }];
 
+  // 入库/Zotero 迁移：紧凑滚动视图——总览一行 + 最近 N 条（文件名 + 耗时），不甩大 JSON。
+  const renderIngest = (_args, value) => {
+    if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
+    const totals = value.totals || {};
+    const files = Array.isArray(value.files) ? value.files : [];
+    const lines = [];
+    lines.push("**入库完成** · 新增 " + (totals.added || 0) + " / 更新 " + (totals.updated || 0)
+      + " / 跳过 " + (totals.skipped || 0) + " / 重复 " + (totals.duplicates || 0)
+      + " / 失败 " + (totals.errors || 0));
+    const totalMs = typeof value.ms === "number" ? value.ms : 0;
+    lines.push("总耗时 " + (totalMs >= 1000 ? (totalMs / 1000).toFixed(1) + "s" : totalMs + "ms")
+      + (value.embedding ? " · " + value.embedding : "")
+      + (typeof totals.chunks === "number" ? " · " + totals.chunks + " 块 / " + (totals.vectors || 0) + " 向量" : ""));
+    if (files.length > 0) {
+      lines.push("");
+      lines.push("**最近入库（滚动）**");
+      const tail = files.slice(-8).reverse();
+      tail.forEach(function (f) {
+        const name = String(f.path || "").split(/[\\/]/).pop();
+        const icon = f.status === "added" ? "✓" : (f.status === "skipped" ? "·" : (f.status === "duplicate" ? "≈" : (f.status === "error" || f.status === "missing" ? "✗" : "·")));
+        const ms = typeof f.ms === "number" ? f.ms : 0;
+        lines.push(icon + " " + name + " · " + ms + "ms");
+      });
+      if (files.length > tail.length) lines.push("（共 " + files.length + " 个文件，仅显示最近 " + tail.length + " 条；完整统计见 kb_stats）");
+    }
+    if (value.note) lines.push(String(value.note));
+    return [{ type: "text", text: lines.join("\n") }];
+  };
+
   const renderSources = (_args, value) => {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
     const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : []);
@@ -371,7 +400,7 @@ function apply(ctx) {
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       force: { type: "boolean", description: "true 时强制重新解析并重新编码向量（默认 false）。" },
     },
-    output: { schema: { type: "json" }, render: renderJson },
+    output: { schema: { type: "json" }, render: renderIngest },
     timeoutMs: 1800000,
     execute(args, exec) {
       return runEngine("ingest", { paths: args.paths, kb_root: kbRootOf(args, exec), force: args.force === true }, exec);
@@ -448,7 +477,7 @@ function apply(ctx) {
       force: { type: "boolean", description: "true 时强制重新解析已入库附件（默认 false）。" },
       dry_run: { type: "boolean", description: "true 时只列候选文献，不导入（默认 false）。" },
     },
-    output: { schema: { type: "json" }, render: renderJson },
+    output: { schema: { type: "json" }, render: renderIngest },
     timeoutMs: 1800000,
     execute(args, exec) {
       return runEngine("zotero", {
