@@ -66,3 +66,8 @@ python "<本仓库路径>/mcp-server/server.py"
 - MCP 无 UI，工具返回即纯文本（检索结果渲染成带 DOI 链接的 markdown）
 - `kb_scope`（DSH 里的查询范围/严格模式）是 DSH 会话概念，MCP 版不含；严格性由调用方（agent）按 `kb_rag`/`kb_search` 返回的来源自行把握
 - 这是**补充内容**：DSH 插件版仍是主发布形态，本目录单独演进
+
+## 已知限制
+
+- **长任务会超时但后台照常完成**：`kb_zotero`（全量）/ `kb_ingest`（大批量）可能跑几分钟，部分 MCP 客户端有自己的工具超时（如 60s），会先报超时——但引擎守护进程是独立子进程，任务会继续跑完。做法：① 用 `kb_zotero(limit=N)` 分批；② 超时后等一会儿再 `kb_stats` 确认结果，数据不会丢。
+- **大库输出已收敛**：`kb_stats`/`kb_ingest`/`kb_zotero` 返回的是紧凑摘要 + 最近 N 条（引擎侧 `kb_stats` 只回最近 20 条），避免"MCP 返回体过大（chunk longer than limit）"。如需完整清单，直接查 `kb_root/kb.sqlite`。

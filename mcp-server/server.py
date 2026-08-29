@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest
+from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest, render_stats
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -72,7 +72,7 @@ async def kb_rag(query: str, top_k: int = 3, rerank: bool = True, related: bool 
 @mcp.tool()
 async def kb_stats(kb_root: str = "") -> str:
     """查看知识库统计：文档数、分块数、向量数、最近入库列表及数据库位置。检索无命中时先调它确认库里有什么。"""
-    return render_json(await engine.call("stats", {"kb_root": _root(kb_root)}))
+    return render_stats(await engine.call("stats", {"kb_root": _root(kb_root)}))
 
 
 @mcp.tool()

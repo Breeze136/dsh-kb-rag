@@ -1165,7 +1165,7 @@ def cmd_stats(req):
         vecs_n = db.execute("SELECT COUNT(*) AS n FROM vecs").fetchone()["n"]
         rows = db.execute(
             "SELECT path,title,authors,year,kind,chunk_count,indexed_at "
-            "FROM docs ORDER BY indexed_at DESC LIMIT 200").fetchall()
+            "FROM docs ORDER BY indexed_at DESC LIMIT 20").fetchall()
     finally:
         db.close()
     return {
