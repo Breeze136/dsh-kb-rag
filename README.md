@@ -113,7 +113,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 2. Activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json (or copy the bundled `cordis.patch.yml` insert into your own patch layer)
 3. Restart DSH and open a new session
 
-Notes: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages. The package ships its own `kb_engine.py` (no manual placement needed); on startup it auto-checks Python dependencies and prints the `pip install` command if anything is missing — with `KB_AUTO_PIP=1` set it installs them itself. The bundled `scripts/install.ps1` / `scripts/install.sh` (also shipped in the npm package) do the whole chain in one shot. See [npm-package/README.md](npm-package/README.md) for full details.
+Notes: the DSH plugin loader resolves package names from the deployment's node_modules and does **not** auto-download missing packages. The package ships its own `kb_engine.py` (no manual placement needed). On startup it auto-checks Python dependencies and reports the **complete missing list** (importlib `find_spec` probe); by default it prints the `pip install` command to the host log, with `KB_AUTO_PIP=1` set it installs them itself, and tool calls return an actionable error (with the exact fix) instead of an opaque engine crash while deps are missing. The npx CLI and the bundled `scripts/install.ps1` / `scripts/install.sh` do the whole chain in one shot. See [npm-package/README.md](npm-package/README.md) for full details.
 
 ## Tool Reference
 

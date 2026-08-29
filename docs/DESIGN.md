@@ -63,7 +63,26 @@ query → filters SQL 预过滤（authors/title/journal/kind/year/section）
 - 元数据：itemData（title/date/publicationTitle/DOI）+ itemCreators（author 角色）→ 覆盖 PDF 抽取值
 - 缺失文件标记 missing 跳过；dry_run 只列候选
 
-## 7. 插件架构（DSH 双端）
+## 7. 安装与分发（v1.3.0 一键安装）
+
+三条安装入口，同一条安装链（Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → 可选模型预下载）：
+
+| 入口 | 命令 | 适用 |
+|---|---|---|
+| npx CLI（`bin/install.js`，package.json `bin`） | `npx dsh-kb-rag-install --profile <name>` | 最终用户，无需克隆；Node ≥18，跨平台 |
+| 平台脚本（`scripts/install.ps1` / `install.sh`，npm 包内同款镜像） | `install.cmd` 双击 / `./scripts/install.sh` | 克隆仓库的用户；npm 手动安装后从 `node_modules/dsh-kb-rag/scripts/` 运行 |
+| 插件自检 | `dsh plugin add` 后设 `KB_AUTO_PIP=1` 重启 DSH | 已装插件但缺 Python 依赖的环境 |
+
+公共参数：`--profile <name>`（DSH profile）、`--mirror <url>`（pip 镜像，或 `PIP_INDEX_URL`）、`--models`（预下载 bge 模型，尊重 `HF_ENDPOINT`/`KB_EMBED_MODEL`/`KB_RERANK_MODEL`）、`--with-docx`（可选 python-docx）、`--dry-run`、`-y`。全部幂等可重跑。
+
+**依赖探测与 KB_AUTO_PIP（插件内建，lib/index.js）**：
+
+- 启动时 spawn `python -c <importlib.util.find_spec 探测>`，一次性输出**完整缺失清单**（裸 import 链在首个缺失处中断，只能看到一个——v1.2.0 的缺陷）
+- 默认只打印 `pip install` 命令到宿主日志（不联网、不阻塞加载）；`KB_AUTO_PIP=1` 时自动执行 `python -m pip install`（固定 argv、装后二次探测确认）
+- 缺失且未自动安装时：首次工具调用先过一次性 depsGate（等探测/安装结束，之后零开销），再返回带三种修复路径的中文错误——不让引擎子进程反复崩出裸 ImportError
+- 安全边界：spawn 全部固定 argv 数组；profile 名经 `[A-Za-z0-9 ._-]` 白名单校验后才进入 Windows shell 调用（npm/dsh 是 .cmd 必须走 shell）；`package.json` 仍声明零 lifecycle install scripts，bin 仅显式调用时执行（详见 SECURITY.md）
+
+## 8. 插件架构（DSH 双端）
 
 ### Host 半（plugin/host.js）
 
@@ -77,13 +96,13 @@ query → filters SQL 预过滤（authors/title/journal/kind/year/section）
 
 - 注册 `tool.call.toolview`（key=kb_rag/kb_search）来源卡片；不渲染的界面自动降级为 Host 输出的 markdown 文本
 
-## 8. 引擎进程协议（kb_engine.py）
+## 9. 引擎进程协议（kb_engine.py）
 
 - 单发：`echo '<json>' | python kb_engine.py <ingest|search|rag|stats|zotero|dedup|clear>`
 - 常驻：`python kb_engine.py serve`（逐行 JSON，stdout ensure_ascii 单行 flush）
 - 响应统一 `{ok:bool, ...fields, engine:ver, ms:int}`；单文件错误不中断批量
 
-## 9. 实测性能（2026-xx，Windows/CPU）
+## 10. 实测性能（2026-xx，Windows/CPU）
 
 | 场景 | 指标 |
 |---|---|

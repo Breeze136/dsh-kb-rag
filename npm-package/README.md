@@ -80,7 +80,7 @@ Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's p
 
 ### Guide for other Harness users
 
-The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
+The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart. To prepare the environment (Python deps, pnpm, activation) in one command from any directory: `npx dsh-kb-rag-install --profile <name>`.
 
 ## Requirements
 
@@ -117,7 +117,7 @@ Data persists in the session workspace `/.kb` by default; every tool accepts `kb
 
 - This is a Host-side static plugin (all tools run server-side) and **deliberately ships no browser UI / management panel**: every operation and inspection happens through conversation and tool returns (search results render with clickable DOI links) — a positioning choice, not a gap.
 - The engine runs as a resident subprocess via the bundled `kb_engine.py` (JSON-lines protocol) and exits when the session ends.
-- On restricted networks (no HF / pip access), prepare the model cache and Python dependencies beforehand.
+- On restricted networks: install with `npx dsh-kb-rag-install --mirror https://pypi.tuna.tsinghua.edu.cn/simple` (or set `PIP_INDEX_URL`), and set `HF_ENDPOINT=https://hf-mirror.com` before the first search so the models download from the mirror. If you must stay fully offline, pre-populate the HF model cache and install the Python packages beforehand.
 
 ## Security
 
