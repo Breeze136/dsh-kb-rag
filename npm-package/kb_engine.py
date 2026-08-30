@@ -1381,6 +1381,9 @@ def cmd_clear(req):
 # ---------------------------------------------------------------- fetch (download OA PDF by identifier)
 
 
+_BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
+
 def _publisher_pdf_url(doi):
     """Canonical publisher PDF URL from a DOI prefix, or None (fall to OA).
 
@@ -1404,10 +1407,29 @@ def _publisher_pdf_url(doi):
     return None
 
 
-def _candidate_sources(ident):
-    """Ordered (url, name) candidates: publisher canonical first, then OA fallback.
+def _extract_pdf_url_from_html(doi):
+    """Fetch the article landing page (via doi.org redirect) and extract the canonical
+    PDF URL from the <meta name="citation_pdf_url"> tag. Works when the network can
+    reach the publisher HTML (e.g. campus/institutional IP); returns None otherwise."""
+    import urllib.request
+    import urllib.parse
+    try:
+        land = "https://doi.org/" + urllib.parse.quote(doi)
+        req = urllib.request.Request(land, headers={"User-Agent": _BROWSER_UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            html = r.read(2 * 1024 * 1024).decode("utf-8", "ignore")
+    except Exception:
+        return None
+    m = re.search(r'<meta[^>]+name=["\']citation_pdf_url["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\']([^"\']+\.pdf[^"\']*)["\'][^>]+name=["\']citation_pdf_url["\']', html, re.I)
+    return m.group(1) if m else None
 
-    arXiv -> direct; DOI -> publisher PDF (if mapped) -> Unpaywall best OA."""
+
+def _candidate_sources(ident):
+    """Ordered (url, name) candidates: publisher PDF -> landing-page HTML -> OA fallback.
+
+    arXiv -> direct; DOI -> publisher direct PDF -> citation_pdf_url from HTML -> Unpaywall OA."""
     import urllib.parse
     import urllib.request
     ident = (ident or "").strip()
@@ -1423,6 +1445,9 @@ def _candidate_sources(ident):
     pub = _publisher_pdf_url(doi)
     if pub:
         out.append((pub, doi))
+    html_pdf = _extract_pdf_url_from_html(doi)
+    if html_pdf and html_pdf != pub:
+        out.append((html_pdf, doi))
     try:
         u = "https://api.unpaywall.org/v2/%s?email=kbrag.demo@gmail.com" % urllib.parse.quote(doi)
         req = urllib.request.Request(u, headers={"User-Agent": "kb-rag/1.0"})
@@ -1441,7 +1466,7 @@ def _candidate_sources(ident):
 def _download_bytes(url):
     import urllib.request
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "User-Agent": _BROWSER_UA,
         "Accept": "application/pdf,*/*"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read()
