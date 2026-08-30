@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # dsh-kb-rag — one-click installer (macOS / Linux / Git Bash)
 # 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (可选)模型预下载。
 # 用法：./scripts/install.sh [--profile <name>] [--mirror <pip镜像>] [--models] [--with-docx]
@@ -16,6 +16,18 @@ warn()   { printf '%s[!!]%s %s\n'  "$YELLOW" "$RESET" "$*"; }
 fail()   { printf '%s[XX]%s %s\n'  "$RED"    "$RESET" "$*"; }
 step()   { printf '\n%s== %s%s\n' "$BOLD$CYAN" "$*" "$RESET"; }
 die()    { fail "$*"; exit 1; }
+
+hf_cache_root() {
+  if [ -n "${HF_HOME:-}" ]; then printf '%s' "$HF_HOME"
+  elif [ -n "${HF_HUB_CACHE:-}" ]; then printf '%s' "$HF_HUB_CACHE"
+  else printf '%s' "${XDG_CACHE_HOME:-$HOME/.cache}/huggingface"; fi
+}
+model_cached() {
+  # HF cache dir is `hub/models--<org>--<name>` with model ID `/` -> `--`.
+  local dir
+  dir="$(hf_cache_root)/hub/models--$(printf '%s' "$1" | tr '/' '-')"
+  [ -e "$dir" ]
+}
 
 DRY_RUN=0; SKIP_PIP=0; SKIP_NODE=0; SKIP_DSH=0; WITH_DOCX=0; WANT_MODELS=0; ASSUME_YES=0
 PROFILE=""; MIRROR="${PIP_INDEX_URL:-}"
@@ -201,16 +213,27 @@ else
   fi
 fi
 
-# ---------------------------------------------------------------- optional model pre-download
+# ---------------------------------------------------------------- model cache status + optional pre-download
 
-if [ "$WANT_MODELS" -eq 1 ]; then
-  step "可选：预下载模型 ($EMBED_MODEL / $RERANK_MODEL)"
+EMBED_CACHED=0; RERANK_CACHED=0
+model_cached "$EMBED_MODEL" && EMBED_CACHED=1
+model_cached "$RERANK_MODEL" && RERANK_CACHED=1
+
+if [ "$EMBED_CACHED" -eq 1 ] && [ "$RERANK_CACHED" -eq 1 ]; then
+  step "模型已在本机缓存，无需下载"
+  ok "embed: $EMBED_MODEL 已缓存"
+  ok "rerank: $RERANK_MODEL 已缓存"
+elif [ "$WANT_MODELS" -eq 1 ]; then
+  step "预下载模型 ($EMBED_MODEL / $RERANK_MODEL)"
+  [ "$EMBED_CACHED" -eq 1 ] && ok "embed 已缓存，跳过" || warn "embed 未缓存，将下载（约 95MB）"
+  [ "$RERANK_CACHED" -eq 1 ] && ok "rerank 已缓存，跳过" || warn "rerank 未缓存，将下载（约 1.1GB）"
+  echo "$DIM  慢网可能数分钟；Ctrl+C 可跳过（不影响安装，首次检索时自动重试）$RESET"
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "dry-run：跳过"
   else
     HF_NOTE=""
     [ -n "${HF_ENDPOINT:-}" ] && HF_NOTE="（HF_ENDPOINT=$HF_ENDPOINT）"
-    echo "$DIM  首次下载约数百 MB，取决于网络$HF_NOTE$RESET"
+    [ -n "${HF_ENDPOINT:-}" ] || warn "未设 HF_ENDPOINT；国内网络建议先 export HF_ENDPOINT=https://hf-mirror.com"
     if "$PYTHON" - "$EMBED_MODEL" "$RERANK_MODEL" <<'PYEOF'
 import os, sys
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
@@ -226,6 +249,9 @@ except Exception as e:
 PYEOF
     then ok "模型已就绪"; else warn "模型下载失败——不影响安装；首次检索时会自动重试（受限网络先 export HF_ENDPOINT=https://hf-mirror.com）"; fi
   fi
+else
+  step "模型状态"
+  warn "模型未全部缓存（首次检索时自动下载约 1.2GB）。想现在下载可加 --models；国内网络先 export HF_ENDPOINT=https://hf-mirror.com"
 fi
 
 # ---------------------------------------------------------------- summary
@@ -236,10 +262,10 @@ printf '安装完成%s\n' "$RESET"
 [ "$DRY_RUN" -eq 0 ] || printf '%s(dry-run 演练，未做任何变更)%s\n' "$YELLOW" "$RESET"
 cat <<NEXT
 下一步：
-  1. 重启 DSH，打开一个新会话 —— 8 个 kb_* 工具自动注册
+  1. 重启 DSH，打开一个新会话 —— 9 个 kb_* 工具自动注册
   2. 首次检索会弹出查询范围选择（封闭库 / 库+全网 / 仅全网）
   3. 入库：对话里说“把 <文献目录> 入库”（kb_ingest）或“同步 Zotero”（kb_zotero）
-  4. 提问：“BiFeO3 畴壁导电机制是什么？”（kb_rag，自动带 DOI 引用）
+  4. 提问：“石墨烯是怎么用化学气相沉积合成的？”（kb_rag，自动带 DOI 引用）
 
 受限网络提示：pip 加速   ./scripts/install.sh --mirror https://pypi.tuna.tsinghua.edu.cn/simple
               模型镜像   export HF_ENDPOINT=https://hf-mirror.com

@@ -242,7 +242,7 @@ if ($DryRun) { Write-Host "安装完成 (dry-run 演练，未做任何变更)" -
 else { Write-Host "安装完成" -ForegroundColor White }
 Write-Host @"
 下一步：
-  1. 重启 DSH，打开一个新会话 —— 8 个 kb_* 工具自动注册
+  1. 重启 DSH，打开一个新会话 —— 9 个 kb_* 工具自动注册
   2. 首次检索会弹出查询范围选择（封闭库 / 库+全网 / 仅全网）
   3. 入库：对话里说"把 <文献目录> 入库"（kb_ingest）或"同步 Zotero"（kb_zotero）
   4. 提问："石墨烯是怎么用化学气相沉积合成的？"（kb_rag，自动带 DOI 引用）

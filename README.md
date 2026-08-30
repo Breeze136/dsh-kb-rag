@@ -120,11 +120,12 @@ Notes: the DSH plugin loader resolves package names from the deployment's node_m
 | kb_ingest | File/folder ingest (incremental + dedup) | "Ingest the papers directory" |
 | kb_zotero | Zotero migration (metadata + PDF) | "Sync Zotero" |
 | kb_search | Hybrid search + rerank, snippets + sources | "Search chemical vapor deposition of graphene" |
-| kb_rag | Evidence QA with enforced citations | "What is the domain-wall conduction mechanism?" |
+| kb_rag | Evidence QA with enforced citations | "How does graphene CVD growth proceed on copper?" |
 | kb_scope | Scope (closed-KB / KB+web / web-only) + strict mode | "Switch to strict mode" |
 | kb_dedup | Clean up existing duplicates | "Deduplicate" |
 | kb_clear | Wipe all documents (confirm-guarded) | "Clear the knowledge base" |
 | kb_stats | Stats and inventory | "What's in the library?" |
+| kb_fetch | Download PDF by DOI / arXiv ID (publisher-first, OA fallback) | "Download 10.1038/s41467-025-56065-9" |
 
 ## Benchmarks (measured)
 

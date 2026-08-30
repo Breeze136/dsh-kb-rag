@@ -31,6 +31,18 @@ function Write-Ok($msg)    { Write-Host ("[OK] " + $msg) -ForegroundColor Green 
 function Write-Warn2($msg) { Write-Host ("[!!] " + $msg) -ForegroundColor Yellow }
 function Write-Fail($msg)  { Write-Host ("[XX] " + $msg) -ForegroundColor Red }
 
+function Get-HfCacheRoot() {
+  if ($env:HF_HOME) { return $env:HF_HOME }
+  if ($env:HF_HUB_CACHE) { return $env:HF_HUB_CACHE }
+  return Join-Path $env:USERPROFILE ".cache\huggingface"
+}
+
+function Test-ModelCached($model) {
+  # HF cache dir is `hub/models--<org>--<name>` with model ID `/` -> `--`.
+  $dir = Join-Path (Get-HfCacheRoot) ("hub\models--" + ($model -replace '/', '--'))
+  return (Test-Path $dir)
+}
+
 function Test-PythonVersion($exe) {
   try {
     $v = & $exe -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
@@ -185,14 +197,25 @@ if ($SkipDsh) {
   }
 }
 
-# ---------------------------------------------------------------- optional model pre-download
+# ---------------------------------------------------------------- model cache status + optional pre-download
 
-if ($Models) {
-  Write-Step ("可选：预下载模型 ($EmbedModel / $RerankModel)")
+$embedCached = Test-ModelCached $EmbedModel
+$rerankCached = Test-ModelCached $RerankModel
+
+if ($embedCached -and $rerankCached) {
+  Write-Step "模型已在本机缓存，无需下载"
+  Write-Ok ("embed: $EmbedModel 已缓存")
+  Write-Ok ("rerank: $RerankModel 已缓存")
+} elseif ($Models) {
+  Write-Step ("预下载模型 ($EmbedModel / $RerankModel)")
+  if (-not $embedCached) { Write-Warn2 "embed 未缓存，将下载（约 95MB）" } else { Write-Ok "embed 已缓存，跳过" }
+  if (-not $rerankCached) { Write-Warn2 "rerank 未缓存，将下载（约 1.1GB）" } else { Write-Ok "rerank 已缓存，跳过" }
+  Write-Host "    慢网可能数分钟；按 Ctrl+C 可跳过（不影响安装，首次检索时自动重试）。" -ForegroundColor DarkGray
   if ($DryRun) {
     Write-Warn2 "dry-run：跳过"
   } else {
     if ($env:HF_ENDPOINT) { Write-Host ("    HF_ENDPOINT=$($env:HF_ENDPOINT)") -ForegroundColor DarkGray }
+    if (-not $env:HF_ENDPOINT) { Write-Warn2 "未设 HF_ENDPOINT；国内网络建议先 set `$env:HF_ENDPOINT='https://hf-mirror.com'" }
     & $Py -c @"
 import os, sys
 os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '60')
@@ -206,6 +229,9 @@ except Exception as e:
     if ($LASTEXITCODE -eq 0) { Write-Ok "模型已就绪" }
     else { Write-Warn2 "模型下载失败——不影响安装；首次检索时会自动重试（受限网络先 `$env:HF_ENDPOINT='https://hf-mirror.com'）" }
   }
+} else {
+  Write-Step "模型状态"
+  Write-Warn2 "模型未全部缓存（首次检索时自动下载约 1.2GB）。想现在下载可加 --models；国内网络先 set `$env:HF_ENDPOINT='https://hf-mirror.com'"
 }
 
 # ---------------------------------------------------------------- summary
@@ -216,10 +242,10 @@ if ($DryRun) { Write-Host "安装完成 (dry-run 演练，未做任何变更)" -
 else { Write-Host "安装完成" -ForegroundColor White }
 Write-Host @"
 下一步：
-  1. 重启 DSH，打开一个新会话 —— 8 个 kb_* 工具自动注册
+  1. 重启 DSH，打开一个新会话 —— 9 个 kb_* 工具自动注册
   2. 首次检索会弹出查询范围选择（封闭库 / 库+全网 / 仅全网）
   3. 入库：对话里说"把 <文献目录> 入库"（kb_ingest）或"同步 Zotero"（kb_zotero）
-  4. 提问："BiFeO3 畴壁导电机制是什么？"（kb_rag，自动带 DOI 引用）
+  4. 提问："石墨烯是怎么用化学气相沉积合成的？"（kb_rag，自动带 DOI 引用）
 
 受限网络提示：pip 加速   .\scripts\install.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
               模型镜像   `$env:HF_ENDPOINT = 'https://hf-mirror.com'

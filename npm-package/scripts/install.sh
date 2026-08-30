@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # dsh-kb-rag — one-click installer (macOS / Linux / Git Bash)
 # 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (可选)模型预下载。
 # 用法：./scripts/install.sh [--profile <name>] [--mirror <pip镜像>] [--models] [--with-docx]
@@ -262,7 +262,7 @@ printf '安装完成%s\n' "$RESET"
 [ "$DRY_RUN" -eq 0 ] || printf '%s(dry-run 演练，未做任何变更)%s\n' "$YELLOW" "$RESET"
 cat <<NEXT
 下一步：
-  1. 重启 DSH，打开一个新会话 —— 8 个 kb_* 工具自动注册
+  1. 重启 DSH，打开一个新会话 —— 9 个 kb_* 工具自动注册
   2. 首次检索会弹出查询范围选择（封闭库 / 库+全网 / 仅全网）
   3. 入库：对话里说“把 <文献目录> 入库”（kb_ingest）或“同步 Zotero”（kb_zotero）
   4. 提问：“石墨烯是怎么用化学气相沉积合成的？”（kb_rag，自动带 DOI 引用）
