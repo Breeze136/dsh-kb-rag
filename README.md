@@ -86,6 +86,8 @@ Manual three steps:
 
 Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)), and indexed on the [dsh.so registry](https://www.dsh.so/artifact/kb-rag/) (security scan: **passed**).
 
+> **最新版本 v1.5.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+
 ### Option 1 — one command (recommended, DSH profiles)
 
 The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
