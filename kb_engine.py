@@ -1463,7 +1463,7 @@ def cmd_fetch(req):
         entry = {"id": ident, "status": "failed", "path": None}
         cands = _candidate_sources(ident)
         if not cands:
-            entry["error"] = "无法识别 DOI/arXiv，或无可用来源——校园网/机构访问请手动下载后 kb_ingest 入库"
+            entry["error"] = "无可用下载源（付费墙且 Unpaywall 无 OA 记录，或非 DOI/arXiv）——校园网/机构访问请手动下载后 kb_ingest 入库"
         else:
             for url, name in cands:  # 出版商正式版优先，OA 兜底
                 try:
