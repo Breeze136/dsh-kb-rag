@@ -9,10 +9,12 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
+> **最新版本 v1.5.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
 
-## Features (8 model tools)
+## Features (9 model tools)
 
 | Tool | Purpose |
 | --- | --- |
@@ -24,6 +26,7 @@ and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answer
 | `kb_stats` | Doc/chunk/vector counts and recent ingest list |
 | `kb_dedup` | Remove duplicate documents (keeps the earliest) |
 | `kb_clear` | Wipe all documents and indexes (requires explicit `confirm: true`) |
+| `kb_fetch` | Download PDF by DOI / arXiv ID (publisher-first, OA fallback; network + proxy hints) |
 
 Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (clickable); without DOI → `[authors, year, filename]`.
 `kb_search`/`kb_rag` also return a **related-literature list** (same authors / same journal / nearby year / thematically similar) that the answer's "suggested additions" cites. Every answer ends with that note; in strict mode the answer stays within KB evidence only.
