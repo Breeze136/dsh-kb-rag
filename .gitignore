@@ -11,3 +11,7 @@ __pycache__/
 # 系统
 .DS_Store
 Thumbs.db
+
+# 个人资料（勿提交）
+tools/doc_list.txt
+tools/交接文档.md
