@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS docs (
   path TEXT NOT NULL UNIQUE,
   title TEXT, authors TEXT, year INTEGER, journal TEXT, doi TEXT,
   kind TEXT, sha256 TEXT, size INTEGER, mtime REAL,
-  chunk_count INTEGER, indexed_at REAL
+  chunk_count INTEGER, indexed_at REAL, zotero_key TEXT
 );
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY,
@@ -444,6 +444,10 @@ def connect(kb_root):
     db = sqlite3.connect(str(root / "kb.sqlite"))
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    try:
+        db.execute("ALTER TABLE docs ADD COLUMN zotero_key TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.execute("DELETE FROM vecs WHERE chunk_id NOT IN (SELECT id FROM chunks)")
     return db
 
@@ -637,12 +641,14 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         if not text.strip():
             raise ValueError("no text extracted")
         title, authors, year, journal, doi = extract_meta(f, text, pdf_meta)
+        zotero_key = None
         if meta:  # authoritative metadata override (e.g. Zotero)
             title = meta.get("title") or title
             authors = meta.get("authors") or authors
             year = meta.get("year") or year
             journal = meta.get("journal") or journal
             doi = meta.get("doi") or doi
+            zotero_key = meta.get("_zotero_key")
         chunks = chunk_document(text)
         seen, uniq = set(), []
         for sec, w, t in chunks:
@@ -656,9 +662,9 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         if row is not None:
             db.execute(
                 "UPDATE docs SET title=?,authors=?,year=?,journal=?,doi=?,kind=?,"
-                "sha256=?,size=?,mtime=?,chunk_count=?,indexed_at=? WHERE id=?",
+                "sha256=?,size=?,mtime=?,chunk_count=?,indexed_at=?,zotero_key=? WHERE id=?",
                 (title, authors, year, journal, doi, f.suffix.lower().lstrip("."),
-                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), row["id"]))
+                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key, row["id"]))
             doc_id = row["id"]
             db.execute("DELETE FROM vecs WHERE chunk_id IN "
                        "(SELECT id FROM chunks WHERE doc_id = ?)", (doc_id,))
@@ -667,9 +673,9 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         else:
             cur = db.execute(
                 "INSERT INTO docs(path,title,authors,year,journal,doi,kind,sha256,"
-                "size,mtime,chunk_count,indexed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "size,mtime,chunk_count,indexed_at,zotero_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (key, title, authors, year, journal, doi, f.suffix.lower().lstrip("."),
-                 sha, st.st_size, st.st_mtime, len(chunks), time.time()))
+                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key))
             doc_id = cur.lastrowid
             status = "added"
         db.executemany(
@@ -907,7 +913,7 @@ def related_docs(db, kb_key, seed_doc_ids, related_k=5):
         except (TypeError, ValueError):
             pass
     cands = db.execute(
-        "SELECT id, title, authors, year, journal, doi, path FROM docs "
+        "SELECT id, title, authors, year, journal, doi, path, zotero_key FROM docs "
         "WHERE id NOT IN (%s)" % ",".join("?" * len(seed_doc_ids)),
         list(seed_doc_ids)).fetchall()
     scored = []
@@ -942,11 +948,13 @@ def related_docs(db, kb_key, seed_doc_ids, related_k=5):
             continue
         scored.append({
             "file": Path(c["path"]).name,
+            "path": c["path"],
             "title": c["title"],
             "authors": c["authors"],
             "year": c["year"],
             "journal": c["journal"],
             "doi": c["doi"],
+            "zotero_key": c["zotero_key"] or None,
             "score": score,
             "reason": "、".join(reasons[:2]) if reasons else "内容相关",
         })
@@ -960,7 +968,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     where, args = build_where(filters)
     rows = db.execute(
         "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, d.title, d.authors, "
-        "d.year, d.journal, d.doi, d.path, d.kind, v.vec "
+        "d.year, d.journal, d.doi, d.path, d.kind, d.zotero_key, v.vec "
         "FROM chunks c JOIN docs d ON d.id = c.doc_id "
         "LEFT JOIN vecs v ON v.chunk_id = c.id" + where, args).fetchall()
 
@@ -1065,6 +1073,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "year": r["year"],
             "journal": r["journal"],
             "doi": r["doi"],
+            "zotero_key": r["zotero_key"] or None,
             "section": r["section"],
             "score": round(score, 4),
             "snippet": make_snippet(r["text"], best_term[i] if best_term else None, snippet_w),
@@ -1232,7 +1241,9 @@ def _zotero_entries(zdb):
                 full = os.path.join(data_dir, full)
         else:
             continue  # imported URL / web snapshot: no local file
-        entries.append((full, _zotero_meta(conn, r["parentItemID"]), r["parentType"]))
+        meta = _zotero_meta(conn, r["parentItemID"])
+        meta["_zotero_key"] = r["itemKey"]
+        entries.append((full, meta, r["parentType"]))
     conn.close()
     return entries
 

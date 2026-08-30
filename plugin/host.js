@@ -379,6 +379,9 @@ return {
         if (typeof r.path === 'string' && r.path.length > 0) {
           lines.push('📂 ' + r.path)
         }
+        if (typeof r.zotero_key === 'string' && r.zotero_key.length > 0) {
+          lines.push('[在 Zotero 中打开 PDF](zotero://open-pdf/library/items/' + r.zotero_key + ')')
+        }
       })
       if (Array.isArray(value.related) && value.related.length > 0) {
         lines.push('')
