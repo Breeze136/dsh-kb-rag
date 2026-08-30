@@ -1469,6 +1469,9 @@ def _download_bytes(url):
         "User-Agent": _BROWSER_UA,
         "Accept": "application/pdf,*/*"})
     with urllib.request.urlopen(req, timeout=60) as r:
+        ct = (r.headers.get("content-type") or "").lower()
+        if "text/html" in ct:
+            raise RuntimeError("paywall/HTML page, not a PDF")
         return r.read()
 
 
