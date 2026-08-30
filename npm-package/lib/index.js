@@ -29,7 +29,52 @@ function apply(ctx) {
   let scopePref = "kb";
   let scopeStrict = false;
   let scopeAsked = false;
+  let netEnv = "unknown";
+  let netAsked = false;
   const userQuestions = ctx.get("userQuestions");
+
+  // ---- 下载前网络环境探测:代理检测(env 变量;本机代理端口由引擎探测) ----
+  function envProxyDetect() {
+    const keys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"];
+    const set = [];
+    try {
+      keys.forEach(function (k) { const v = process.env[k]; if (v) set.push(k + "=" + v); });
+    } catch (e) { /* process 不可用时忽略 */ }
+    return set;
+  }
+
+  // 下载前询问网络环境(校园网可下订阅版;家庭网络以 OA 为主),非阻塞,仅首次
+  function askNetworkOnce(agent) {
+    if (netAsked || userQuestions === undefined) return;
+    netAsked = true;
+    const request = {
+      questions: [{
+        id: "kb-net",
+        header: "下载网络环境",
+        question: "kb_fetch 下载前确认：当前网络环境？(付费墙期刊的订阅版 PDF 只有校园网/机构 IP 才能直接下)",
+        options: [
+          { label: "校园网/机构网络", description: "可下出版商订阅版 PDF，将优先尝试出版商正式版" },
+          { label: "家庭网络", description: "以 OA 开放获取为主，付费墙文献会提示手动下载" },
+          { label: "不确定", description: "两者都试：先出版商正式版，失败自动转 OA" },
+        ],
+      }],
+    };
+    if (agent !== undefined) request.agent = agent;
+    Promise.race([
+      userQuestions.ask(request).then(function (answer) {
+        const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0];
+        if (typeof picked === "string") {
+          if (picked.indexOf("校园网") === 0) netEnv = "campus";
+          else if (picked.indexOf("家庭") === 0) netEnv = "home";
+          else netEnv = "unknown";
+        }
+        console.log("[kb-rag] download network env:", netEnv);
+      }).catch(function (e) {
+        console.error("[kb-rag] network question failed:", String(e));
+      }),
+      ctx.timeout(120000),
+    ]);
+  }
 
   function askScopeOnce(agent) {
     if (scopeAsked || userQuestions === undefined) return;
@@ -346,13 +391,32 @@ function apply(ctx) {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
     const lines = [];
     lines.push("**下载完成** · " + (value.downloaded || 0) + " / " + (value.total || 0) + " 篇");
+    if (value.network) {
+      const envLabel = value.network.env === "campus" ? "校园网/机构网络" : value.network.env === "home" ? "家庭网络" : "未确认";
+      lines.push("网络环境：" + envLabel);
+      const p = value.network.proxy || {};
+      const proxyMsgs = [];
+      if (Array.isArray(p.env) && p.env.length) proxyMsgs.push("环境变量代理");
+      if (Array.isArray(p.localPorts) && p.localPorts.length) proxyMsgs.push("本机代理端口:" + p.localPorts.join(","));
+      if (p.system === true) proxyMsgs.push("系统代理");
+      if (proxyMsgs.length) lines.push("⚠ 检测到代理(" + proxyMsgs.join("; ") + ")——代理可能干扰下载(TLS/反爬)，如失败请关闭代理后重试");
+    }
     if (value.target) lines.push("保存到：" + value.target);
     const files = Array.isArray(value.files) ? value.files : [];
+    const fails = [];
     files.forEach(function (f) {
-      const icon = f.status === "downloaded" ? "✓" : "✗";
       const name = f.path ? String(f.path).split(/[\\/]/).pop() : String(f.id || "");
-      lines.push(icon + " " + name + (f.error ? " · " + String(f.error).slice(0, 90) : ""));
+      if (f.status === "downloaded") {
+        lines.push("✓ " + name);
+      } else {
+        fails.push(f);
+        lines.push("✗ " + name + (f.error ? " · " + String(f.error).slice(0, 200) : ""));
+      }
     });
+    if (fails.length > 0) {
+      lines.push("");
+      lines.push("**未能自动下载 " + fails.length + " 篇** —— 失败原因已标注在上方（含打开链接），请在浏览器中打开对应 DOI 手动下载，再用 kb_ingest 入库（或 Zotero 抓取后同步）");
+    }
     if (value.note) { lines.push(""); lines.push(String(value.note)); }
     return [{ type: "text", text: lines.join("\n") }];
   };
@@ -557,7 +621,9 @@ function apply(ctx) {
     output: { schema: { type: "json" }, render: renderFetch },
     timeoutMs: 300000,
     execute(args, exec) {
-      return runEngine("fetch", { identifiers: args.identifiers, target_dir: args.target_dir }, exec);
+      askNetworkOnce(exec && exec.agent);
+      const network = { env: netEnv, proxy: { env: envProxyDetect() } };
+      return runEngine("fetch", { identifiers: args.identifiers, target_dir: args.target_dir, network: network }, exec);
     },
   }));
 
