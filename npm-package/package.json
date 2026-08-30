@@ -21,6 +21,7 @@
     "cordis.patch.yml",
     "scripts/install.ps1",
     "scripts/install.sh",
+    "scripts/doi_pdf.mjs",
     "README.md",
     "SECURITY.md",
     "LICENSE"
