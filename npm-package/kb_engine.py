@@ -1381,22 +1381,48 @@ def cmd_clear(req):
 # ---------------------------------------------------------------- fetch (download OA PDF by identifier)
 
 
-def _resolve_oa_pdf(ident):
-    """Return (pdf_url, base_name) for a DOI / arXiv ID, or (None, None).
+def _publisher_pdf_url(doi):
+    """Canonical publisher PDF URL from a DOI prefix, or None (fall to OA).
 
-    arXiv -> arxiv.org/pdf/<id>; DOI -> Unpaywall best OA location.
-    Only open-access sources; no paywall/Sci-Hub."""
+    For paywalled journals this URL only yields a PDF when the network has
+    institutional/campus access; otherwise it returns an HTML paywall and we
+    fall back to OA. No paywall bypass."""
+    m = re.match(r"10\.\d{4,9}/(.+)", doi)
+    suffix = m.group(1) if m else ""
+    if doi.startswith("10.1038/"):
+        return "https://www.nature.com/articles/%s.pdf" % suffix
+    if doi.startswith("10.1126/"):
+        return "https://www.science.org/doi/pdf/%s" % doi
+    if doi.startswith("10.1002/"):
+        return "https://onlinelibrary.wiley.com/doi/pdfdirect/%s" % doi
+    if doi.startswith("10.1021/"):
+        return "https://pubs.acs.org/doi/pdf/%s" % doi
+    if doi.startswith("10.1007/"):
+        return "https://link.springer.com/content/pdf/%s.pdf" % doi
+    if doi.startswith("10.1088/"):
+        return "https://iopscience.iop.org/article/%s/pdf" % doi
+    return None
+
+
+def _candidate_sources(ident):
+    """Ordered (url, name) candidates: publisher canonical first, then OA fallback.
+
+    arXiv -> direct; DOI -> publisher PDF (if mapped) -> Unpaywall best OA."""
     import urllib.parse
     import urllib.request
     ident = (ident or "").strip()
     m = _ARXIV_RE.search(ident) or re.search(r"10\.48550/arXiv\.(\d{4}\.\d{4,5})", ident)
     if m:
         aid = m.group(1)
-        return "https://arxiv.org/pdf/" + aid, "arxiv_" + aid
+        return [("https://arxiv.org/pdf/" + aid, "arxiv_" + aid)]
     md = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", ident)
     doi = md.group(0).rstrip(".,;") if md else None
     if not doi:
-        return None, None
+        return []
+    out = []
+    pub = _publisher_pdf_url(doi)
+    if pub:
+        out.append((pub, doi))
     try:
         u = "https://api.unpaywall.org/v2/%s?email=kbrag.demo@gmail.com" % urllib.parse.quote(doi)
         req = urllib.request.Request(u, headers={"User-Agent": "kb-rag/1.0"})
@@ -1405,9 +1431,11 @@ def _resolve_oa_pdf(ident):
         loc = d.get("best_oa_location") or {}
         url = loc.get("url_for_pdf") or loc.get("url")
         name = (d.get("title") or "paper")[:80]
-        return url, name
+        if url:
+            out.append((url, name))
     except Exception:
-        return None, None
+        pass
+    return out
 
 
 def _download_bytes(url):
@@ -1433,24 +1461,27 @@ def cmd_fetch(req):
     files = []
     for ident in ids:
         entry = {"id": ident, "status": "failed", "path": None}
-        try:
-            url, name = _resolve_oa_pdf(ident)
-            if not url:
-                entry["error"] = "付费墙或暂无开放获取版：如有校园网/机构访问，可到出版商页面手动下载后 kb_ingest 入库"
-            else:
-                data = _download_bytes(url)
-                if not data[:4].startswith(b"%PDF"):
-                    entry["error"] = "下载内容不是 PDF"
-                else:
-                    safe = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", "_", name or ident).strip("_")[:60]
-                    fname = safe + ".pdf"
-                    path = Path(target) / fname
-                    path.write_bytes(data)
-                    entry["status"] = "downloaded"
-                    entry["path"] = str(path)
-                    entry["bytes"] = len(data)
-        except Exception as e:
-            entry["error"] = f"{type(e).__name__}: {e}"[:200]
+        cands = _candidate_sources(ident)
+        if not cands:
+            entry["error"] = "无法识别 DOI/arXiv，或无可用来源——校园网/机构访问请手动下载后 kb_ingest 入库"
+        else:
+            for url, name in cands:  # 出版商正式版优先，OA 兜底
+                try:
+                    data = _download_bytes(url)
+                    if data[:4].startswith(b"%PDF"):
+                        safe = re.sub(r"[^A-Za-z0-9\u4e00-\u9fff]+", "_", name or ident).strip("_")[:60]
+                        fname = safe + ".pdf"
+                        path = Path(target) / fname
+                        path.write_bytes(data)
+                        entry["status"] = "downloaded"
+                        entry["path"] = str(path)
+                        entry["bytes"] = len(data)
+                        entry["source"] = url[:90]
+                        break
+                except Exception:
+                    continue
+            if entry["status"] != "downloaded":
+                entry["error"] = "付费墙且无 OA 版本：请在校园网/机构访问下到出版商页面手动下载后 kb_ingest 入库"
         files.append(entry)
     downloaded = sum(1 for f in files if f["status"] == "downloaded")
     return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
