@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.0] - Zotero 集成 + 文件路径显示
+
+- **Zotero 直接打开 PDF**：`kb_zotero` 迁移时存储 Zotero itemKey，搜索结果渲染 `zotero://open-pdf/library/items/{key}` 链接，点击直接跳 Zotero 阅读器
+- **文件路径显示**：所有搜索结果底行展示完整文件路径，方便复制后在文件管理器或引用管理器中打开
+- 引擎：docs 表新增 `zotero_key` 列（含存量 DB 自动迁移），搜索/关联文献结果带回 `zotero_key` 字段
+
 ## [1.4.0] - kb_fetch 下载增强
 
 - **kb_fetch 首选 Node 下载器**（随包分发 `scripts/doi_pdf.mjs`）：Node fetch 的 TLS 指纹更接近浏览器，手动重定向 + 全程 cookie jar 绕过 Nature `cookies_not_supported`；候选源比 Python 版多（Unpaywall / Crossref PDF link / `citation_pdf_url` meta / 页面 pdf 链接模式），Node 不可用或漏项时回退 Python urllib 路径
