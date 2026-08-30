@@ -452,6 +452,9 @@ function apply(ctx) {
           lines.push("↳ 搜索串（Scholar 可复制）: " + String(r.search).slice(0, 200));
         }
       }
+      if (typeof r.path === "string" && r.path.length > 0) {
+        lines.push("📂 " + r.path);
+      }
     });
     if (Array.isArray(value.related) && value.related.length > 0) {
       lines.push("");
