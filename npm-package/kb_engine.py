@@ -1475,19 +1475,83 @@ def _download_bytes(url):
         return r.read()
 
 
+def _node_doi_pdf_script():
+    """Locate the bundled Node downloader (doi_pdf.mjs) next to the engine, or None.
+
+    Node 版比 Python urllib 强在:Node fetch(undici)TLS 指纹更接近浏览器、
+    手动重定向 + 全程 cookie jar(绕过 Nature cookies_not_supported)、
+    候选源多(Unpaywall / Crossref PDF link / citation_pdf_url meta / 页面 pdf 链接)。"""
+    import shutil
+    if shutil.which("node") is None:
+        return None
+    here = Path(__file__).resolve().parent
+    for cand in (here / "scripts" / "doi_pdf.mjs",
+                 here / "tools" / "doi_pdf.mjs",
+                 here / "doi_pdf.mjs"):
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 def cmd_fetch(req):
-    """Download open-access PDFs by DOI / arXiv ID into a local dir (pull-only)."""
+    """Download open-access PDFs by DOI / arXiv ID into a local dir (pull-only).
+
+    首选 Node 下载器(doi_pdf.mjs,随包分发);Node 不可用或漏掉的标识符回退 Python urllib。"""
     import urllib.parse
+    import subprocess
     t0 = time.time()
     ids = req.get("identifiers") or []
     if isinstance(ids, str):
         ids = [i.strip() for i in re.split(r"[,\s;]+", ids) if i.strip()]
     if not ids:
         return {"ok": False, "error": "identifiers 必填：给一个 DOI 或 arXiv ID 列表"}
+    def _norm_fetch_id(i):
+        # 与 Node doi_pdf.mjs 的 norm() 保持一致,避免同标识符被 Node/Python 双跑
+        i = re.sub(r"^https?://(dx\.)?doi\.org/", "", i, flags=re.I)
+        i = re.sub(r"^https?://arxiv\.org/abs/", "", i, flags=re.I)
+        i = re.sub(r"^arxiv[:/]", "", i, flags=re.I)
+        return i.rstrip(".,;").strip()
+
+    ids = [_norm_fetch_id(i) for i in ids]
     target = req.get("target_dir") or str(Path.home() / ".kb-rag" / "downloads")
     Path(target).mkdir(parents=True, exist_ok=True)
     files = []
+    node_note = None
+    script = _node_doi_pdf_script()
+    if script:
+        try:
+            p = subprocess.run(["node", script, "--out", target] + ids,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=900)
+            for line in p.stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                entry = {"id": rec.get("doi") or "?",
+                         "status": "downloaded" if rec.get("ok") else "failed",
+                         "path": rec.get("file"),
+                         "source": rec.get("source"),
+                         "error": rec.get("error") or rec.get("lastReason") or None}
+                if entry["status"] == "downloaded" and not entry["path"]:
+                    entry["status"] = "failed"
+                    entry["error"] = entry["error"] or "下载成功但未返回文件路径"
+                if entry["status"] == "downloaded" and entry["path"]:
+                    try:
+                        entry["bytes"] = Path(entry["path"]).stat().st_size
+                    except Exception:
+                        pass
+                files.append(entry)
+        except Exception as e:
+            node_note = "Node 下载器执行失败(%s)，已回退 Python 下载路径" % str(e)[:80]
+    # Python 兜底:Node 未运行或漏掉的标识符(如 Node 中途崩溃)
+    handled = set(f["id"] for f in files)
     for ident in ids:
+        if ident in handled:
+            continue
         entry = {"id": ident, "status": "failed", "path": None}
         cands = _candidate_sources(ident)
         if not cands:
@@ -1512,12 +1576,13 @@ def cmd_fetch(req):
                 entry["error"] = "付费墙且无 OA 版本：请在校园网/机构访问下到出版商页面手动下载后 kb_ingest 入库"
         files.append(entry)
     downloaded = sum(1 for f in files if f["status"] == "downloaded")
+    note = ("已下载 %d/%d 篇到 %s。付费墙文献不自动绕过：请在校园网/机构访问下"
+            "手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
+            % (downloaded, len(ids), target))
+    if node_note:
+        note += " " + node_note
     return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
-            "files": files,
-            "note": ("已下载 %d/%d 篇到 %s。付费墙文献不自动绕过：请在校园网/机构访问下"
-                     "手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
-                     % (downloaded, len(ids), target)),
-            "ms": round((time.time() - t0) * 1000)}
+            "files": files, "note": note, "ms": round((time.time() - t0) * 1000)}
 
 
 # ---------------------------------------------------------------- serve

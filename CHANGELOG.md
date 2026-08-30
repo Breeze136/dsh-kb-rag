@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased] - kb_fetch 下载增强
+
+- **kb_fetch 首选 Node 下载器**（随包分发 `scripts/doi_pdf.mjs`）：Node fetch 的 TLS 指纹更接近浏览器，手动重定向 + 全程 cookie jar 绕过 Nature `cookies_not_supported`；候选源比 Python 版多（Unpaywall / Crossref PDF link / `citation_pdf_url` meta / 页面 pdf 链接模式），Node 不可用或漏项时回退 Python urllib 路径
+- **下载顺序改为「出版商正式版优先，OA 兜底」**：先落地页 `citation_pdf_url`（校园网/机构 IP 直接下订阅版 PDF，实测 Nature Materials 付费墙期刊成功），再 Unpaywall/Crossref OA
+- **arXiv 直连补全**：裸 ID / `arXiv:ID` / `10.48550/arXiv.ID` / abs URL 四种形式均直达 arxiv.org（原 doi_pdf.mjs 无 arXiv 分支）
+- **反爬识别**：Cloudflare "Just a moment" 与 Akamai `bm-verify` 挑战页明确报"需真实浏览器手动下载后入库"（Wiley / science.org / cambridge.org / MDPI 实测 403）；MDPI 令牌跟随尝试保留（部分站点可过）
+- **快速失败**：`_download_bytes` 对 `text/html`（付费墙页）立即失败回退，不再整页下载后再判魔数
+- 实测（2026-09，校园网）：Nature Comms / Sci Reports / arXiv / Nature Materials(订阅) 均经 citation_pdf_url 或直连成功；Wiley/Science/Cambridge/MDPI 为 JS 反爬，需浏览器手动下载
+
 ## [1.3.1] - 安装器体验 + 隐私修正
 
 - **检测环境避免重复下载**：安装器先探测 embed/rerank 模型是否已在 HF 缓存，已缓存则打印"已缓存，跳过下载"；未缓存且未加 `--models` 时提示"首次检索自动下载"并给出镜像指引
