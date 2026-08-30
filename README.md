@@ -181,6 +181,10 @@ kb-rag/
 - Search performance: keyword scan is an in-memory implementation; beyond a few hundred thousand chunks consider FAISS HNSW / SQLite FTS5
 - Roadmap: zh→en query translation (local opus-mt model), caption OCR, citation-network graph
 
+## Uninstall
+
+See [UNINSTALL.md](UNINSTALL.md) — stop the plugin, delete only the index/`kb.sqlite` it generated, and keep your PDFs and Zotero library untouched.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
