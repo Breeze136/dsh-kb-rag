@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - kb_fetch 下载增强
+## [1.4.0] - kb_fetch 下载增强
 
 - **kb_fetch 首选 Node 下载器**（随包分发 `scripts/doi_pdf.mjs`）：Node fetch 的 TLS 指纹更接近浏览器，手动重定向 + 全程 cookie jar 绕过 Nature `cookies_not_supported`；候选源比 Python 版多（Unpaywall / Crossref PDF link / `citation_pdf_url` meta / 页面 pdf 链接模式），Node 不可用或漏项时回退 Python urllib 路径
 - **下载顺序改为「出版商正式版优先，OA 兜底」**：先落地页 `citation_pdf_url`（校园网/机构 IP 直接下订阅版 PDF，实测 Nature Materials 付费墙期刊成功），再 Unpaywall/Crossref OA

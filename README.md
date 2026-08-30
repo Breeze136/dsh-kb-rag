@@ -31,7 +31,7 @@ kb-rag is a lightweight local database-RAG plugin for **DSH (DeepSeek Harness)**
 
 ## Features
 
-- **8 model tools**: `kb_ingest` (file/folder ingest), `kb_zotero` (Zotero migration), `kb_search` (hybrid search), `kb_rag` (cited QA), `kb_scope` (scope/strict mode), `kb_dedup` (dedup), `kb_clear` (wipe), `kb_stats` (stats)
+- **9 model tools**: `kb_ingest` (file/folder ingest), `kb_zotero` (Zotero migration), `kb_search` (hybrid search), `kb_rag` (cited QA), `kb_scope` (scope/strict mode), `kb_dedup` (dedup), `kb_clear` (wipe), `kb_stats` (stats), `kb_fetch` (DOI/arXiv PDF download)
 - **Structured chunking**: paper section recognition (abstract ×1.5, methods ×1.2 weights), inline-heading detection, abstract auto-promotion, caption blocks; paragraph fallback for non-papers
 - **Hybrid retrieval**: keyword BM25 (CJK-bigram friendly) + bge-small vector cosine, RRF fusion, × section weights
 - **Reranking**: bge-reranker-base Cross-Encoder, Top-20 → Top-3 (auto-fallback to bge-large-en bi-encoder if missing)
@@ -99,7 +99,7 @@ Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependenc
 - **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; normally it only logs the command).
 - **One-shot installer**: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` runs the bundled `scripts/install.ps1` / `scripts/install.sh` (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
 
-Then restart DSH and open a new session — the 8 tools register automatically.
+Then restart DSH and open a new session — the 9 tools register automatically.
 
 ### Option 2 — plugin marketplace (no terminal)
 
@@ -161,10 +161,10 @@ kb-rag/
 ├─ install.cmd             # Windows one-click entry (double-click)
 ├─ kb_engine.py          # Python search engine (CLI + serve protocol)
 ├─ plugin/
-│  ├─ host.js            # DSH plugin Host half (8 tools + daemon + RPC)
+│  ├─ host.js            # DSH plugin Host half (9 tools + daemon + RPC)
 │  └─ client.js          # DSH plugin Client half (tool source cards, optional)
 ├─ npm-package/          # npm static package dsh-kb-rag
-│  ├─ lib/index.js       # Host plugin (8 tools + dep probe / KB_AUTO_PIP)
+│  ├─ lib/index.js       # Host plugin (9 tools + dep probe / KB_AUTO_PIP)
 │  ├─ install.mjs        # npm bin: dsh-kb-rag-install (npx entry)
 │  ├─ scripts/           # one-click installers (install.ps1 / install.sh)
 │  └─ kb_engine.py

@@ -60,7 +60,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scri
 
   It chains Python deps (`-Mirror` / `--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activation (`-Profile` / `--profile`) → optional model pre-download (`-Models` / `--models`). Add `-DryRun` / `--dry-run` to rehearse. (Via `npx`, bash-style flags like `--profile` work on every OS — the entry translates them for Windows.)
 
-Then restart DSH and open a new session — the 8 tools register automatically.
+Then restart DSH and open a new session — the 9 tools register automatically.
 
 ### Option 2 — plugin marketplace (no terminal)
 
@@ -76,7 +76,7 @@ Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's p
 
 ### Guide for other Harness users
 
-The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 8 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
+The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 9 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
 
 ## Requirements
 
