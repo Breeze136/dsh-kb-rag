@@ -1436,7 +1436,7 @@ def cmd_fetch(req):
         try:
             url, name = _resolve_oa_pdf(ident)
             if not url:
-                entry["error"] = "无开放获取 PDF（Unpaywall 未命中或非 DOI/arXiv）"
+                entry["error"] = "付费墙或暂无开放获取版：如有校园网/机构访问，可到出版商页面手动下载后 kb_ingest 入库"
             else:
                 data = _download_bytes(url)
                 if not data[:4].startswith(b"%PDF"):
@@ -1455,8 +1455,8 @@ def cmd_fetch(req):
     downloaded = sum(1 for f in files if f["status"] == "downloaded")
     return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
             "files": files,
-            "note": ("已下载 %d/%d 篇到 %s。Zotero 不会自动导入：请在 Zotero 里手动"
-                     "「文件 → 添加文件」或把该目录 PDF 拖入 Zotero 入库。"
+            "note": ("已下载 %d/%d 篇到 %s。付费墙文献不自动绕过：请在校园网/机构访问下"
+                     "手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
                      % (downloaded, len(ids), target)),
             "ms": round((time.time() - t0) * 1000)}
 
