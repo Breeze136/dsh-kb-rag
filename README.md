@@ -61,6 +61,8 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 
 ## Quick Start
 
+> **最新版本 v1.5.0** — 下载：`npm install dsh-kb-rag@latest`　安装：`dsh plugin --profile web add dsh-kb-rag@latest`
+
 See [QUICKSTART.md](QUICKSTART.md). One command via npx:
 
 ```bash
