@@ -1051,8 +1051,12 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     results = []
     seed_doc_ids = []
     caption_cache = {}
-    for i, score in ranked[:top_k]:
+    seen_docs = set()
+    for i, score in ranked:
         r = rows[i]
+        if r["doc_id"] in seen_docs:
+            continue  # 结果层去重：同一篇只保留最高分的一块，避免 Top-K 被同一篇占据
+        seen_docs.add(r["doc_id"])
         entry = {
             "file": Path(r["path"]).name,
             "path": r["path"],
@@ -1080,8 +1084,9 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                             str(r["year"]) if r["year"] else ""]
             entry["search"] = " ".join(p for p in search_parts if p)
         results.append(entry)
-        if r["doc_id"] not in seed_doc_ids:
-            seed_doc_ids.append(r["doc_id"])
+        seed_doc_ids.append(r["doc_id"])
+        if len(results) >= top_k:
+            break
 
     resp = {"query": query, "scored": len(ranked), "top_k": top_k,
             "mode_used": mode_used, "reranker": reranker_used, "results": results,
