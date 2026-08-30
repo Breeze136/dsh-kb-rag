@@ -1475,6 +1475,23 @@ def _download_bytes(url):
         return r.read()
 
 
+def _local_proxy_ports():
+    """Probe common local proxy ports (clash 7890/7897, v2ray 10808/10809, socks 1080)."""
+    import socket
+    open_ports = []
+    for port in (7890, 7897, 10809, 10808, 1080):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.6)
+        try:
+            s.connect(("127.0.0.1", port))
+            open_ports.append(port)
+        except Exception:
+            pass
+        finally:
+            s.close()
+    return open_ports
+
+
 def _node_doi_pdf_script():
     """Locate the bundled Node downloader (doi_pdf.mjs) next to the engine, or None.
 
@@ -1576,13 +1593,30 @@ def cmd_fetch(req):
                 entry["error"] = "付费墙且无 OA 版本：请在校园网/机构访问下到出版商页面手动下载后 kb_ingest 入库"
         files.append(entry)
     downloaded = sum(1 for f in files if f["status"] == "downloaded")
-    note = ("已下载 %d/%d 篇到 %s。付费墙文献不自动绕过：请在校园网/机构访问下"
-            "手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
-            % (downloaded, len(ids), target))
+    # 网络环境 + 代理检测(用于下载提示;host 端已问过用户并传 env)
+    import urllib.request as _ur
+    net = req.get("network") or {}
+    net_env = net.get("env") or "unknown"
+    sys_proxy = _ur.getproxies()
+    host_ports = net.get("proxy", {}).get("localPorts") or []
+    proxy_report = {"env": net.get("proxy", {}).get("env") or [],
+                    "localPorts": sorted(set(host_ports) | set(_local_proxy_ports())),
+                    "system": bool(sys_proxy)}
+    if sys_proxy:
+        proxy_report["systemDetail"] = {k: v for k, v in list(sys_proxy.items())[:3]}
+    note = "已下载 %d/%d 篇到 %s。" % (downloaded, len(ids), target)
+    if net_env == "campus":
+        note += "校园网/机构网络：出版商正式版优先（可含订阅版 PDF）。"
+    elif net_env == "home":
+        note += "家庭网络：以 OA 开放获取为主，付费墙期刊需校园网/机构访问或手动下载。"
+    if bool(sys_proxy) or bool(proxy_report["env"]) or bool(proxy_report["localPorts"]):
+        note += "检测到代理（系统/环境变量/本机端口），代理可能干扰下载（TLS/反爬），如失败请关闭代理后重试。"
+    note += "付费墙文献不自动绕过：请在浏览器打开对应 DOI 手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
     if node_note:
         note += " " + node_note
     return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
-            "files": files, "note": note, "ms": round((time.time() - t0) * 1000)}
+            "files": files, "note": note, "network": {"env": net_env, "proxy": proxy_report},
+            "ms": round((time.time() - t0) * 1000)}
 
 
 # ---------------------------------------------------------------- serve

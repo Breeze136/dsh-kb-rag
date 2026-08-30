@@ -93,7 +93,11 @@ async function getBuf(url, jar = [], acceptPdf = true, depth = 0) {
     const head = buf.slice(0, 4096).toString("utf8");
     // Cloudflare JS 挑战:真实浏览器才能过,脚本无解,给出明确原因
     if (head.includes("Just a moment") || head.includes("cf-browser-verification") || head.includes("__cf_chl")) {
-      return { ok: false, reason: "Cloudflare JS 挑战(需真实浏览器手动下载),无法脚本绕过", url };
+      return { ok: false, reason: "Cloudflare JS 挑战(需真实浏览器执行 JS)", url };
+    }
+    // Akamai Bot Manager:bm-verify 令牌跟随后仍 403 Access Denied(需 JS 算 _abck cookie)
+    if (head.includes("Access Denied") || head.includes("akamai")) {
+      return { ok: false, reason: "Akamai 反爬(Access Denied,需真实浏览器)", url };
     }
     // MDPI BlockMetrics:meta-refresh 给 bm-verify token,带 cookie 再跟一次即得真 PDF
     const m = head.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["']\d+;\s*URL=['"]([^'"]+)["']/i);
@@ -102,7 +106,7 @@ async function getBuf(url, jar = [], acceptPdf = true, depth = 0) {
       return await getBuf(next, jar, acceptPdf, depth + 1);
     }
     if (acceptPdf) {
-      return { ok: false, reason: `landed on HTML (content-type=${ct}), likely paywall/not-pdf`, url };
+      return { ok: false, reason: "出版商返回 HTML 而非 PDF(付费墙/需订阅/反爬)", url };
     }
   }
   return { ok: true, buf, ct, isPdf };
@@ -215,8 +219,10 @@ for (const raw of dois) {
       }
     }
     if (!done) {
-      rec.error = rec.lastReason
-        || (landingBlocked ? `出版商落地页被反爬拦截(${landingBlocked}),请在浏览器中手动下载后入库` : "no PDF candidate found");
+      const cause = rec.lastReason
+        || (landingBlocked ? `落地页被反爬拦截(${landingBlocked})` : "无任何可下载源(无 OA 版本,Unpaywall/Crossref 均无 PDF 链接)");
+      const link = /^\d{4}\.\d{4,5}$/.test(d) ? `https://arxiv.org/abs/${d}` : `https://doi.org/${d}`;
+      rec.error = `${cause} —— 请用浏览器打开 ${link},在校园网/机构网络下下载 PDF,再用 kb_ingest 入库`;
     }
   } catch (e) {
     rec.error = String(e?.message || e);
