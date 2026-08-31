@@ -1,20 +1,20 @@
 # kb-rag 文献工具集
 
-配合 `dsh-kb-rag` 知识库插件使用的辅助脚本,都在本目录。数据在 `F:\Desktop\workspace\.kb\kb.sqlite`。
+配合 `dsh-kb-rag` 知识库插件使用的辅助脚本,都在本目录。数据默认在 `<工作区>\.kb\kb.sqlite`(可用参数/`--db` 指定)。
 
 ## 1. doi_pdf.mjs — DOI → 下载 PDF(核心工具)
 
 给定 DOI,自动找 PDF 并下载(**出版商正式版优先 → 开放获取兜底**)。**不依赖按钮位置**,靠标准 `citation_pdf_url` meta 标签 + Unpaywall + Crossref + 链接模式。
 
 ```powershell
-# 单个
-node F:\Desktop\workspace\tools\doi_pdf.mjs --out F:\Desktop\workspace\downloads "10.1038/nature06932"
+# 单个(相对路径示例,请替换为你自己的目录)
+node .\tools\doi_pdf.mjs --out downloads "10.1038/nature06932"
 
 # 多个
-node F:\Desktop\workspace\tools\doi_pdf.mjs --out F:\Desktop\workspace\downloads "10.1038/nature06932" "10.1038/nmat3223"
+node .\tools\doi_pdf.mjs --out downloads "10.1038/nature06932" "10.1038/nmat3223"
 
 # 从文件批量(一行一个 DOI)
-node F:\Desktop\workspace\tools\doi_pdf.mjs --file dois.txt
+node .\tools\doi_pdf.mjs --file dois.txt
 ```
 
 参数:
@@ -39,7 +39,7 @@ MDPI 的 `bm-verify` 令牌跟随尝试、Cloudflare/Akamai 挑战页识别(明�
 
 ## 2. 入库
 
-下载到 `F:\Desktop\workspace\downloads` 后,在 DSH 对话里说"把 downloads 目录入库"即可(模型调用 `kb_ingest`)。
+下载到 `downloads` 目录后,在 DSH 对话里说"把 downloads 目录入库"即可(模型调用 `kb_ingest`)。
 或直接给模型 DOI,让它一次性"下载 + 入库"。
 
 ## 3. 元数据修正(常用)
@@ -48,25 +48,25 @@ MDPI 的 `bm-verify` 令牌跟随尝试、Cloudflare/Akamai 挑战页识别(明�
 用 Crossref 权威数据一键修正:
 
 ```powershell
-python F:\Desktop\workspace\tools\kb_fix_meta.py 10.1038/nature06932
+# --db 默认 <当前目录>/.kb/kb.sqlite,可用 --db 指定
+python .\tools\kb_fix_meta.py 10.1038/nature06932
 # 同名多版本时精确指定路径子串:
-python F:\Desktop\workspace\tools\kb_fix_meta.py 10.1038/nmat3415 --like "ferroelectric memristor"
+python .\tools\kb_fix_meta.py 10.1038/nmat3415 --like "ferroelectric memristor"
 ```
 
 ## 4. 其它
 
 | 脚本 | 用途 |
 |---|---|
-| `kb_list.py` | 列出知识库全部文献清单(输出 `doc_list.txt`) |
+| `kb_list.py` | 列出知识库全部文献清单(输出 `doc_list.txt`,默认读 `<当前目录>/.kb/kb.sqlite`) |
 | `kb_cites.py` | 从库里文献的参考文献中抽取 Nature 系列引文(输出 `nature_cites.txt`) |
 | `kb_fix_meta.py` | 按 DOI 用 Crossref 修正元数据 |
 
-## 目录约定
+## 目录约定(示例)
 
 ```
-F:\Desktop\workspace\
+<工作区>\
 ├─ tools\           ← 本目录(脚本)
 ├─ downloads\       ← DOI 下载的 PDF 中转站
-├─ .kb\             ← 知识库(SQLite + 数据)
-└─ kb-rag-breeze136\  ← 插件源码副本(参考用)
+└─ .kb\             ← 知识库(SQLite + 数据)
 ```

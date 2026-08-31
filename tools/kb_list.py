@@ -5,7 +5,7 @@
 # 默认 db = 工作区下 .kb/kb.sqlite,输出 = 同目录 doc_list.txt
 import sqlite3, sys, os
 
-db = sys.argv[1] if len(sys.argv) > 1 else r"F:\Desktop\workspace\.kb\kb.sqlite"
+db = sys.argv[1] if len(sys.argv) > 1 else os.path.join(".kb", "kb.sqlite")
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "doc_list.txt")
 
 c = sqlite3.connect(db)

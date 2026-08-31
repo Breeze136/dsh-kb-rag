@@ -4,7 +4,8 @@
 #   python kb_cites.py [db路径]
 import sqlite3, re, sys, os
 
-DB = sys.argv[1] if len(sys.argv) > 1 else r"F:\Desktop\workspace\.kb\kb.sqlite"
+# 默认库路径：当前目录下 .kb（可用参数覆盖，如 python kb_cites.py ~/.kb/kb.sqlite）
+DB = sys.argv[1] if len(sys.argv) > 1 else os.path.join(".kb", "kb.sqlite")
 
 c = sqlite3.connect(DB)
 rows = c.execute("select text from chunks").fetchall()

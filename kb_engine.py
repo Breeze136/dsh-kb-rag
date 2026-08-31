@@ -51,7 +51,9 @@ CREATE TABLE IF NOT EXISTS chunks (
   section TEXT NOT NULL,
   weight REAL NOT NULL DEFAULT 1.0,
   seq INTEGER NOT NULL,
-  text TEXT NOT NULL
+  text TEXT NOT NULL,
+  para_start INTEGER,
+  para_end INTEGER
 );
 CREATE TABLE IF NOT EXISTS vecs (
   chunk_id INTEGER PRIMARY KEY,
@@ -64,6 +66,15 @@ CREATE TABLE IF NOT EXISTS cache (
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 """
+
+# 库结构（schema）版本：与引擎代码版本 VERSION 独立。
+# v1: docs.zotero_key；v2: chunks.para_start / para_end（段落定位，隐式元数据）。
+# PRAGMA user_version 记录库结构版本；破坏性变更需新增迁移块（见 docs/MIGRATION.md §4）。
+SCHEMA_VERSION = 2
+
+# 最近一次连接/迁移说明（cmd_stats 等据此给出迁移与健康提示；每次 connect 更新）
+_LAST_CONNECT = {"created": False, "from_version": None, "to_version": None,
+                 "actions": [], "backfilled_keys": 0, "logged": False}
 
 # ---------------------------------------------------------------- sectioning
 
@@ -157,7 +168,7 @@ def _promote_abstract(sectioned):
             continue
         if not any(s2 != "Front matter" for s2, _, _ in sectioned[i + 1:]):
             continue  # unbounded: the whole doc fell into front matter
-        for j, p in enumerate(paras):
+        for j, (pno, p) in enumerate(paras):
             if j == 0:
                 continue
             if 400 <= len(p) <= 3000:
@@ -171,13 +182,72 @@ def _promote_abstract(sectioned):
     return sectioned
 
 
+_REF_HEAD_RE = re.compile(r"(?m)^\s*(references|bibliography|参考文献|引用文献)\b", re.I)
+# 参考文献条目风格：'1. Author' / '1 Author' / '[1] Author'（Wiley） / '1Author'（紧贴式）
+_REF_ENTRY_BRACKET_RE = re.compile(r"(?m)^\s*\[\s*(\d{1,3})\s*\]\s+(?=\S)")
+
+
+def _ref_entry_count(text):
+    n = 0
+    for pat in (_REF_ENTRY_RE, _REF_ENTRY_TIGHT_RE, _REF_ENTRY_BRACKET_RE):
+        n += len(list(pat.finditer(text or "")))
+    return n
+
+
+def _find_ref_index(paragraphs):
+    """后置 References 兜底：在段落列表中按行级标题拆分。
+    返回 (新段落列表, 首个参考文献段的下标 或 None)。
+    两阶段：
+    1) 有标题：文档后半段中最后一个带 references/bibliography/参考文献 行首标题、
+       且标题之后出现序号条目的段（避免表格单元格里的 "references" 字样），在该行拆段；
+    2) 无标题：后半段中第一个序号条目高密度（≥2 条）的段视为 References 起点
+       （Wiley '[n]' / 常规 'n.' 风格且无标题的论文）。"""
+    n = len(paragraphs)
+    idx = None
+    for i, p in enumerate(paragraphs):
+        m = _REF_HEAD_RE.search(p)
+        if not m or i < n * 0.5:
+            continue                      # 只在文档后半段找
+        tail = p[m.start():] + "\n" + "\n".join(paragraphs[i + 1:i + 6])
+        if _ref_entry_count(tail) >= 1:
+            idx = i                        # 取最后一个同时满足条件的段
+    if idx is not None:
+        m = _REF_HEAD_RE.search(paragraphs[idx])
+        body = paragraphs[idx][:m.start()].strip()
+        refp = paragraphs[idx][m.start():].strip()
+        newp = []
+        if body:
+            newp.append(body)
+        newp.append(refp)
+        out = paragraphs[:idx] + newp + paragraphs[idx + 1:]
+        return out, idx + (1 if body else 0)
+    # 无标题阶段：文末【连续】序号条目高密度段（参考文献总在文末成片出现；
+    # 多栏排版的正文页偶发 [n] 行首，因不连续而被排除）
+    run_start = None
+    for i in range(n - 1, int(n * 0.5) - 1, -1):
+        if _ref_entry_count(paragraphs[i]) >= 2:
+            run_start = i
+        elif run_start is not None:
+            break
+    if run_start is not None and (n - run_start) >= 3:
+        return paragraphs, run_start
+    return paragraphs, None
+
+
 def chunk_document(full_text):
-    """Section-aware chunking; falls back to paragraph merging."""
+    """Section-aware chunking; falls back to paragraph merging.
+    返回 [(section, weight, text, para_start, para_end)]。
+    - 段落号为全局计数（从文献第一个段落到最后一个，References 除外），跨章节不重置；
+    - References（weight 0）保留入库供引文关联使用（检索时按 weight>0 排除）；
+    - 后置兜底：行级 references/bibliography/参考文献 标题之后的全部内容归为 References。"""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
-    sectioned = []  # (section, weight, [paragraphs])
+    paragraphs, ref_idx = _find_ref_index(paragraphs)
+    ref_para_no = (ref_idx + 1) if ref_idx is not None else None
+    sectioned = []  # (section, weight, [(para_no, text)])
     section, weight = "Front matter", 1.0
     buf = []
     structured = False
+    para_no = 0
 
     def flush():
         nonlocal section, weight, buf
@@ -186,62 +256,90 @@ def chunk_document(full_text):
         buf = []
 
     for p in paragraphs:
-        for j, seg in enumerate(split_inline_headings(p)):
-            if not seg:
-                continue
+        para_no += 1
+        segs = [(para_no, s) for s in split_inline_headings(p) if s]
+        for j, (pno, seg) in enumerate(segs):
             hit = match_section_prefix(seg, allow_long=(j > 0))
             if hit is not None:
                 structured = True
                 flush()
                 section, weight, rest = hit
                 if rest:
-                    buf.append(rest)
+                    buf.append((pno, rest))
                 continue
             if CAPTION_RE.match(seg):
                 structured = True
                 flush()
                 section, weight = "Figure/Table", 1.0
-                buf.append(seg)
+                buf.append((pno, seg))
                 flush()
                 section, weight = "Front matter", 1.0
                 continue
-            buf.append(seg)
+            buf.append((pno, seg))
     flush()
 
     if not structured:
-        return fallback_chunks(full_text)
+        return fallback_chunks(paragraphs, ref_idx=ref_idx)
 
     sectioned = _promote_abstract(sectioned)
 
     chunks = []
     for sec, w, paras in sectioned:
-        text = clean(" ".join(paras))
-        if len(text) < 40 or w <= 0:
-            continue
-        if len(text) > 1200:
-            chunks.extend((sec, w, piece) for piece in split_long(text))
+        ps, pe = paras[0][0], paras[-1][0]
+        if ref_para_no is not None and ps >= ref_para_no:
+            sec, w = "References", 0.0          # 后置兜底：标题之后全部归 References
+        # References 保留换行结构（引文条目按行切分）；其余章节照常 clean 压平
+        if sec == "References":
+            text = "\n".join(t for _, t in paras)
         else:
-            chunks.append((sec, w, text))
+            text = clean(" ".join(t for _, t in paras))
+        if len(text) < 40:
+            continue
+        if w <= 0 and sec != "References":
+            continue                     # 仅 References 保留（引文关联数据源），其余权重 0 章节丢弃
+        if len(text) > 1200:
+            chunks.extend((sec, w, piece, ps, pe) for piece in split_long(text))
+        else:
+            chunks.append((sec, w, text, ps, pe))
     return chunks
 
 
-def fallback_chunks(full_text, low=300, high=800):
-    """Paragraph merging with sentence-level splitting for oversized blocks."""
-    pieces = []
-    for p in (p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()):
+def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None):
+    """Paragraph merging with sentence-level splitting for oversized blocks.
+    返回 [(section, weight, text, para_start, para_end)]，段落号为全局序号。
+    ref_idx 非空时，其后的段落归入 References（weight 0，入库供引文关联）。"""
+    pieces = []                      # (para_no, text)
+    for i, p in enumerate(paragraphs, start=1):
+        if ref_idx is not None and i > ref_idx:
+            pieces.append((i, p))    # References 段落整段保留（不拆分）
+            continue
         if len(p) > high:
-            pieces.extend(split_long(p, limit=high))
+            pieces.extend((i, piece) for piece in split_long(p, limit=high))
         else:
-            pieces.append(p)
-    chunks, buf = [], ""
-    for p in pieces:
-        if len(buf) + len(p) + 1 > high and len(buf) >= low:
-            chunks.append(("Body", 1.0, clean(buf)))
-            buf = p
+            pieces.append((i, p))
+    chunks, buf = [], []             # buf: [(para_no, text)]
+    ref_buf = []
+
+    def buf_len():
+        return len(clean(" ".join(t for _, t in buf)))
+
+    for pno, p in pieces:
+        if ref_idx is not None and pno > ref_idx:
+            ref_buf.append((pno, p))
+            continue
+        if buf and buf_len() + len(p) + 1 > high and buf_len() >= low:
+            chunks.append(("Body", 1.0, clean(" ".join(t for _, t in buf)),
+                           buf[0][0], buf[-1][0]))
+            buf = [(pno, p)]
         else:
-            buf = (buf + " " + p).strip()
+            buf.append((pno, p))
     if buf:
-        chunks.append(("Body", 1.0, clean(buf)))
+        chunks.append(("Body", 1.0, clean(" ".join(t for _, t in buf)),
+                       buf[0][0], buf[-1][0]))
+    if ref_buf:
+        # References 保留换行结构（引文条目按行切分）
+        chunks.append(("References", 0.0, "\n".join(t for _, t in ref_buf),
+                       ref_buf[0][0], ref_buf[-1][0]))
     return chunks
 
 
@@ -348,10 +446,19 @@ def _usable_title(s):
     s = _WORD_PREFIX_RE.sub("", s).strip()
     if not s or s.lower() in _TITLE_BAD:
         return None
+    s = _FN_ZLIB_RE.sub("", s).strip()   # 剥 "(Z-Library)" 等书库尾巴
+    if not s or s.lower() in _TITLE_BAD:
+        return None
+    # 封面大字号行有时把标题重复两遍（如 "Advanced Computing ... Advanced Computing ..."）
+    half = len(s) // 2
+    if len(s) >= 24 and s[:half].strip() == s[half:].strip():
+        s = s[:half].strip()
     if _JUNK_TITLE_RE.search(s):
         return None
     words = [w for w in s.split() if re.search(r"[A-Za-z]", w)]
-    if len(words) < 2 and not re.search(r"[A-Za-z]{4,}", s):
+    cjk_n = len(re.findall(r"[\u4e00-\u9fff]", s))
+    # 有效标题：≥2 个拉丁词，或 ≥4 个连续拉丁字母，或 ≥4 个汉字（支持纯中文标题，如学位论文/中文期刊）
+    if len(words) < 2 and not re.search(r"[A-Za-z]{4,}", s) and cjk_n < 4:
         return None
     if _DIGITONLY_LINE.match(s):
         return None
@@ -369,7 +476,8 @@ def _first_page_title(text):
         if _HEAD_SKIP_RE.match(l) or _DIGITONLY_LINE.match(l):
             continue
         words = [w for w in l.split() if re.search(r"[A-Za-z]", w)]
-        if len(words) >= 2 or re.search(r"[A-Za-z]{4,}", l):
+        cjk_n = len(re.findall(r"[\u4e00-\u9fff]", l))
+        if len(words) >= 2 or re.search(r"[A-Za-z]{4,}", l) or cjk_n >= 6:
             return l
     return None
 
@@ -396,6 +504,59 @@ def _clean_year(value):
 _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
 _ARXIV_RE = re.compile(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:\s*)(\d{4}\.\d{4,5})", re.I)
 
+# ---- 文件名命名习惯解析（Zotero / 下载站 / 中文习惯） ----
+# "Author - YYYY - Title.pdf"（Zotero 导出 / 常规下载站）
+_FN_AUTHOR_YEAR_RE = re.compile(
+    r"^(?P<author>.+?)\s*-\s*(?P<year>(?:19|20)\d{2})\s*-\s*(?P<title>.+)$")
+# 尾巴 "(Z-Library)" / "(z-library.sk, 1lib.sk, z-lib.sk)"
+_FN_ZLIB_RE = re.compile(r"\s*\([^()]*z[-_ ]?lib[^()]*\)\s*$", re.I)
+# 尾巴 "(作者1, 作者2)"（下载站书库命名，如 "(Ashim Kumar Bain, Prem Chand)"）
+_FN_TRAIL_AUTHORS_RE = re.compile(r"\s*\([^()]*,[^()]*\)\s*$")
+
+
+def _filename_title(stem):
+    """从文件名提取标题：剥 '作者 - 年份 - ' 前缀、(Z-Library) 与 (作者1,作者2) 尾巴；
+    中文习惯 '作者-标题'（无年份）且标题部分以汉字为主时同样拆分。"""
+    t = stem.strip()
+    m = _FN_AUTHOR_YEAR_RE.match(t)
+    if m:
+        t = m.group("title")
+    else:
+        parts = t.split("-", 1)
+        if len(parts) == 2:
+            a, tt = parts[0].strip(), parts[1].strip()
+            if (tt and len(re.findall(r"[\u4e00-\u9fff]", tt)) >= 6
+                    and a and len(a) <= 20):
+                t = tt
+    t = _FN_ZLIB_RE.sub("", t)
+    t = _FN_TRAIL_AUTHORS_RE.sub("", t)
+    t = re.sub(r"^[\s\-_]+|[\s\-_]+$", "", t)
+    return t or stem.strip()
+
+
+def _filename_author(stem):
+    """从文件名提取作者（保守）：'作者 - 年份 - 标题'、中文 '作者-标题'、
+    '(作者1, 作者2)'（下载站书库）、'(作者)'（中文单作者）。"""
+    m = _FN_AUTHOR_YEAR_RE.match(stem)
+    if m:
+        a = re.sub(r"\s+", " ", m.group("author").strip())
+        return a or None
+    parts = stem.split("-", 1)
+    if len(parts) == 2:
+        a, t = parts[0].strip(), parts[1].strip()
+        if (t and len(re.findall(r"[\u4e00-\u9fff]", t)) >= 6 and a and len(a) <= 20):
+            return a
+    s = _FN_ZLIB_RE.sub("", stem)                      # 先剥书库尾巴
+    m2 = re.search(r"\(\s*([^()]*,[^()]*)\s*\)\s*$", s)   # "(作者1, 作者2)"
+    if m2:
+        names = [n.strip().strip("，,;") for n in m2.group(1).split(",") if n.strip()]
+        if names and all(2 <= len(n) <= 40 for n in names):
+            return "; ".join(names[:6])
+    m3 = re.search(r"\(\s*([\u4e00-\u9fff]{2,6})\s*\)", s)   # "(赵巍胜)"
+    if m3:
+        return m3.group(1)
+    return None
+
 
 def extract_meta(path, text, pdf_meta=None):
     title = authors = journal = doi = None
@@ -404,8 +565,8 @@ def extract_meta(path, text, pdf_meta=None):
     if pdf_meta:
         title = _usable_title(pdf_meta.get("title"))
         authors = _clean_authors(pdf_meta.get("author"))
-        m = re.search(r"(?:D:)?(19|20)\d{2}", pdf_meta.get("creationDate") or "")
-        year = _clean_year(m.group(0)[-4:] if m else None)
+        # 年份不取 creationDate：PDF 被重新编码时该日期是"文件生成时间"而非出版年份（实测 2018 文献被误取 2026）。
+        # 年份一律从首页/正文前段提取（下方 year 回退逻辑），并经过 _clean_year 合理性校验。
         page1 = pdf_meta.get("_page1_text") or ""
         if not title:
             ft = _usable_title(pdf_meta.get("_page1_title"))
@@ -413,8 +574,18 @@ def extract_meta(path, text, pdf_meta=None):
                 title = ft
     if not title:
         title = _first_page_title(page1 or text)
+    stem = Path(path).stem
     if not title:
-        title = _usable_title(Path(path).stem) or Path(path).stem
+        # 文件名回退：剥 '作者 - 年份 - ' 前缀与 (Z-Library)/(作者1,作者2) 尾巴，兼容中文 '作者-标题'
+        title = _usable_title(_filename_title(stem)) or stem
+    if not authors:
+        # 作者回退：文件名 '作者 - 年份 - 标题' / 中文 '作者-标题' / '(作者1,作者2)' / '(作者)'（保守）
+        authors = _filename_author(stem)
+    if title and len(title.split()) < 3 and len(title) <= 24:
+        # 短/过泛标题偏好更长候选（如 pdf_meta 只剩 "Ferroelectrics"，文件名有完整书名）
+        ft2 = _usable_title(_filename_title(stem))
+        if ft2 and len(ft2.split()) >= 3 and len(ft2) > len(title):
+            title = ft2
 
     # Identifier extraction, scoped to the title page and stopping at the
     # bibliography: a DOI here is the paper's own, not a reference's.
@@ -429,10 +600,49 @@ def extract_meta(path, text, pdf_meta=None):
         ma = _ARXIV_RE.search(page1 or text[:3000])
         if ma:
             doi = "10.48550/arXiv." + ma.group(1)
+    # ---- 年份级联（优先级从可靠到兜底）----
+    # ① 文件名年份（Zotero 命名习惯最可靠，如 "Kirkland - 2020 - ..."）
     if year is None:
-        my = re.search(r"\b(19|20)\d{2}\b", scope)
-        year = _clean_year(my.group(0)) if my else None
+        my = _FN_AUTHOR_YEAR_RE.match(stem)
+        if my:
+            year = _clean_year(my.group("year"))
+    # ② 正文上下文年份（© / Copyright / Vol / ISSN / received 等日期语境的年份优先）
+    if year is None:
+        ctx = re.search(
+            r"(?:©|\(c\)|copyright|vol(?:ume)?\.?|issn|isbn|received|accepted|published)\b"
+            r"[^\n]{0,60}?\b(19|20)\d{2}", scope, re.I)
+        if ctx:
+            year = _clean_year(ctx.group(1))
+    # ③ 括号年份（(2008) / [2008]，常见于期刊页眉/引证信息）
+    if year is None:
+        yp = re.search(r"[\(\[]\s*(19|20)\d{2}\s*[\)\]]", scope)
+        if yp:
+            year = _clean_year(yp.group(1))
+    # ④ 首个裸年份（最后手段）
+    if year is None:
+        my2 = re.search(r"\b(19|20)\d{2}\b", scope)
+        year = _clean_year(my2.group(0)) if my2 else None
+    # ⑤ 过老的裸年份通常是正文引述（如 "in 1971 Leon Chua..."），用 creationDate 修正
+    #    （仅当 creationDate 落在合理年代，避免重编码日期污染）
+    if year is not None and year < 1990:
+        cd = _creation_year(pdf_meta)
+        if cd is not None and cd >= 1990:
+            year = cd
+    # ⑥ 完全无年份信号时 creationDate 兜底（书籍/扫描件无文字年份时；容忍重编码风险）
+    if year is None:
+        year = _creation_year(pdf_meta)
     return title, authors, year, journal, doi
+
+
+def _creation_year(pdf_meta):
+    """从 PDF creationDate 提取年份（仅作兜底，不作首选）。"""
+    try:
+        m = re.search(r"(?:D:)?(19|20)\d{2}", (pdf_meta or {}).get("creationDate") or "")
+        if m:
+            return _clean_year(m.group(0)[-4:])
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------- storage
@@ -441,15 +651,98 @@ def extract_meta(path, text, pdf_meta=None):
 def connect(kb_root):
     root = Path(kb_root)
     root.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(str(root / "kb.sqlite"))
+    db_file = root / "kb.sqlite"
+    created = not db_file.exists()
+    db = sqlite3.connect(str(db_file))
     db.row_factory = sqlite3.Row
-    db.executescript(SCHEMA)
-    try:
-        db.execute("ALTER TABLE docs ADD COLUMN zotero_key TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    db.execute("DELETE FROM vecs WHERE chunk_id NOT IN (SELECT id FROM chunks)")
+    info = _migrate(db, created)
+    info["db"] = str(db_file.resolve())
+    _LAST_CONNECT.update(info)
+    if not info["logged"]:
+        _log_migration(info)
+        info["logged"] = True
+    if os.environ.get("KB_SQLITE_WAL") == "1":   # 可选 WAL：同步 .kb 目录时保持默认 DELETE 模式更安全
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+        except Exception:
+            pass
     return db
+
+
+def _log_migration(info):
+    """迁移/建库日志。走 stderr：引擎 stdout 是 JSON 协议线，不能混入日志。"""
+    if info["created"]:
+        _log("[kb-rag] 知识库已创建（schema v%s）: %s" % (info["to_version"], info.get("db")))
+    elif info["from_version"] != info["to_version"]:
+        _log("[kb-rag] 知识库已自动迁移 v%s -> v%s：%s" % (
+            info["from_version"], info["to_version"], "、".join(info["actions"]) or "无"))
+        if info.get("backfilled_keys"):
+            _log("[kb-rag] 已按 Zotero 存储路径回填 %d 个 zotero_key" % info["backfilled_keys"])
+    elif info.get("backfilled_keys"):
+        _log("[kb-rag] 已按 Zotero 存储路径回填 %d 个 zotero_key" % info["backfilled_keys"])
+
+
+def _log(msg):
+    try:
+        print(msg, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def _migrate(db, created):
+    """版本化迁移：PRAGMA user_version 门控，幂等，纯加法优先。
+
+    - 首次建库：一次建全表/索引并写版本号（不残留半状态）。
+    - 旧库升级：v0 -> v1 补齐缺失表/列，回填 zotero_key，清理孤儿向量。
+    - 未来破坏性变更：新增 `if cur < N` 迁移块（重建表），见 docs/MIGRATION.md §4。
+    返回迁移说明：{created, from_version, to_version, actions, backfilled_keys}。
+    """
+    cur = db.execute("PRAGMA user_version").fetchone()[0] or 0
+    info = {"created": created, "from_version": cur, "to_version": SCHEMA_VERSION,
+            "actions": [], "backfilled_keys": 0, "logged": False}
+    if created:
+        # 首次建库：一次建全表 + 索引，写版本号
+        db.executescript(SCHEMA)
+        db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+        db.commit()
+        info["actions"].append("create_full_schema")
+        return info
+    # v0 -> v1：旧版（1.0.x ~ 1.4.x）库，补齐缺失的表/列
+    if cur < 1:
+        db.executescript(SCHEMA)                     # 幂等：缺的表/索引补齐，已存在的不动
+        try:
+            db.execute("ALTER TABLE docs ADD COLUMN zotero_key TEXT")
+            info["actions"].append("add docs.zotero_key")
+        except sqlite3.OperationalError:
+            pass                                     # 列已存在
+        db.execute("PRAGMA user_version = 1")
+    # v1 -> v2：chunks 段落定位列（旧数据为 NULL，重入库后才有段号）
+    if cur < 2:
+        for col in ("para_start", "para_end"):
+            try:
+                db.execute("ALTER TABLE chunks ADD COLUMN %s INTEGER" % col)
+                info["actions"].append("add chunks.%s" % col)
+            except sqlite3.OperationalError:
+                pass                                 # 列已存在
+        db.execute("PRAGMA user_version = 2")
+    # zotero_key 回填：旧行按 Zotero storage 路径提取附件 key（幂等，只补 NULL）
+    n = db.execute(
+        "SELECT COUNT(*) AS n FROM docs WHERE zotero_key IS NULL AND path LIKE ?",
+        ("%\\Zotero\\storage\\%",)).fetchone()["n"]
+    if n:
+        db.execute(
+            "UPDATE docs SET zotero_key = substr(path, instr(path, '\\storage\\') + 9, 8) "
+            "WHERE zotero_key IS NULL AND path LIKE ?",
+            ("%\\Zotero\\storage\\%",))
+        info["backfilled_keys"] = n
+        info["actions"].append("backfill zotero_key")
+    # 孤儿向量清理（连接时兜底）
+    db.execute("DELETE FROM vecs WHERE chunk_id NOT IN (SELECT id FROM chunks)")
+    info["actions"].append("cleanup orphan vecs")
+    # 显式提交：Python sqlite3 的 DML 在隐式事务中，close() 会回滚未提交修改
+    # （backfill/孤儿清理必须在命令处理前落盘；PRAGMA user_version 不受此影响但一并提交无害）
+    db.commit()
+    return info
 
 
 # ---------------------------------------------------------------- embeddings
@@ -603,7 +896,7 @@ def _embed_new_chunks(db, doc_id):
     if get_embedder() is None:
         return 0
     rows = db.execute(
-        "SELECT id, text FROM chunks WHERE doc_id = ? AND id NOT IN "
+        "SELECT id, text FROM chunks WHERE doc_id = ? AND weight > 0 AND id NOT IN "
         "(SELECT chunk_id FROM vecs)", (doc_id,)).fetchall()
     if not rows:
         return 0
@@ -651,12 +944,12 @@ def _ingest_file(db, f, force, files, totals, meta=None):
             zotero_key = meta.get("_zotero_key")
         chunks = chunk_document(text)
         seen, uniq = set(), []
-        for sec, w, t in chunks:
+        for sec, w, t, ps, pe in chunks:
             h = hashlib.sha1(t.encode("utf-8")).hexdigest()
             if h in seen:
                 continue
             seen.add(h)
-            uniq.append((sec, w, t))
+            uniq.append((sec, w, t, ps, pe))
         chunks = uniq
         st = f.stat()
         if row is not None:
@@ -679,8 +972,9 @@ def _ingest_file(db, f, force, files, totals, meta=None):
             doc_id = cur.lastrowid
             status = "added"
         db.executemany(
-            "INSERT INTO chunks(doc_id,section,weight,seq,text) VALUES(?,?,?,?,?)",
-            [(doc_id, sec, w, i, t) for i, (sec, w, t) in enumerate(chunks)])
+            "INSERT INTO chunks(doc_id,section,weight,seq,text,para_start,para_end) "
+            "VALUES(?,?,?,?,?,?,?)",
+            [(doc_id, sec, w, i, t, ps, pe) for i, (sec, w, t, ps, pe) in enumerate(chunks)])
         n_vec = _embed_new_chunks(db, doc_id)
         totals[status] += 1
         totals["chunks"] += len(chunks)
@@ -838,6 +1132,65 @@ def rrf_fuse(kw_ranked, v_ranked):
 
 _FIGREF_RE = re.compile(r"(?:fig(?:ure|s)?\.?\s*|图\s*)(\d+)([a-zA-Z])?(?!\d)", re.I)
 _CAPTION_NUM_RE = re.compile(r"\d+")
+_INCITE_RE = re.compile(r"\[(\d{1,3})(?:\s*[–\-]\s*(\d{1,3}))?\]")
+_REF_ENTRY_RE = re.compile(r"(?m)^\s*(\d{1,3})\s*(?:[\.\)]\s+|\s+)(?=\S)")
+_REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(\d{1,3})(?=[A-Z])")
+
+
+def _doc_references(db, doc_id, cache=None):
+    """该文献 References 分块拼接文本（引文关联数据源）；带 per-search 缓存。"""
+    key = ("refs", doc_id)
+    if cache is not None and key in cache:
+        return cache[key]
+    parts = [r["text"] for r in db.execute(
+        "SELECT text FROM chunks WHERE doc_id = ? AND section = 'References' ORDER BY seq",
+        (doc_id,)).fetchall()]
+    text = "\n".join(parts)
+    if cache is not None:
+        cache[key] = text
+    return text
+
+
+def _parse_references(text, cap=400):
+    """References 文本 -> {编号: 引文文本}。支持 '1. ' / '1 ' / '[1] ' / '1Author' 四种风格。"""
+    if not text:
+        return {}
+    refs = {}
+    for pat in (_REF_ENTRY_RE, _REF_ENTRY_BRACKET_RE, _REF_ENTRY_TIGHT_RE):
+        ms = list(pat.finditer(text))
+        if len(ms) < 2 and len(text) > 200:
+            continue  # 单条匹配不可靠，跳过该模式
+        for i, m in enumerate(ms):
+            end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
+            body = text[m.end():end].strip()
+            body = re.sub(r"\s+", " ", body)
+            if body:
+                refs[int(m.group(1))] = body[:cap]
+        if refs:
+            return refs
+    return refs
+
+
+def _cited_refs(db, doc_id, chunk_text, cache):
+    """取本块正文引用的 [n] 对应参考文献条目（含范围展开），供引文关联建议使用。"""
+    refs = _parse_references(_doc_references(db, doc_id, cache))
+    if not refs:
+        return []
+    nums = []
+    for m in _INCITE_RE.finditer(chunk_text or ""):
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else a
+        if b > a + 50:
+            b = a + 50
+        nums.extend(range(a, b + 1))
+    out, seen = [], set()
+    for n in nums:
+        if n in refs and n not in seen:
+            seen.add(n)
+            out.append({"n": n, "text": refs[n]})
+        if len(out) >= 8:
+            break
+    return out
 
 
 def _doc_captions(db, doc_id):
@@ -966,8 +1319,11 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                   related_flag=True, related_k=5):
     t0 = time.time()
     where, args = build_where(filters)
+    # References（weight 0）只作引文关联数据源，不参与检索
+    where = (where + " AND c.weight > 0") if where else " WHERE c.weight > 0"
     rows = db.execute(
-        "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, d.title, d.authors, "
+        "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, "
+        "c.para_start, c.para_end, d.title, d.authors, "
         "d.year, d.journal, d.doi, d.path, d.kind, d.zotero_key, v.vec "
         "FROM chunks c JOIN docs d ON d.id = c.doc_id "
         "LEFT JOIN vecs v ON v.chunk_id = c.id" + where, args).fetchall()
@@ -1075,9 +1431,14 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "doi": r["doi"],
             "zotero_key": r["zotero_key"] or None,
             "section": r["section"],
+            "para": [r["para_start"], r["para_end"]] if r["para_start"] is not None else None,
             "score": round(score, 4),
             "snippet": make_snippet(r["text"], best_term[i] if best_term else None, snippet_w),
         }
+        # 引文关联：本块正文引用 [n] -> 该文献 References 对应条目（隐式元数据，按需暴露）
+        cites = _cited_refs(db, r["doc_id"], r["text"], caption_cache)
+        if cites:
+            entry["citations"] = cites
         if r["section"] != "Figure/Table":
             fm = _FIGREF_RE.search(r["text"])
             if fm:
@@ -1177,14 +1538,27 @@ def cmd_stats(req):
         chars_n = db.execute(
             "SELECT COALESCE(SUM(LENGTH(text)),0) AS n FROM chunks").fetchone()["n"]
         vecs_n = db.execute("SELECT COUNT(*) AS n FROM vecs").fetchone()["n"]
+        orphan_chunks = db.execute(
+            "SELECT COUNT(*) AS n FROM chunks WHERE doc_id NOT IN (SELECT id FROM docs)"
+        ).fetchone()["n"]
+        missing_vecs = db.execute(
+            "SELECT COUNT(*) AS n FROM chunks c LEFT JOIN vecs v ON v.chunk_id = c.id "
+            "WHERE v.chunk_id IS NULL AND c.weight > 0").fetchone()["n"]
         rows = db.execute(
             "SELECT path,title,authors,year,kind,chunk_count,indexed_at "
             "FROM docs ORDER BY indexed_at DESC LIMIT 20").fetchall()
     finally:
         db.close()
+    health = {"orphan_chunks": orphan_chunks, "missing_vecs": missing_vecs,
+              "ok": orphan_chunks == 0 and missing_vecs == 0}
+    migration = dict(_LAST_CONNECT)
+    migration.pop("logged", None)
     return {
         "ok": True,
         "db": str((Path(req.get("kb_root") or ".kb") / "kb.sqlite").resolve()),
+        "schema_version": SCHEMA_VERSION,
+        "migration": migration,
+        "health": health,
         "docs": docs_n,
         "chunks": chunks_n,
         "vectors": vecs_n,
@@ -1460,7 +1834,9 @@ def _candidate_sources(ident):
     if html_pdf and html_pdf != pub:
         out.append((html_pdf, doi))
     try:
-        u = "https://api.unpaywall.org/v2/%s?email=kbrag.demo@gmail.com" % urllib.parse.quote(doi)
+        u = ("https://api.unpaywall.org/v2/%s?email=%s"
+             % (urllib.parse.quote(doi),
+                os.environ.get("UNPAYWALL_EMAIL") or "kbrag.demo@gmail.com"))
         req = urllib.request.Request(u, headers={"User-Agent": "kb-rag/1.0"})
         with urllib.request.urlopen(req, timeout=25) as r:
             d = json.loads(r.read().decode("utf-8"))

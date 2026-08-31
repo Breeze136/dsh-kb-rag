@@ -1,4 +1,4 @@
-# kb-rag — Local Literature Knowledge-Base RAG (DSH Plugin)
+﻿# kb-rag — Local Literature Knowledge-Base RAG (DSH Plugin)
 
 <p align="center">
   <b>把脑子里的模糊记忆,变成一条能点开的文献坐标。</b><br/>
@@ -61,34 +61,39 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 
 ## Quick Start
 
-> **最新版本 v1.5.0** — 下载：`npm install dsh-kb-rag@latest`　安装：`dsh plugin --profile web add dsh-kb-rag@latest`
+> **最新版本 v1.6.0** — 下载：`npm install dsh-kb-rag@latest`　安装：`dsh plugin --profile web add dsh-kb-rag@latest`
 
-See [QUICKSTART.md](QUICKSTART.md). One command via npx:
+**推荐：npx 一键装环境 + 激活（无需先安装包）**
 
 ```bash
+# ✅ 正确：--package dsh-kb-rag 指明命令来自哪个包
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-Or one-click from a clone:
+> ⚠️ **常见坑**：裸写 `npx dsh-kb-rag-install` 会失败（npx 会去找一个**名为 `dsh-kb-rag-install` 的包**，注册表里不存在 → E404）。必须带 `--package dsh-kb-rag` 和 `-c`。Windows 下 bash 风格参数（`--profile`/`--models`/`--dry-run`）会被自动翻译，全平台通用；`--dry-run` 可先演练。
+
+安装器一条链完成：Python 依赖（`--mirror` pip 镜像）→ 引擎冒烟 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 激活（`--profile <name>`）→ 可选 `--models` 预下载模型（尊重 `HF_ENDPOINT`）。
+
+**也可从源码一键安装：**
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
-./npm-package/scripts/install.sh        # Windows: install.cmd (or npm-package\scripts\install.ps1)
+./npm-package/scripts/install.sh        # Windows: install.cmd（或 npm-package\scripts\install.ps1）
 ```
 
-The installer chains everything: Python deps (`--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activate (`--profile <name>`) → optional `--models` pre-download (`HF_ENDPOINT` respected). `--dry-run` rehearses without installing.
+**手动三步（老式动态插件，一般用户用上面两条即可）：**
 
-Manual three steps:
+1. 安装 Python 依赖（见 requirements.txt）
+2. 把 `kb_engine.py` 放到 DSH 会话工作区根目录
+3. 通过 `cordis_define` 加载 `plugin/host.js` 与 `plugin/client.js`，运行后直接对话（首次检索会询问查询范围）
 
-1. Install Python dependencies (see requirements.txt)
-2. Place `kb_engine.py` at the DSH session workspace root
-3. Load `plugin/host.js` and `plugin/client.js` via `cordis_define`, run, then just chat (the first search asks for the query scope)
+> 装完务必**重启 DSH 并开新会话**（工具在会话创建时注入，老会话不会自动获得）。升级旧版：在 profile 目录 `npm install dsh-kb-rag@latest`，旧 `.kb` 库自动迁移（schema 版本化，见 `docs/MIGRATION.md`）。更多常见坑见 [npm-package/README.md](npm-package/README.md) 的 Troubleshooting 表。
 
 ## npm Static Package (for other Harness users)
 
 Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)), and indexed on the [dsh.so registry](https://www.dsh.so/artifact/kb-rag/) (security scan: **passed**).
 
-> **最新版本 v1.5.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
 
 ### Option 1 — one command (recommended, DSH profiles)
 
@@ -101,7 +106,7 @@ dsh plugin --profile web add dsh-kb-rag
 Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
 
 - **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv, off by default; normally it only logs the command).
-- **One-shot installer**: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` runs the bundled `scripts/install.ps1` / `scripts/install.sh` (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot.
+- **One-shot installer**: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"` runs the bundled `scripts/install.ps1` / `scripts/install.sh` (`node_modules/dsh-kb-rag/scripts/`) — Python deps, engine smoke test, pnpm, plugin activation, optional model pre-download in one shot. (⚠️ 裸 `npx dsh-kb-rag-install` 会失败，必须带 `--package dsh-kb-rag`，见上方 Quick Start 坑提示。)
 
 Then restart DSH and open a new session — the 9 tools register automatically.
 
