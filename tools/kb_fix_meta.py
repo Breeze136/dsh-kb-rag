@@ -3,9 +3,12 @@
 # 用法:
 #   python kb_fix_meta.py <DOI> [<DOI> ...] [--like 路径子串]
 #     --like: 只更新 path 中包含该子串的文档(用于同一标题多个版本时精确定位);省略则按 path 中英文标题自动匹配。
-import sqlite3, json, sys, urllib.request, urllib.parse, re
+import sqlite3, json, sys, urllib.request, urllib.parse, re, os
 
-DB = r"F:\Desktop\workspace\.kb\kb.sqlite"
+# 默认库路径：当前目录下 .kb（可用参数 --db 覆盖）
+DB = os.path.join(".kb", "kb.sqlite")
+if "--db" in sys.argv:
+    DB = sys.argv[sys.argv.index("--db") + 1]
 
 def slug(s):
     s = re.sub(r"[^a-zA-Z0-9 ]+", " ", (s or "").lower())

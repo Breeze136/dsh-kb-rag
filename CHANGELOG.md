@@ -1,4 +1,15 @@
-# Changelog
+﻿# Changelog
+
+## [1.6.0] - 版本化迁移 + 元数据质量修复 + 段落定位与引文关联
+
+- **库结构版本化迁移**：`PRAGMA user_version` 门控替代临时 ALTER（详见 `docs/MIGRATION.md`）；首次建库一次建全表+索引并写版本号；旧库 v0→v1 自动补齐表/列并回填 `zotero_key`；**v1→v2 新增 `chunks.para_start/para_end`（段落定位，旧行 NULL）**；迁移显式 `commit()`
+- **段落定位（隐式元数据）**：`chunk_document`/`fallback_chunks` 记录全局段落号；检索结果带 `para` 字段，默认不渲染，供"这句在文献第几段"追问与点开文献定位（详见 `docs/OUTPUT-FORMAT.md`）
+- **References 保留 + 引文关联**：References（weight 0）入库供引文关联（检索按 `weight>0` 排除）；References 检测两级（行首标题 / 文末连续序号段，支持 `n.` `[n]` `nAuthor` 风格）；正文 `[n]` 引用 → 该文献引文条目，检索结果带 `citations` 字段（实测：结构化论文可解析；无标题栏排 PDF 部分解析，见 OUTPUT-FORMAT §6）
+- **迁移与健康提示**：连接时迁移日志走 stderr；`kb_stats` 返回 `schema_version` / `migration` / `health`
+- **元数据修复**：纯中文标题支持（≥4 汉字）；年份级联（文件名 → ©/Copyright/Vol → 括号 → 裸年份 → creationDate 兜底 + <1990 修正）；文件名命名习惯解析（作者-年份-标题 / Z-Library / (作者1,作者2) / 中文 作者-标题）；短标题偏好 + 封面重复去重
+- **发布包隐私**：移除 npm-package 与 tools/ 中的本地绝对路径与硬编码库路径；Unpaywall 邮箱改 `UNPAYWALL_EMAIL` 可配置
+- **README 安装命令补全**：明确 `npx` 必须带 `--package dsh-kb-rag`（裸命令 E404）、`npm install` 在 profile 目录执行、新增 Troubleshooting 表
+- 可选 `KB_SQLITE_WAL=1` 开启 WAL（默认关闭）
 
 ## [1.5.0] - Zotero 集成 + 文件路径显示
 

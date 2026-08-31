@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 // doi_pdf.mjs — 给定 DOI,自动解析并下载 PDF(优先 OA,其次校园网订阅,靠 citation_pdf_url meta 而非按钮位置)
 // 用法:
 //   node doi_pdf.mjs "10.1038/s41586-018-0770-2" "10.1063/1.2753390"
 //   node doi_pdf.mjs --file dois.txt
-//   node doi_pdf.mjs --out "F:\Desktop\workspace\downloads" 10.xxxx/yyyy
+//   node doi_pdf.mjs --out "downloads" 10.xxxx/yyyy
 // 输出:每个 DOI 一行 JSON {doi, ok, source, file, title, error}
 
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";

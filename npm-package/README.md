@@ -1,4 +1,4 @@
-# dsh-kb-rag
+﻿# dsh-kb-rag
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **最新版本 v1.5.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -33,27 +33,38 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 
 ## Install & Enable
 
-### Option 1 — one command (recommended, DSH profiles)
+Three ways — pick **one**. After installing: **restart DSH and open a new session** (tools are injected at session creation).
 
-The package declares `dsh.bundle`, so `dsh plugin add` installs **and** activates it in one step:
+### Option 1 — `dsh plugin` one-liner (recommended, DSH profiles)
+
+The package declares `dsh.bundle`, so this installs **and** activates it in one step:
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag
 ```
 
-Requires pnpm on PATH (the official DSH plugin flow uses pnpm). Python dependencies are then handled two ways:
+> Requires `pnpm` on PATH (the official DSH plugin flow uses pnpm). Install it once with `npm install -g pnpm` if missing.
 
-- **Zero-config**: set `KB_AUTO_PIP=1` in the host environment and restart DSH — the plugin pip-installs missing packages itself (fixed argv; off by default, normally it only logs the command).
-- **One-shot installer (npx)**: run the installer shipped inside the package without installing anything first:
+### Option 1b — one-shot environment installer via npx (no prior install needed)
+
+Runs the bundled installer (`scripts/install.ps1` / `scripts/install.sh`) straight from the npm registry:
+Python deps → engine smoke test → Node/pnpm check → `dsh plugin add` activation → optional model pre-download.
 
 ```bash
+# ✅ correct — `--package dsh-kb-rag` tells npx which package provides the command
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-  Or, when the package is already installed, run the bundled script directly:
+> ⚠️ **Common mistake**: a bare `npx dsh-kb-rag-install` **fails** — npx looks for a *package named* `dsh-kb-rag-install` on the registry (which doesn't exist). You must use `--package dsh-kb-rag` (and `-c` to run the bin inside that package's context).
+>
+> Bash-style flags (`--profile`, `--models`, `--dry-run`, `--mirror`) work on every OS — the entry translates them for Windows PowerShell. Add `--dry-run` to rehearse without changing anything.
+
+### Option 2 — run the bundled script directly (package already installed)
+
+From the deployment/profile directory where you installed the package:
 
 ```powershell
-# Windows (from the deployment/profile directory where you installed the package)
+# Windows
 powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scripts\install.ps1
 ```
 ```bash
@@ -61,21 +72,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File node_modules\dsh-kb-rag\scri
 ./node_modules/dsh-kb-rag/scripts/install.sh
 ```
 
-  It chains Python deps (`-Mirror` / `--mirror` for a pip mirror) → engine smoke test → Node/pnpm check (installs pnpm if missing) → `dsh plugin add` activation (`-Profile` / `--profile`) → optional model pre-download (`-Models` / `--models`). Add `-DryRun` / `--dry-run` to rehearse. (Via `npx`, bash-style flags like `--profile` work on every OS — the entry translates them for Windows.)
+Flags (Windows / bash): `-Mirror`/`--mirror` (pip mirror), `-Profile`/`--profile`, `-Models`/`--models`, `-DryRun`/`--dry-run`.
 
-Then restart DSH and open a new session — the 9 tools register automatically.
+### Option 3 — manual `npm install` (bring your own activation)
 
-### Option 2 — plugin marketplace (no terminal)
+Run **inside the DSH profile/deployment directory** (this is where the plugin loader resolves packages from):
+
+```bash
+cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.0 to pin
+```
+
+Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
+
+### Option 4 — plugin marketplace (no terminal)
 
 Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once; its Settings "plugin marketplace" panel lists kb-rag (listed in the curated [awesome-dsh-plugin](https://github.com/beancookie/awesome-dsh-plugin) list) with one-click install.
 
-### Option 3 — manual
+---
 
-```bash
-npm install dsh-kb-rag
-```
+### Troubleshooting (things that bite)
 
-Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's package.json, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
+| Symptom | Cause / Fix |
+|---|---|
+| `npx dsh-kb-rag-install` → "npm error code E404 / package not found" | Bare npx looks for a package **named** `dsh-kb-rag-install`. Use `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"` (Option 1b). |
+| `dsh plugin ... add` → pnpm errors | pnpm missing from PATH: `npm install -g pnpm`, then retry. |
+| install.ps1 → garbled Chinese / syntax error on Windows PowerShell 5.1 | The script ships with UTF-8 BOM (fixed in 1.3.1+). If you copied it manually, re-save as UTF-8 **with BOM**. |
+| Installed but tools don't appear | Tools are injected at **session creation** — restart DSH and open a **new** conversation. |
+| "模型首次检索自动下载" is slow / fails | Set `HF_ENDPOINT=https://hf-mirror.com` (or run the installer with `--mirror`) for the HuggingFace mirror; models are `bge-small-zh-v1.5` (~95MB) + `bge-reranker-base` (~1.1GB). |
+| Upgrading from an older version | In the profile dir: `npm install dsh-kb-rag@latest`, restart, new session. Existing `.kb` libraries migrate automatically (schema versioning, see repo `docs/MIGRATION.md`). |
+| Tool call says Python deps missing | Default: only logs the `pip install` command. Set `KB_AUTO_PIP=1` in the host env to auto-install (fixed argv), or run the installer (Option 1b/2). |
 
 ### Guide for other Harness users
 
