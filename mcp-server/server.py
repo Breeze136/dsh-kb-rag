@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """kb-rag MCP server — 本地文献知识库 RAG，通过 Model Context Protocol (stdio) 暴露。
 
-与 DSH 插件共用同一个 kb_engine.py 引擎（常驻守护进程）。7 个工具：
-kb_ingest / kb_zotero / kb_search / kb_rag / kb_stats / kb_dedup / kb_clear。
+与 DSH 插件共用同一个 kb_engine.py 引擎（常驻守护进程）。9 个工具：
+kb_ingest（支持 async_mode 后台执行）/ kb_zotero / kb_search / kb_rag / kb_stats /
+kb_dedup / kb_clear / kb_fetch / kb_status（轮询后台任务）。
 
 配置为 stdio MCP server 后，Claude Desktop / Cherry Studio / Kimi / DeepSeek /
 Zcode 等支持 MCP 的桌面 agent 都可直接调用。运行前先装依赖：pip install -r requirements.txt
+
+并发说明：引擎为单守护进程、JSON-lines 逐行协议 —— EngineClient 用 asyncio.Lock 串行化调用
+（一次仅一个引擎请求在途，避免行交错损坏协议）。MCP 宿主（如 Kimi Work）并发触发的工具调用
+会在该锁上排队，不会并发冲击引擎。若宿主有执行超时（如 Kimi Work 60s），请分批入库
+（建议每次 ≤5 个文件夹/目录），大批量全量入库请换用无超时限制的环境（如 Kimi Code）。
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from engine_client import EngineClient, DEFAULT_KB_ROOT, render_json, render_sources, render_ingest, render_stats, render_fetch
+from engine_client import (EngineClient, DEFAULT_KB_ROOT, render_json, render_sources,
+                           render_ingest, render_stats, render_fetch, render_async,
+                           render_status)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -29,9 +37,20 @@ def _root(kb_root):
 
 
 @mcp.tool()
-async def kb_ingest(paths: list[str], kb_root: str = "", force: bool = False) -> str:
-    """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。"""
+async def kb_ingest(paths: list[str], kb_root: str = "", force: bool = False,
+                    async_mode: bool = False) -> str:
+    """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。
+    async_mode=true 时后台执行并立即返回 job_id（宿主单次调用超时限制内适用，如 Kimi Work 60s），随后用 kb_status(job_id) 轮询直到 done。大批量（几十个以上文件夹/数百篇）强烈建议 async_mode=true。"""
+    if async_mode:
+        return render_async(await engine.call("ingest_async", {
+            "paths": paths, "kb_root": _root(kb_root), "force": force}))
     return render_ingest(await engine.call("ingest", {"paths": paths, "kb_root": _root(kb_root), "force": force}))
+
+
+@mcp.tool()
+async def kb_status(job_id: str, kb_root: str = "") -> str:
+    """查询后台入库任务状态（配合 kb_ingest async_mode=true 使用）。job_id 来自 async 返回。running 时返回已处理进度；done 时返回入库 totals 与最近文件。"""
+    return render_status(await engine.call("status", {"job_id": job_id, "kb_root": _root(kb_root)}))
 
 
 @mcp.tool()

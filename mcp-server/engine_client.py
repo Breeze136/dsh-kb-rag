@@ -8,11 +8,14 @@ real kb_engine.py without the `mcp` SDK installed. It spawns the engine's
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent.parent / "kb_engine.py"
 DEFAULT_KB_ROOT = os.environ.get("KB_RAG_ROOT", str(Path.home() / ".kb-rag"))
-PYTHON = os.environ.get("KB_RAG_PYTHON") or "python"
+# 默认用当前解释器（MCP 服务由哪个 Python 拉起就用哪个），避免裸 "python" 命中错误解释器；
+# 可用 KB_RAG_PYTHON 显式覆盖。
+PYTHON = os.environ.get("KB_RAG_PYTHON") or sys.executable
 
 
 class EngineClient:
@@ -103,6 +106,49 @@ def render_json(resp):
     return json.dumps(resp, ensure_ascii=False, default=str, indent=2)
 
 
+def render_async(resp):
+    """async_mode 提交结果：job_id + 轮询指引。"""
+    if not isinstance(resp, dict):
+        return str(resp)
+    if resp.get("ok") is False:
+        return "**后台入库启动失败**：%s" % resp.get("error")
+    lines = ["**后台入库已启动**"]
+    if resp.get("job_id"):
+        lines.append("job_id：%s" % resp["job_id"])
+    if resp.get("note"):
+        lines.append(str(resp["note"]))
+    lines.append("下一步：调用 kb_status(job_id=\"%s\") 轮询，直到 status=done 返回 totals。" % resp.get("job_id", ""))
+    return "\n".join(lines)
+
+
+def render_status(resp):
+    """kb_status 结果：running 显进度 / done 复用入库汇总。"""
+    if not isinstance(resp, dict):
+        return str(resp)
+    if resp.get("ok") is False:
+        return "**查询失败**：%s" % resp.get("error")
+    st = resp.get("status")
+    if st == "done":
+        head = "**后台入库完成** · job_id=%s" % resp.get("job_id")
+        result = resp.get("result")
+        if isinstance(result, dict):
+            body = render_ingest(result)
+            return head + "\n" + body if body else head
+        return head
+    if st == "running":
+        prog = resp.get("progress") or {}
+        lines = ["**后台入库运行中** · job_id=%s" % resp.get("job_id")]
+        if "processed" in prog:
+            lines.append("已处理 %s 个文件 · 错误 %s · 已生成 %s 块" % (
+                prog.get("processed"), prog.get("errors", 0), prog.get("chunks", 0)))
+        lines.append(str(resp.get("note") or "请稍后重查"))
+        return "\n".join(lines)
+    lines = ["**任务状态：%s**" % st]
+    if resp.get("note"):
+        lines.append(str(resp["note"]))
+    return "\n".join(lines)
+
+
 def render_ingest(resp):
     """Compact rolling view for ingest/zotero: one summary line + recent tail."""
     if not isinstance(resp, dict):
@@ -132,7 +178,8 @@ def render_ingest(resp):
             ms = f.get("ms", 0) or 0
             lines.append("%s %s · %dms" % (icon.get(st, "·"), name, ms))
         if len(files) > len(tail):
-            lines.append("（共 %d 个文件，仅显示最近 %d 条；完整统计见 kb_stats）" % (len(files), len(tail)))
+            total_n = resp.get("files_total") or len(files)  # 截断后仍显示真实总数
+            lines.append("（共 %d 个文件，仅显示最近 %d 条；完整统计见 kb_stats）" % (total_n, len(tail)))
     if resp.get("note"):
         lines.append(str(resp["note"]))
     return "\n".join(lines)
@@ -201,14 +248,35 @@ def render_sources(resp):
         title = str(r.get("title") or r.get("file") or "")
         doi = r.get("doi") if isinstance(r.get("doi"), str) and r["doi"] else None
         t = "[%s](https://doi.org/%s)" % (title, doi) if doi else title
+        loc = None
+        # 页码是"快速定位"的首选锚点（PDF 物理页，可 Zotero ?page=N 跳页）；段落号降级辅助
+        page = r.get("page")
+        if isinstance(page, list) and len(page) == 2 and all(isinstance(x, int) for x in page):
+            a, b = page
+            loc = ("§%s · p.%d" % (r["section"], a)) if a == b else \
+                  ("§%s · p.%d–%d" % (r["section"], a, b))
+        else:
+            para = r.get("para")
+            if isinstance(para, list) and len(para) == 2 and all(isinstance(x, int) for x in para):
+                a, b = para
+                loc = ("§%s 第 %d 段" % (r["section"], a)) if a == b else \
+                      ("§%s 第 %d–%d 段" % (r["section"], a, b))
+            elif r.get("section"):
+                loc = "§" + str(r["section"])
         rest = [x for x in [_authors_short(r.get("authors")), r.get("year"),
-                             r.get("journal"), ("§" + r["section"]) if r.get("section") else None] if x]
+                             r.get("journal"), loc] if x]
         lines.append("")
         lines.append("%d. %s%s" % (i, t, (" — " + " · ".join(map(str, rest))) if rest else ""))
         if r.get("snippet"):
             lines.append("> " + str(r["snippet"])[:280].replace("\n", " "))
         if isinstance(r.get("figure"), str) and r["figure"]:
             lines.append("↳ 图注坐标: " + str(r["figure"])[:220])
+        # 引文关联：本证据正文引用的参考文献条目（隐式元数据，按需暴露给 agent）
+        cites = r.get("citations")
+        if isinstance(cites, list) and cites:
+            lines.append("↳ 引文补充（出自本证据文献的引文，供补库/深读）")
+            for c in cites[:5]:
+                lines.append("  · [%s] %s" % (c.get("n"), str(c.get("text") or "")[:150]))
         if doi:
             lines.append("[DOI %s](https://doi.org/%s) · score %s" % (doi, doi, r.get("score")))
         else:
