@@ -1,4 +1,4 @@
-﻿# kb-rag 数据库迁移文档（Schema Migration）
+# kb-rag 数据库迁移文档（Schema Migration）
 
 > 版本：适用于插件 1.0.5 → 1.6.0+ 的升级场景，以及未来所有跨版本升级。
 > 状态：**版本化迁移已在引擎实现并通过实测**（新库首建 / 旧库 v0→v1 自动迁移 / zotero_key 回填 207 条 / 检索回归），代码见 `kb_engine.py` 的 `_migrate()`；本文档同步记录设计约束与扩展方法。
@@ -149,5 +149,5 @@ def _migrate(db):
 |---|---|---|
 | 1.0.5（旧） | docs 无 zotero_key | — |
 | 1.5.0 | docs 增 `zotero_key TEXT`（可空） | `ALTER TABLE` + try/except，连接时自动执行 |
-| 1.6.0 | `PRAGMA user_version` 门控；v1 = docs.zotero_key + 回填；**v2 = chunks.para_start/para_end（段落定位，旧行 NULL）** | `_migrate()` 版本化迁移（已实现，含迁移/健康提示） |
+| 1.6.0 | `PRAGMA user_version` 门控；v1 = docs.zotero_key + 回填；v2 = chunks.para_start/para_end；**v3 = chunks.page_start/page_end（PDF 物理页码锚点，Zotero ?page=N 跳页）** | `_migrate()` 版本化迁移（已实现，含迁移/健康提示；旧行页码为 NULL，force 重入库恢复） |
 | 未来 | （示例）改类型/删列 / refs 引文表（方案 B） | 在 `_migrate()` 新增 `if cur < N` 块（4.1 骨架） |

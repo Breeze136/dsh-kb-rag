@@ -1,10 +1,10 @@
-﻿# 智能体 kb-rag 输出格式建议（v2）
+# 智能体 kb-rag 输出格式建议（v2）
 
 > 变更目标：**去掉回答末尾的"点击原文打开"区块**；将"补充建议"升级为**引文关联建议**——
 > 从回答所用证据的**正文引文标记 [n]** 出发，回溯该文献的参考文献列表，把被引文献推荐给用户，
 > 并明确标注**出自哪一篇文献的哪一条引文**；同时**证据引用精确到文献中的第几段**。
-> 状态：**已按方案 A + 段落列实施并通过引擎级实测**（schema v2、段落号、References 保留、
-> 检索透传、引文解析）；渲染层与宿主展示为后续项。检测局限见 §4。
+> 状态：**已按方案 A + 段落列 + 页码锚点实施并通过引擎级实测**（schema v3：段落列 + PDF 页码列；
+> References 保留、检索透传、引文解析、页码跳页）；渲染层与宿主展示为后续项。检测局限见 §4/§6。
 
 ---
 
@@ -43,30 +43,64 @@
 （非严格模式）库外常识补充处标注"非库内知识"。*
 ```
 
-### 段落定位（隐式，按需暴露）
+### 定位锚点：页码优先（隐式，按需暴露）
 
-- **平时**：回答正文不出现任何"§章节 / 第几段"字样——零噪音。
-- **打开文献细看时**：渲染层可在证据卡片/文献入口上以**可折叠或悬浮**方式携带
-  `§<section> 第 <a>–<b> 段`（如 tooltip、details 展开、或点开文献后的定位栏），不占回答视野。
-- **追问时**：用户问"这句话在文献哪里？"→ 模型读取证据 JSON 的 `section`/`para` 字段回答，
-  例如："出自 [3]（Ederer & Spaldin 2005, PRB）的 §Results 第 8 段"。
-- **Zotero 定位展望（可选）**：若后续实现"段落→页码"映射，可用
-  `zotero://open-pdf/library/items/<key>?page=N` 一键跳到对应页（Zotero 7 支持 `?page=`）。
+- **页码 = 首选锚点**（PDF 物理页码，1 基）：两栏/扫描排版 PDF 也可靠，用于
+  `zotero://open-pdf/library/items/<key>?page=N` 一键跳页。段落号仅作降级辅助
+  （两栏 PDF 文本层段落被合并时段号不可靠，实测 Nature 类论文全文仅 ~8 段）。
+- **平时**：回答正文不显示页码/段号——零噪音。
+- **打开文献细看时**：证据卡片携带 `§<section> · p.<页码>`（可折叠/悬浮），或直接
+  Zotero 跳页（`?page=N`，Zotero 7 支持）。
+- **追问时**：用户问"这句话在文献哪里？"→ agent 读证据 JSON 的 `page` 字段回答，
+  例如："出自 [3]（Ederer & Spaldin 2005, PRB）的 §Results · p.4"。
+- **数据支持**：`chunks` 表 `page_start/page_end`（schema v3），来自 read_document
+  的 `meta['_paras']` 段落→页码映射；检索结果/evidence 带 `page` 字段。
+  txt/md/docx 与旧数据无页码（NULL）→ 降级为仅章节。
 
-### 示例（基于本库真实内容）
+### 示例（真实数据驱动的完整推演，v2 页码版）
 
-> 问：BFO 反铁磁序结构？
+> 问：BFO 的反铁磁序和自旋摆线是什么结构？这个结论能在原文哪里找到？
 >
-> 答：BFO 本征为 G 型反铁磁序（T_N≈643 K）[1]；其上叠加非公度自旋摆线，周期≈62–65 nm，
-> 波矢 k∥[1̄10]、极化 P∥[111]，M(r)=m[cos(k·r)êₖ+sin(k·r)êₚ][3]……
-> （段落号不进正文；用户追问时："[3] 出自 Ederer & Spaldin 2005, PRB，§Body 第 3 段 / §Results 第 8 段"）
+> **工具返回（MCP 渲染，agent 可见）：**
 >
-> **引文补充建议**
-> - Burns et al., 2020, Adv. Mater.（出自 Burns 2020 的引文 [22–25]：Sosnowska/Zvezdin 的自旋摆线热力学理论系列）
-> - Lebeugle et al., 2007, Phys. Rev. B（出自 Ederer & Spaldin 2005 的引文 [14,15]：弱铁磁的对称性来源）
+> ```
+> **知识库来源 Top-2**
+> 混合检索 · 精排 BAAI/bge-reranker-base · 386ms
+>
+> 1. [Switching the spin cycloid in BiFeO3 with an electric field](https://doi.org/10.1038/s41467-024-47232-5) — Peter Meisenheimer; Guy Moore · 2024 · Nature Communications · §Results · p.4
+> > the spin rotates in the plane defined by k and P (i.e., the (112̄), where P is along the [111] and k along the [1̄10]) with a period of ~65 nm
+> ↳ 引文补充（出自本证据文献的引文，供补库/深读）
+>   · [4] Sosnowska, M. et al. J. Phys. C 15, 4835 (1982)
+>   · [9] Kadomtseva, A. et al. — 摆线磁电理论
+> [DOI 10.1038/s41467-024-47232-5](https://doi.org/10.1038/s41467-024-47232-5) · score 0.98
+>
+> 2. [Weak ferromagnetism and magnetoelectric coupling in bismuth ferrite](https://doi.org/10.1103/PhysRevB.71.060401) — Ederer; Spaldin · 2005 · Physical Review B · §Body · p.2
+> > If the magnetic moments are oriented perpendicular to the {111} direction, the symmetry also permits a canting…
+> [DOI 10.1103/PhysRevB.71.060401](https://doi.org/10.1103/PhysRevB.71.060401) · score 0.87
+>
+> **关联文献（可作补充建议）**
+> - [The Experimentalist's Guide to the Cycloid](https://doi.org/10.1002/adma.202003711) — Burns et al. · 2020（同作者·主题相似 · score 4.4）
+> ```
+>
+> **Agent 回答：**
+>
+> BFO 的磁结构是"G 型反铁磁 + 长程自旋摆线"的复合序：
+> - 本征 **G 型反铁磁序**（Fe³⁺ 最近邻反平行，T_N≈643 K），自旋 ⊥[111] 时子晶格倾斜产生弱铁磁[2]；
+> - 叠加**非公度自旋摆线**：自旋在 k 与 P 张成平面内旋转，**P∥[111]、k∥[1̄10]，周期 ≈65 nm**，
+>   M(r)=m[cos(k·r)êₖ+sin(k·r)êₚ][1]。
+>
+> **引文补充建议（出自本次证据的参考文献）**
+> - [Sosnowska et al., 1982, J. Phys. C](https://doi.org/10.1038/s41467-024-47232-5)（出自 Meisenheimer 2024 的引文 [4]：摆线首次中子发现）
+> - [Kadomtseva 摆线磁电理论](https://doi.org/10.1038/s41467-024-47232-5)（出自 Meisenheimer 2024 的引文 [9]）
+>
+> **追问示例** —— "这个结论原文在哪？" → agent 读 `page` 字段：
+> > 出自 [1]（Meisenheimer et al. 2024, Nat. Commun.）**§Results · 第 4 页**，点击直达：
+> > **[在 Zotero 打开到 p.4](zotero://open-pdf/library/items/FVPJFV8Q?page=4)**
+> > [2] 出自 Ederer & Spaldin 2005, PRB **§Body · 第 2 页**：[跳转 p.2](zotero://open-pdf/library/items/V2AKVNXW?page=2)
 
-> 说明：上例"出自…引文"即引擎从证据文献的 References 中提取的条目；若该被引文献已在库内，
-> 可在建议后附带库内 Zotero 入口（可选），不在库内则仅给文本，供用户补库。
+> 说明：`§Results · p.4` 中 p = **PDF 物理页码**（1 基），对两栏/扫描排版同样可靠（实测两栏
+> PDF 全部块均带页码）；段落号仅作降级辅助。DSH 侧页码是工具 JSON 的隐式字段，平时正文不显示；
+> MCP 侧因 agent 只读文本而显式呈现。txt/md/docx 与旧数据无页码（NULL）→ 自动退化为仅章节。
 
 ---
 
@@ -152,8 +186,9 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
 | `[n]` 超出 References 条数 / 编号错位 | 跳过该条，不猜测；宁缺勿错 |
 | 证据文献为书籍/无 References | 同上降级 |
 | 库内匹配到被引文献 | 建议条目附"库内可打开"标记（保留单个可点击入口，不堆叠区块） |
-| 证据来自**旧库**（para_start/para_end 为 NULL） | 段落号不可用：追问时只答"§章节"；重新入库（force）后恢复段落号（隐式字段，不影响平时回答） |
-| 同段信息被拆成多块 / 多段合并一块 | 段区间（"第 8 段"或"第 8–10 段"）仅在被追问/展开时展示 |
+| 证据来自**旧库**（page/para 为 NULL） | 页码/段号不可用：追问时只答"§章节"；重新入库（force）后恢复（隐式字段，不影响平时回答） |
+| 同段信息被拆成多块 / 多段合并一块 | 段区间仅在被追问/展开时展示；页码区间同理（如 p.4–5） |
+| 证据为 txt/md/docx（无 PDF 页） | `page` 为 NULL → 定位降级为章节 |
 | 严格模式 | 引文建议也仅来自 evidence 文献的 References（仍属"基于证据"），不引入库外知识 |
 
 ## 5. 与相关文档的关系
@@ -163,14 +198,18 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
 
 ## 6. 实施记录与已知局限（引擎实测）
 
-### 已实施（引擎 `kb_engine.py`）
-- `chunks` 表新增 `para_start`/`para_end`（SCHEMA v2，`_migrate()` `if cur < 2` 块自动迁移）；
-- `chunk_document`/`fallback_chunks` 记录全局段落号，返回 5 元组；
+### 已实施（引擎 `kb_engine.py` / mcp-server）
+- `chunks` 表新增 `para_start`/`para_end`（SCHEMA v2）与 **`page_start`/`page_end`（SCHEMA v3，
+  PDF 物理页码锚点）**；`_migrate()` 逐级自动迁移；
+- `read_document` 产出 `meta['_paras'] = [(PDF页码, 段文本)]`（段落归属其起始页）；
+  `chunk_document`/`fallback_chunks` 贯穿页码，返回 7 元组；
 - References（weight 0）**保留入库**供引文关联，检索 SQL 显式 `c.weight > 0` 排除；
 - References 检测两级：① 行首标题（references/bibliography/参考文献）+ 后半段 + 序号条目；
   ② 无标题时**文末连续高密度序号段**（Wiley `[n]` / 常规 `n.` / 紧贴 `nAuthor` 三风格）；
 - `_doc_references`/`_parse_references`/`_cited_refs`：正文 `[n]`（含区间 `[a–b]`）→ 该文献引文条目；
-- 检索结果 entry 新增 `para`（[起,止]）与 `citations`（[{n,text}]，隐式字段，按需暴露）。
+- 检索结果 entry 新增 `para`、**`page`**（[起,止]）与 `citations`（[{n,text}]，隐式字段，按需暴露）；
+- MCP 渲染：`§<章节> · p.<页码>`（有页显页，无页退段号）；引文补充建议块；
+- Zotero 跳页：`zotero://open-pdf/library/items/<key>?page=N`（数据已就绪，宿主渲染可选加参）。
 
 ### 已知局限（如实记录）
 1. **References 检出率取决于 PDF 文本层**：无标题 + 多栏排版的论文（实测 Wiley 综述）只能

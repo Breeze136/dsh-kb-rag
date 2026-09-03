@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS chunks (
   seq INTEGER NOT NULL,
   text TEXT NOT NULL,
   para_start INTEGER,
-  para_end INTEGER
+  para_end INTEGER,
+  page_start INTEGER,
+  page_end INTEGER
 );
 CREATE TABLE IF NOT EXISTS vecs (
   chunk_id INTEGER PRIMARY KEY,
@@ -68,9 +70,10 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 """
 
 # 库结构（schema）版本：与引擎代码版本 VERSION 独立。
-# v1: docs.zotero_key；v2: chunks.para_start / para_end（段落定位，隐式元数据）。
+# v1: docs.zotero_key；v2: chunks.para_start/para_end（段落定位，隐式元数据）；
+# v3: chunks.page_start/page_end（PDF 物理页码，证据锚点 → Zotero ?page=N 跳页）。
 # PRAGMA user_version 记录库结构版本；破坏性变更需新增迁移块（见 docs/MIGRATION.md §4）。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 最近一次连接/迁移说明（cmd_stats 等据此给出迁移与健康提示；每次 connect 更新）
 _LAST_CONNECT = {"created": False, "from_version": None, "to_version": None,
@@ -194,14 +197,14 @@ def _ref_entry_count(text):
     return n
 
 
-def _find_ref_index(paragraphs):
+def _find_ref_index(paragraphs, pages=None):
     """后置 References 兜底：在段落列表中按行级标题拆分。
-    返回 (新段落列表, 首个参考文献段的下标 或 None)。
+    返回 (新段落列表, 首个参考文献段的下标, 平行页列表)。
     两阶段：
     1) 有标题：文档后半段中最后一个带 references/bibliography/参考文献 行首标题、
        且标题之后出现序号条目的段（避免表格单元格里的 "references" 字样），在该行拆段；
-    2) 无标题：后半段中第一个序号条目高密度（≥2 条）的段视为 References 起点
-       （Wiley '[n]' / 常规 'n.' 风格且无标题的论文）。"""
+    2) 无标题：文末【连续】序号条目高密度段（参考文献总在文末成片出现；
+       多栏排版的正文页偶发 [n] 行首，因不连续而被排除）。"""
     n = len(paragraphs)
     idx = None
     for i, p in enumerate(paragraphs):
@@ -213,16 +216,19 @@ def _find_ref_index(paragraphs):
             idx = i                        # 取最后一个同时满足条件的段
     if idx is not None:
         m = _REF_HEAD_RE.search(paragraphs[idx])
+        pg = pages[idx] if pages else None
         body = paragraphs[idx][:m.start()].strip()
         refp = paragraphs[idx][m.start():].strip()
-        newp = []
+        newp, newpg = [], []
         if body:
-            newp.append(body)
-        newp.append(refp)
-        out = paragraphs[:idx] + newp + paragraphs[idx + 1:]
-        return out, idx + (1 if body else 0)
-    # 无标题阶段：文末【连续】序号条目高密度段（参考文献总在文末成片出现；
-    # 多栏排版的正文页偶发 [n] 行首，因不连续而被排除）
+            newp.append(body); newpg.append(pg)
+        newp.append(refp); newpg.append(pg)
+        out_p = paragraphs[:idx] + newp + paragraphs[idx + 1:]
+        out_g = pages
+        if pages is not None:
+            out_g = pages[:idx] + newpg + pages[idx + 1:]
+        return out_p, idx + (1 if body else 0), out_g
+    # 无标题阶段：文末连续序号条目高密度段
     run_start = None
     for i in range(n - 1, int(n * 0.5) - 1, -1):
         if _ref_entry_count(paragraphs[i]) >= 2:
@@ -230,19 +236,32 @@ def _find_ref_index(paragraphs):
         elif run_start is not None:
             break
     if run_start is not None and (n - run_start) >= 3:
-        return paragraphs, run_start
-    return paragraphs, None
+        return paragraphs, run_start, pages
+    return paragraphs, None, pages
 
 
-def chunk_document(full_text):
+def chunk_document(full_text, paras=None):
     """Section-aware chunking; falls back to paragraph merging.
-    返回 [(section, weight, text, para_start, para_end)]。
+    返回 [(section, weight, text, para_start, para_end, page_start, page_end)]。
+    paras：可选 [(PDF物理页码或None, 段落文本)]，来自 read_document 的 meta['_paras']；
     - 段落号为全局计数（从文献第一个段落到最后一个，References 除外），跨章节不重置；
+    - 页码为 PDF 物理页码（1 基），段落归属其起始页；txt/md/docx 无页（None）；
     - References（weight 0）保留入库供引文关联使用（检索时按 weight>0 排除）；
     - 后置兜底：行级 references/bibliography/参考文献 标题之后的全部内容归为 References。"""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
-    paragraphs, ref_idx = _find_ref_index(paragraphs)
+    pages = None
+    if paras is not None:
+        pages = [pg for pg, _ in paras]
+        paragraphs = [t for _, t in paras]
+    paragraphs, ref_idx, pages = _find_ref_index(paragraphs, pages)
     ref_para_no = (ref_idx + 1) if ref_idx is not None else None
+
+    def _pg_of(pno):
+        """段落序号 -> PDF 页码（无页信息返回 None）。"""
+        if pages is None or not (0 < pno <= len(pages)):
+            return None
+        return pages[pno - 1]
+
     sectioned = []  # (section, weight, [(para_no, text)])
     section, weight = "Front matter", 1.0
     buf = []
@@ -279,7 +298,7 @@ def chunk_document(full_text):
     flush()
 
     if not structured:
-        return fallback_chunks(paragraphs, ref_idx=ref_idx)
+        return fallback_chunks(paragraphs, ref_idx=ref_idx, pages=pages)
 
     sectioned = _promote_abstract(sectioned)
 
@@ -288,6 +307,9 @@ def chunk_document(full_text):
         ps, pe = paras[0][0], paras[-1][0]
         if ref_para_no is not None and ps >= ref_para_no:
             sec, w = "References", 0.0          # 后置兜底：标题之后全部归 References
+        pgs = [pg for pg in (_pg_of(pno) for (pno, _) in paras) if pg is not None]
+        pg_s = min(pgs) if pgs else None
+        pg_e = max(pgs) if pgs else None
         # References 保留换行结构（引文条目按行切分）；其余章节照常 clean 压平
         if sec == "References":
             text = "\n".join(t for _, t in paras)
@@ -298,17 +320,24 @@ def chunk_document(full_text):
         if w <= 0 and sec != "References":
             continue                     # 仅 References 保留（引文关联数据源），其余权重 0 章节丢弃
         if len(text) > 1200:
-            chunks.extend((sec, w, piece, ps, pe) for piece in split_long(text))
+            chunks.extend((sec, w, piece, ps, pe, pg_s, pg_e) for piece in split_long(text))
         else:
-            chunks.append((sec, w, text, ps, pe))
+            chunks.append((sec, w, text, ps, pe, pg_s, pg_e))
     return chunks
 
 
-def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None):
+def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None, pages=None):
     """Paragraph merging with sentence-level splitting for oversized blocks.
-    返回 [(section, weight, text, para_start, para_end)]，段落号为全局序号。
+    返回 [(section, weight, text, para_start, para_end, page_start, page_end)]，
+    段落号为全局序号；pages 为平行页列表（无页信息传 None）。
     ref_idx 非空时，其后的段落归入 References（weight 0，入库供引文关联）。"""
     pieces = []                      # (para_no, text)
+
+    def _pg_of(pno):
+        if pages is None or not (0 < pno <= len(pages)):
+            return None
+        return pages[pno - 1]
+
     for i, p in enumerate(paragraphs, start=1):
         if ref_idx is not None and i > ref_idx:
             pieces.append((i, p))    # References 段落整段保留（不拆分）
@@ -328,18 +357,21 @@ def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None):
             ref_buf.append((pno, p))
             continue
         if buf and buf_len() + len(p) + 1 > high and buf_len() >= low:
+            pg = _pg_of(buf[0][0])
             chunks.append(("Body", 1.0, clean(" ".join(t for _, t in buf)),
-                           buf[0][0], buf[-1][0]))
+                           buf[0][0], buf[-1][0], pg, pg))
             buf = [(pno, p)]
         else:
             buf.append((pno, p))
     if buf:
+        pg = _pg_of(buf[0][0])
         chunks.append(("Body", 1.0, clean(" ".join(t for _, t in buf)),
-                       buf[0][0], buf[-1][0]))
+                       buf[0][0], buf[-1][0], pg, pg))
     if ref_buf:
         # References 保留换行结构（引文条目按行切分）
+        pg = _pg_of(ref_buf[0][0])
         chunks.append(("References", 0.0, "\n".join(t for _, t in ref_buf),
-                       ref_buf[0][0], ref_buf[-1][0]))
+                       ref_buf[0][0], ref_buf[-1][0], pg, pg))
     return chunks
 
 
@@ -353,12 +385,21 @@ def read_document(path):
         import fitz  # PyMuPDF
         doc = fitz.open(str(path))
         try:
-            text = "\n".join(page.get_text() for page in doc)
+            pages_text = [page.get_text() for page in doc]
+            text = "\n".join(pages_text)
             meta = dict(doc.metadata or {})
             # First-page signals for reliable identifier extraction.
-            p1 = doc[0].get_text()
+            p1 = pages_text[0] if pages_text else ""
             meta["_page1_text"] = p1
-            meta["_page1_title"] = _largest_font_title(doc[0])
+            meta["_page1_title"] = _largest_font_title(doc[0]) if len(doc) else None
+            # 段落 → PDF 物理页码（1 基）映射：段落归属其起始页（_paras=[(page, text)]）
+            paras = []
+            for pno, ptext in enumerate(pages_text, start=1):
+                for seg in re.split(r"\n\s*\n", ptext):
+                    seg = seg.strip()
+                    if seg:
+                        paras.append((pno, seg))
+            meta["_paras"] = paras
         finally:
             doc.close()
         return text or "", meta
@@ -725,6 +766,15 @@ def _migrate(db, created):
             except sqlite3.OperationalError:
                 pass                                 # 列已存在
         db.execute("PRAGMA user_version = 2")
+    # v2 -> v3：chunks 页码列（PDF 物理页码锚点；旧数据为 NULL，重入库后才有）
+    if cur < 3:
+        for col in ("page_start", "page_end"):
+            try:
+                db.execute("ALTER TABLE chunks ADD COLUMN %s INTEGER" % col)
+                info["actions"].append("add chunks.%s" % col)
+            except sqlite3.OperationalError:
+                pass
+        db.execute("PRAGMA user_version = 3")
     # zotero_key 回填：旧行按 Zotero storage 路径提取附件 key（幂等，只补 NULL）
     n = db.execute(
         "SELECT COUNT(*) AS n FROM docs WHERE zotero_key IS NULL AND path LIKE ?",
@@ -859,22 +909,39 @@ def cmd_ingest(req):
     paths = req.get("paths") or []
     if not paths:
         return {"ok": False, "error": "paths is required (file or directory list)"}
+    progress_path = req.get("progress_path")   # 异步任务专用：后台进程逐文件回写进度
     db = connect(kb_root)
     files = []
     totals = {"added": 0, "updated": 0, "skipped": 0, "errors": 0, "duplicates": 0,
               "chunks": 0, "vectors": 0}
+    processed = 0
+
+    def _prog():
+        if progress_path:
+            try:
+                Path(progress_path).write_text(json.dumps(
+                    {"status": "running", "processed": processed,
+                     "errors": totals["errors"], "chunks": totals["chunks"]},
+                    ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
+
     try:
         for p in paths:
             p = Path(p)
             if not p.exists():
                 files.append({"path": str(p), "status": "error", "error": "not found"})
                 totals["errors"] += 1
+                processed += 1
+                _prog()
                 continue
             candidates = sorted(p.rglob("*")) if p.is_dir() else [p]
             for f in candidates:
                 if not f.is_file() or f.suffix.lower() not in SUPPORTED_EXTS:
                     continue
                 _ingest_file(db, f, force, files, totals)
+                processed += 1
+                _prog()
         if totals["added"] or totals["updated"]:
             db.execute("DELETE FROM cache")  # any index change invalidates cache
         db.commit()
@@ -883,7 +950,10 @@ def cmd_ingest(req):
     resp = {
         "ok": True,
         "kb_root": str(Path(kb_root).resolve()),
-        "files": files,
+        # 大批量入库时 files 可能很大（数百条 × 每条 ~150B），响应只回最近 20 条以压缩 JSON
+        # （Kimi Work 等 MCP 宿主有 60s/体积限制；完整统计在 totals，files_total 为真实总数）
+        "files": files[-20:],
+        "files_total": len(files),
         "totals": totals,
         "embedding": _EMBED_NAME if get_embedder() is not None else None,
         "ms": round((time.time() - t0) * 1000),
@@ -942,14 +1012,15 @@ def _ingest_file(db, f, force, files, totals, meta=None):
             journal = meta.get("journal") or journal
             doi = meta.get("doi") or doi
             zotero_key = meta.get("_zotero_key")
-        chunks = chunk_document(text)
+        paras = (pdf_meta or {}).get("_paras")          # [(PDF页码或None, 段文本)]
+        chunks = chunk_document(text, paras=paras)
         seen, uniq = set(), []
-        for sec, w, t, ps, pe in chunks:
+        for sec, w, t, ps, pe, gs, ge in chunks:
             h = hashlib.sha1(t.encode("utf-8")).hexdigest()
             if h in seen:
                 continue
             seen.add(h)
-            uniq.append((sec, w, t, ps, pe))
+            uniq.append((sec, w, t, ps, pe, gs, ge))
         chunks = uniq
         st = f.stat()
         if row is not None:
@@ -972,9 +1043,10 @@ def _ingest_file(db, f, force, files, totals, meta=None):
             doc_id = cur.lastrowid
             status = "added"
         db.executemany(
-            "INSERT INTO chunks(doc_id,section,weight,seq,text,para_start,para_end) "
-            "VALUES(?,?,?,?,?,?,?)",
-            [(doc_id, sec, w, i, t, ps, pe) for i, (sec, w, t, ps, pe) in enumerate(chunks)])
+            "INSERT INTO chunks(doc_id,section,weight,seq,text,para_start,para_end,page_start,page_end) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            [(doc_id, sec, w, i, t, ps, pe, gs, ge)
+             for i, (sec, w, t, ps, pe, gs, ge) in enumerate(chunks)])
         n_vec = _embed_new_chunks(db, doc_id)
         totals[status] += 1
         totals["chunks"] += len(chunks)
@@ -1323,7 +1395,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     where = (where + " AND c.weight > 0") if where else " WHERE c.weight > 0"
     rows = db.execute(
         "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, "
-        "c.para_start, c.para_end, d.title, d.authors, "
+        "c.para_start, c.para_end, c.page_start, c.page_end, d.title, d.authors, "
         "d.year, d.journal, d.doi, d.path, d.kind, d.zotero_key, v.vec "
         "FROM chunks c JOIN docs d ON d.id = c.doc_id "
         "LEFT JOIN vecs v ON v.chunk_id = c.id" + where, args).fetchall()
@@ -1432,6 +1504,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "zotero_key": r["zotero_key"] or None,
             "section": r["section"],
             "para": [r["para_start"], r["para_end"]] if r["para_start"] is not None else None,
+            "page": [r["page_start"], r["page_end"]] if r["page_start"] is not None else None,
             "score": round(score, 4),
             "snippet": make_snippet(r["text"], best_term[i] if best_term else None, snippet_w),
         }
@@ -1690,7 +1763,9 @@ def cmd_zotero(req):
     finally:
         db.close()
     return {"ok": True, "zotero_db": zdb, "candidates": len(entries),
-            "dry_run": dry_run, "files": files, "totals": totals,
+            # 同 ingest：files 只回最近 20 条压缩 JSON，files_total 为真实总数
+            "dry_run": dry_run, "files": files[-20:], "files_total": len(files),
+            "totals": totals,
             "ms": round((time.time() - t0) * 1000)}
 
 
@@ -2006,6 +2081,94 @@ def cmd_fetch(req):
             "ms": round((time.time() - t0) * 1000)}
 
 
+# ------------------------------------------------- async ingest (MCP 60s 超时解药)
+
+def _jobs_dir(kb_root):
+    """后台任务目录（与 kb.sqlite 同级的 .kb-jobs/）。"""
+    return Path(kb_root) / ".kb-jobs"
+
+
+def cmd_ingest_async(req):
+    """异步入库：fork 独立子进程跑 ingest，父进程立即返回 job_id。
+    适用于 MCP/Kimi 等有单次调用超时（60s）的宿主：提交即返回，kb_status 轮询。
+    注意：子进程与主进程并发写同一 kb.sqlite，请勿在任务运行期间再发起写操作。"""
+    import subprocess, uuid
+    kb_root = req.get("kb_root") or ".kb"
+    job_id = uuid.uuid4().hex[:12]
+    jdir = _jobs_dir(kb_root)
+    try:
+        jdir.mkdir(parents=True, exist_ok=True)
+        job = {"id": job_id, "payload": dict(req),
+               "result_path": str(jdir / (job_id + ".result.json")),
+               "progress_path": str(jdir / (job_id + ".progress.json"))}
+        jf = jdir / (job_id + ".job.json")
+        jf.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
+        script = os.path.abspath(sys.argv[0]) if (sys.argv and sys.argv[0]) else os.path.abspath(__file__)
+        subprocess.Popen([sys.executable, script, "run_job", str(jf)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return {"ok": False, "error": "启动后台入库进程失败: %s: %s" % (type(e).__name__, e)}
+    return {"ok": True, "job_id": job_id, "status": "running",
+            "kb_root": str(Path(kb_root).resolve()),
+            "note": "后台入库已启动（job_id=%s）。用 kb_status(job_id=...) 轮询进度；"
+                    "宿主 60s 超时不影响后台任务。" % job_id}
+
+
+def run_async_job(jobfile):
+    """后台子进程入口：读 job 文件 -> 执行 ingest（逐文件回写进度）-> 写结果文件。"""
+    job = {}
+    try:
+        job = json.loads(Path(jobfile).read_text(encoding="utf-8"))
+        payload = dict(job.get("payload") or {})
+        payload["progress_path"] = job.get("progress_path")
+        result = cmd_ingest(payload)
+        result.setdefault("ok", True)
+        out = {"status": "done", "job_id": job.get("id"), "result": result}
+    except Exception as e:
+        out = {"status": "error", "job_id": job.get("id", "?"),
+               "error": "%s: %s" % (type(e).__name__, e)}
+    rp = job.get("result_path")
+    if rp:
+        try:
+            Path(rp).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+    return out
+
+
+def cmd_status(req):
+    """查询后台任务：done 时返回完整结果（totals + files 最近 20 条），running 时返回进度。"""
+    job_id = (req.get("job_id") or "").strip()
+    kb_root = req.get("kb_root") or ".kb"
+    if not job_id:
+        return {"ok": False, "error": "job_id 必填（来自 kb_ingest async_mode 或 ingest_async 的返回）"}
+    jdir = _jobs_dir(kb_root)
+    rp = jdir / (job_id + ".result.json")
+    if rp.exists():
+        try:
+            data = json.loads(rp.read_text(encoding="utf-8"))
+            resp = {"ok": True, "job_id": job_id, "status": data.get("status", "done")}
+            if data.get("error"):
+                resp["error"] = data["error"]
+            if isinstance(data.get("result"), dict):
+                resp["result"] = data["result"]
+            return resp
+        except Exception as e:
+            return {"ok": False, "error": "读取任务结果失败: %s" % e}
+    pp = jdir / (job_id + ".progress.json")
+    prog = None
+    if pp.exists():
+        try:
+            prog = json.loads(pp.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if (jdir / (job_id + ".job.json")).exists() or pp.exists():
+        return {"ok": True, "job_id": job_id, "status": "running", "progress": prog,
+                "note": "任务运行中，请稍后重查（完成时返回 totals）"}
+    return {"ok": True, "job_id": job_id, "status": "not_found",
+            "note": "未找到该任务（job 目录: %s）" % jdir}
+
+
 # ---------------------------------------------------------------- serve
 
 
@@ -2026,7 +2189,8 @@ def cmd_serve():
             stdout.flush()
             continue
         rid = req.get("id")
-        handler = {"ingest": cmd_ingest, "search": cmd_search, "rag": cmd_rag,
+        handler = {"ingest": cmd_ingest, "ingest_async": cmd_ingest_async, "status": cmd_status,
+                   "search": cmd_search, "rag": cmd_rag,
                    "stats": cmd_stats, "zotero": cmd_zotero,
                    "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(req.get("command"))
         try:
@@ -2053,7 +2217,11 @@ def main():
     if command == "serve":
         cmd_serve()
         return 0
-    handler = {"ingest": cmd_ingest, "search": cmd_search, "rag": cmd_rag,
+    if command == "run_job":          # 后台任务子进程入口（argv 传 job 文件，不走 stdin）
+        run_async_job(sys.argv[2] if len(sys.argv) > 2 else "")
+        return 0
+    handler = {"ingest": cmd_ingest, "ingest_async": cmd_ingest_async, "status": cmd_status,
+               "search": cmd_search, "rag": cmd_rag,
                "stats": cmd_stats, "zotero": cmd_zotero,
                "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(command)
     if handler is None:
