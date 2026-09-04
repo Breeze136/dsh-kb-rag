@@ -1,4 +1,4 @@
-﻿# dsh-kb-rag
+# dsh-kb-rag
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **最新版本 v1.6.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.1** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -80,7 +80,7 @@ Run **inside the DSH profile/deployment directory** (this is where the plugin lo
 
 ```bash
 cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
-npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.0 to pin
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.1 to pin
 ```
 
 Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
