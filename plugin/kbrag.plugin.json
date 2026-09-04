@@ -1,6 +1,6 @@
-﻿{
+{
   "name": "kb-rag",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Local literature knowledge-base RAG for DSH: hybrid retrieval + rerank + cited answers over a SQLite index.",
   "kind": "dsh-dynamic-plugin",
   "idPrefix": "kbrag",

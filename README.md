@@ -1,4 +1,4 @@
-﻿# kb-rag — Local Literature Knowledge-Base RAG (DSH Plugin)
+# kb-rag — Local Literature Knowledge-Base RAG (DSH Plugin)
 
 <p align="center">
   <b>把脑子里的模糊记忆,变成一条能点开的文献坐标。</b><br/>
@@ -61,7 +61,7 @@ Data flow: raw PDF → verbatim extraction + section chunking → chunks into th
 
 ## Quick Start
 
-> **最新版本 v1.6.0** — 下载：`npm install dsh-kb-rag@latest`　安装：`dsh plugin --profile web add dsh-kb-rag@latest`
+> **最新版本 v1.6.1** — 下载：`npm install dsh-kb-rag@latest`　安装：`dsh plugin --profile web add dsh-kb-rag@latest`
 
 **推荐：npx 一键装环境 + 激活（无需先安装包）**
 
@@ -93,7 +93,7 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 
 Published to npm: **`dsh-kb-rag`** ([npmjs.com/package/dsh-kb-rag](https://www.npmjs.com/package/dsh-kb-rag)), and indexed on the [dsh.so registry](https://www.dsh.so/artifact/kb-rag/) (security scan: **passed**).
 
-> **最新版本 v1.6.0** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.1** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
 
 ### Option 1 — one command (recommended, DSH profiles)
 

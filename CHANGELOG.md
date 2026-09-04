@@ -1,4 +1,14 @@
-﻿# Changelog
+# Changelog
+
+## [1.6.1] - MCP 异步入库 + PDF 页码锚点（schema v3）
+
+- **异步入库（MCP 60s 超时解药）**：`kb_ingest` 支持 `async_mode=true`，fork 独立子进程跑 ingest 并立即返回 `job_id`；新增 `kb_status(job_id)` 轮询进度（`.kb-jobs/` 目录，与 kb.sqlite 同级），宿主超时不影响后台任务
+- **PDF 页码锚点（schema v2→v3）**：`chunks` 表新增 `page_start/page_end`（PDF 物理页码，1 基）；`read_document` 建立段落→页码映射（`meta['_paras']`）；检索结果带 `page` 字段，渲染优先 `§章节 · p.N`，可配合 Zotero `?page=N` 一键跳页；段落号降级为辅助（两栏 PDF 段落合并时段号不可靠）；txt/md/docx 与旧数据无页码（NULL）自动降级
+- **响应体积压缩**：ingest/zotero 的 `files` 只回最近 20 条 + 新增 `files_total` 真实总数（针对 Kimi Work 等宿主的体积限制）
+- **渲染增强**：页码优先定位；证据引文关联前 5 条（"↳ 引文补充"，供补库/深读）
+- **解释器修复**：MCP 服务默认用 `sys.executable`（拉起服务的 Python）替代裸 `python`，避免命中错误解释器；`KB_RAG_PYTHON` 仍可覆盖
+- **库迁移**：`_migrate()` 自动 v2→v3 ALTER 加页码列；旧数据页码为 NULL，`force` 重入库后恢复（详见 `docs/MIGRATION.md`）
+- 文档：`docs/OUTPUT-FORMAT.md` 页码版示例与 `docs/MIGRATION.md` v3 迁移行同步更新
 
 ## [1.6.0] - 版本化迁移 + 元数据质量修复 + 段落定位与引文关联
 
