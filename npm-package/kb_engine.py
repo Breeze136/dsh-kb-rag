@@ -754,8 +754,9 @@ def _migrate(db, created):
         try:
             db.execute("ALTER TABLE docs ADD COLUMN zotero_key TEXT")
             info["actions"].append("add docs.zotero_key")
-        except sqlite3.OperationalError:
-            pass                                     # 列已存在
+        except sqlite3.OperationalError as ex:
+            if "duplicate column" not in str(ex):
+                raise                                 # 锁冲突等真实错误上抛，勿静默吞
         db.execute("PRAGMA user_version = 1")
     # v1 -> v2：chunks 段落定位列（旧数据为 NULL，重入库后才有段号）
     if cur < 2:
@@ -763,8 +764,11 @@ def _migrate(db, created):
             try:
                 db.execute("ALTER TABLE chunks ADD COLUMN %s INTEGER" % col)
                 info["actions"].append("add chunks.%s" % col)
-            except sqlite3.OperationalError:
-                pass                                 # 列已存在
+            except sqlite3.OperationalError as ex:
+                # 仅幂等重入（列已存在）时吞掉；锁冲突等其他 OperationalError 必须上抛，
+                # 否则版本号已置新而列缺失，后续 INSERT 每行都报 no such column 且永不重迁移
+                if "duplicate column" not in str(ex):
+                    raise
         db.execute("PRAGMA user_version = 2")
     # v2 -> v3：chunks 页码列（PDF 物理页码锚点；旧数据为 NULL，重入库后才有）
     if cur < 3:
@@ -772,8 +776,9 @@ def _migrate(db, created):
             try:
                 db.execute("ALTER TABLE chunks ADD COLUMN %s INTEGER" % col)
                 info["actions"].append("add chunks.%s" % col)
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as ex:
+                if "duplicate column" not in str(ex):
+                    raise
         db.execute("PRAGMA user_version = 3")
     # zotero_key 回填：旧行按 Zotero storage 路径提取附件 key（幂等，只补 NULL）
     n = db.execute(
@@ -786,9 +791,23 @@ def _migrate(db, created):
             ("%\\Zotero\\storage\\%",))
         info["backfilled_keys"] = n
         info["actions"].append("backfill zotero_key")
-    # 孤儿向量清理（连接时兜底）
-    db.execute("DELETE FROM vecs WHERE chunk_id NOT IN (SELECT id FROM chunks)")
-    info["actions"].append("cleanup orphan vecs")
+    # 孤儿向量清理（连接时兜底）。写语句在库被异步入库等事务持锁时会阻塞至
+    # busy timeout 后抛 database is locked —— 读命令的 connect 不应因此失败/长等，
+    # 清理是可推迟的维护操作：以短超时探测，撞锁即跳过，留给下次连接/写命令再清。
+    prev_timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
+    try:
+        db.execute("PRAGMA busy_timeout = 500")  # 500ms：宁可推迟清理也不让读连接干等 5s
+        db.execute("DELETE FROM vecs WHERE chunk_id NOT IN (SELECT id FROM chunks)")
+        info["actions"].append("cleanup orphan vecs")
+    except sqlite3.OperationalError as ex:
+        if "locked" not in str(ex).lower():
+            raise
+        info["actions"].append("cleanup orphan vecs deferred (db locked)")
+    finally:
+        try:
+            db.execute("PRAGMA busy_timeout = %d" % prev_timeout)
+        except Exception:
+            pass
     # 显式提交：Python sqlite3 的 DML 在隐式事务中，close() 会回滚未提交修改
     # （backfill/孤儿清理必须在命令处理前落盘；PRAGMA user_version 不受此影响但一并提交无害）
     db.commit()
@@ -919,10 +938,13 @@ def cmd_ingest(req):
     def _prog():
         if progress_path:
             try:
-                Path(progress_path).write_text(json.dumps(
+                # 原子写：临时文件 + rename，避免轮询方读到半截 JSON
+                tmp = progress_path + ".tmp"
+                Path(tmp).write_text(json.dumps(
                     {"status": "running", "processed": processed,
                      "errors": totals["errors"], "chunks": totals["chunks"]},
                     ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, progress_path)
             except Exception:
                 pass
 
@@ -941,6 +963,11 @@ def cmd_ingest(req):
                     continue
                 _ingest_file(db, f, force, files, totals)
                 processed += 1
+                # 逐文件 commit：把 SQLite 写锁窗口从"整批"缩到"单文件+嵌入"，
+                # 避免异步入库运行期间同库的一切命令（含只读）在 connect 处撞锁
+                # （子进程首个 INSERT 即开事务，原实现到全部文件处理完才 commit）。
+                # 部分成功是合理语义：files[] 逐条带 status，异常时未 commit 文件自然回滚。
+                db.commit()
                 _prog()
         if totals["added"] or totals["updated"]:
             db.execute("DELETE FROM cache")  # any index change invalidates cache
@@ -1831,12 +1858,20 @@ def cmd_clear(req):
         db.commit()
         db.execute("VACUUM")
         db.commit()
+        # 一并清空后台任务残留（job/progress/result 旧文件会让 kb_status 读出陈旧结果）
+        try:
+            jdir = _jobs_dir(req.get("kb_root") or ".kb")
+            if jdir.exists():
+                for f in jdir.glob("*.json"):
+                    f.unlink(missing_ok=True)
+        except Exception:
+            pass
         db_path = str((Path(req.get("kb_root") or ".kb") / "kb.sqlite").resolve())
     finally:
         db.close()
     return {"ok": True, "cleared_docs": docs_n, "cleared_chunks": chunks_n,
             "db": db_path,
-            "note": "已清空全部文献与索引，可用 kb_ingest 或 kb_zotero 重建。",
+            "note": "已清空全部文献与索引（含后台任务记录），可用 kb_ingest 或 kb_zotero 重建。",
             "ms": round((time.time() - t0) * 1000)}
 
 
@@ -2090,10 +2125,24 @@ def _jobs_dir(kb_root):
     return Path(kb_root) / ".kb-jobs"
 
 
+# job_id 由 uuid4().hex[:12] 生成：固定 12 位小写十六进制。查询入口据此校验，
+# 阻止含路径分隔/.. 段的 job_id 目录穿越读取库外 JSON（cmd_status 用 job_id 拼文件路径）。
+_JOB_ID_RE = None  # 惰性编译，避免 import 时开销
+
+
+def _valid_job_id(job_id):
+    import re
+    global _JOB_ID_RE
+    if _JOB_ID_RE is None:
+        _JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+    return bool(_JOB_ID_RE.match(job_id))
+
+
 def cmd_ingest_async(req):
     """异步入库：fork 独立子进程跑 ingest，父进程立即返回 job_id。
     适用于 MCP/Kimi 等有单次调用超时（60s）的宿主：提交即返回，kb_status 轮询。
-    注意：子进程与主进程并发写同一 kb.sqlite，请勿在任务运行期间再发起写操作。"""
+    注意：子进程与主进程并发写同一 kb.sqlite；任务期间同库的写命令会撞锁失败
+    （读命令经逐文件 commit + 孤儿清理容错后可正常连接）。"""
     import subprocess, uuid
     kb_root = req.get("kb_root") or ".kb"
     job_id = uuid.uuid4().hex[:12]
@@ -2106,8 +2155,22 @@ def cmd_ingest_async(req):
         jf = jdir / (job_id + ".job.json")
         jf.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
         script = os.path.abspath(sys.argv[0]) if (sys.argv and sys.argv[0]) else os.path.abspath(__file__)
-        subprocess.Popen([sys.executable, script, "run_job", str(jf)],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen([sys.executable, script, "run_job", str(jf)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # 启动校验：脚本路径/解释器错误会让子进程在数毫秒内退出；
+        # 短窗口内 poll() 非 None 说明启动即失败，报错并清理 job 文件（result 未写，任务不留残骸）。
+        try:
+            rc = proc.poll()
+        except Exception:
+            rc = None
+        if rc is not None:
+            try:
+                jf.unlink(missing_ok=True)
+                (jdir / (job_id + ".progress.json")).unlink(missing_ok=True)
+            except Exception:
+                pass
+            return {"ok": False, "job_id": job_id,
+                    "error": "后台入库进程启动即退出（exit=%s）。请检查引擎脚本路径与 Python 环境。" % rc}
     except Exception as e:
         return {"ok": False, "error": "启动后台入库进程失败: %s: %s" % (type(e).__name__, e)}
     return {"ok": True, "job_id": job_id, "status": "running",
@@ -2129,10 +2192,21 @@ def run_async_job(jobfile):
     except Exception as e:
         out = {"status": "error", "job_id": job.get("id", "?"),
                "error": "%s: %s" % (type(e).__name__, e)}
-    rp = job.get("result_path")
+    rp = job.get("result_path") if isinstance(job, dict) else None
+    if not rp:
+        # job 文件本身不可解析/无 result_path：无法告知轮询方，退而求其次
+        # 在 job 文件旁写一个 error 结果，让 kb_status 至少能返回"任务失败"而非永久 running
+        try:
+            jf = Path(jobfile)
+            rp = str(jf.with_name((job.get("id") if isinstance(job, dict) and job.get("id") else "unknown") + ".result.json"))
+        except Exception:
+            rp = None
     if rp:
         try:
-            Path(rp).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+            # 原子写：先写临时文件再 rename，避免 kb_status 读到半截 JSON
+            tmp = rp + ".tmp"
+            Path(tmp).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, rp)
         except Exception:
             pass
     return out
@@ -2144,6 +2218,8 @@ def cmd_status(req):
     kb_root = req.get("kb_root") or ".kb"
     if not job_id:
         return {"ok": False, "error": "job_id 必填（来自 kb_ingest async_mode 或 ingest_async 的返回）"}
+    if not _valid_job_id(job_id):
+        return {"ok": False, "error": "job_id 非法（应为 12 位十六进制，来自 kb_ingest async_mode 的返回）"}
     jdir = _jobs_dir(kb_root)
     rp = jdir / (job_id + ".result.json")
     if rp.exists():
@@ -2154,6 +2230,13 @@ def cmd_status(req):
                 resp["error"] = data["error"]
             if isinstance(data.get("result"), dict):
                 resp["result"] = data["result"]
+            # 已完结的任务：清理 job/progress 中间文件，避免 .kb-jobs 永久累积
+            # （result.json 保留供后续 kb_status 读取，kb_clear 会一并清空目录）
+            for suffix in (".job.json", ".progress.json"):
+                try:
+                    (jdir / (job_id + suffix)).unlink(missing_ok=True)
+                except Exception:
+                    pass
             return resp
         except Exception as e:
             return {"ok": False, "error": "读取任务结果失败: %s" % e}
@@ -2165,8 +2248,18 @@ def cmd_status(req):
         except Exception:
             pass
     if (jdir / (job_id + ".job.json")).exists() or pp.exists():
+        # 心跳近似：首个 progress 在首文件处理完后才写；若任务卡在模型加载/锁等环节
+        # 会长时间零产出。job.json mtime 超过 1 小时仍无 result，视为可能崩溃/卡死。
+        try:
+            jf = jdir / (job_id + ".job.json")
+            age_h = (time.time() - jf.stat().st_mtime) / 3600 if jf.exists() else 0
+        except Exception:
+            age_h = 0
+        note = ("任务运行中，请稍后重查（完成时返回 totals）"
+                if age_h < 1 else
+                "任务已超过 1 小时无更新，可能卡死或子进程已退出；可稍后再查，或检查任务日志后重试")
         return {"ok": True, "job_id": job_id, "status": "running", "progress": prog,
-                "note": "任务运行中，请稍后重查（完成时返回 totals）"}
+                "note": note}
     return {"ok": True, "job_id": job_id, "status": "not_found",
             "note": "未找到该任务（job 目录: %s）" % jdir}
 

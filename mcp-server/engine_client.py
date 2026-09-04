@@ -128,9 +128,24 @@ def render_status(resp):
     if resp.get("ok") is False:
         return "**查询失败**：%s" % resp.get("error")
     st = resp.get("status")
+    if st == "error":
+        lines = ["**后台任务失败** · job_id=%s" % resp.get("job_id")]
+        if resp.get("error"):
+            lines.append(str(resp["error"]))
+        if resp.get("note"):
+            lines.append(str(resp["note"]))
+        return "\n".join(l for l in lines if l)
     if st == "done":
-        head = "**后台入库完成** · job_id=%s" % resp.get("job_id")
         result = resp.get("result")
+        if isinstance(result, dict) and result.get("ok") is False:
+            # cmd_ingest 入参错误（如空 paths）等：result.ok=False 不是成功，如实呈现失败原因
+            lines = ["**后台任务未成功** · job_id=%s" % resp.get("job_id")]
+            if result.get("error"):
+                lines.append(str(result["error"]))
+            if resp.get("error"):
+                lines.append(str(resp["error"]))
+            return "\n".join(l for l in lines if l)
+        head = "**后台入库完成** · job_id=%s" % resp.get("job_id")
         if isinstance(result, dict):
             body = render_ingest(result)
             return head + "\n" + body if body else head
