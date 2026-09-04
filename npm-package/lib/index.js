@@ -364,7 +364,8 @@ function apply(ctx) {
         const ms = typeof f.ms === "number" ? f.ms : 0;
         lines.push(icon + " " + name + " · " + ms + "ms");
       });
-      if (files.length > tail.length) lines.push("（共 " + files.length + " 个文件，仅显示最近 " + tail.length + " 条；完整统计见 kb_stats）");
+      const totalN = typeof value.files_total === "number" ? value.files_total : files.length;
+      if (files.length > tail.length) lines.push("（共 " + totalN + " 个文件，仅显示最近 " + tail.length + " 条；完整统计见 kb_stats）");
     }
     if (value.note) lines.push(String(value.note));
     return [{ type: "text", text: lines.join("\n") }];
