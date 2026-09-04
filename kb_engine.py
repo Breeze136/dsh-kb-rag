@@ -2139,17 +2139,18 @@ def _valid_job_id(job_id):
 
 
 def cmd_ingest_async(req):
-    """异步入库：fork 独立子进程跑 ingest，父进程立即返回 job_id。
+    """异步任务提交（ingest/zotero 通用）：fork 独立子进程跑任务，父进程立即返回 job_id。
     适用于 MCP/Kimi 等有单次调用超时（60s）的宿主：提交即返回，kb_status 轮询。
     注意：子进程与主进程并发写同一 kb.sqlite；任务期间同库的写命令会撞锁失败
     （读命令经逐文件 commit + 孤儿清理容错后可正常连接）。"""
     import subprocess, uuid
     kb_root = req.get("kb_root") or ".kb"
+    command = req.get("command") or "ingest"          # 后台任务要执行的引擎命令
     job_id = uuid.uuid4().hex[:12]
     jdir = _jobs_dir(kb_root)
     try:
         jdir.mkdir(parents=True, exist_ok=True)
-        job = {"id": job_id, "payload": dict(req),
+        job = {"id": job_id, "command": command, "payload": dict(req),
                "result_path": str(jdir / (job_id + ".result.json")),
                "progress_path": str(jdir / (job_id + ".progress.json"))}
         jf = jdir / (job_id + ".job.json")
@@ -2170,23 +2171,27 @@ def cmd_ingest_async(req):
             except Exception:
                 pass
             return {"ok": False, "job_id": job_id,
-                    "error": "后台入库进程启动即退出（exit=%s）。请检查引擎脚本路径与 Python 环境。" % rc}
+                    "error": "后台任务进程启动即退出（exit=%s）。请检查引擎脚本路径与 Python 环境。" % rc}
     except Exception as e:
-        return {"ok": False, "error": "启动后台入库进程失败: %s: %s" % (type(e).__name__, e)}
+        return {"ok": False, "error": "启动后台任务进程失败: %s: %s" % (type(e).__name__, e)}
     return {"ok": True, "job_id": job_id, "status": "running",
             "kb_root": str(Path(kb_root).resolve()),
-            "note": "后台入库已启动（job_id=%s）。用 kb_status(job_id=...) 轮询进度；"
+            "note": "后台任务已启动（job_id=%s）。用 kb_status(job_id=...) 轮询进度；"
                     "宿主 60s 超时不影响后台任务。" % job_id}
 
 
 def run_async_job(jobfile):
-    """后台子进程入口：读 job 文件 -> 执行 ingest（逐文件回写进度）-> 写结果文件。"""
+    """后台子进程入口：读 job 文件 -> 执行对应引擎命令（逐文件回写进度）-> 写结果文件。"""
     job = {}
     try:
         job = json.loads(Path(jobfile).read_text(encoding="utf-8"))
         payload = dict(job.get("payload") or {})
         payload["progress_path"] = job.get("progress_path")
-        result = cmd_ingest(payload)
+        command = job.get("command") or "ingest"
+        handler = {"ingest": cmd_ingest, "zotero": cmd_zotero}.get(command)
+        if handler is None:
+            raise ValueError("unknown async command: %s" % command)
+        result = handler(payload)
         result.setdefault("ok", True)
         out = {"status": "done", "job_id": job.get("id"), "result": result}
     except Exception as e:
