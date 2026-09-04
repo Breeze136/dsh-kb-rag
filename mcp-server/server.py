@@ -80,8 +80,14 @@ async def kb_status(job_id: str, kb_root: str = "") -> str:
 
 
 @mcp.tool()
-async def kb_zotero(zotero_db: str = "", kb_root: str = "", limit: int = 0, force: bool = False, dry_run: bool = False) -> str:
-    """把本地 Zotero 文献库中带 PDF 附件的文献批量迁移到知识库。读取 zotero.sqlite（默认自动定位 ~/Zotero 等；找不到时用 zotero_db 显式指定），解析每篇元数据与 PDF 附件路径，逐篇解析入库并生成向量。已入库跳过、重复标记 duplicate（增量）。附件缺失标记 missing 跳过。dry_run=true 只列候选不写入。"""
+async def kb_zotero(zotero_db: str = "", kb_root: str = "", limit: int = 0, force: bool = False,
+                    dry_run: bool = False, async_mode: bool = False) -> str:
+    """把本地 Zotero 文献库中带 PDF 附件的文献批量迁移到知识库。读取 zotero.sqlite（默认自动定位 ~/Zotero 等；找不到时用 zotero_db 显式指定），解析每篇元数据与 PDF 附件路径，逐篇解析入库并生成向量。已入库跳过、重复标记 duplicate（增量）。附件缺失标记 missing 跳过。dry_run=true 只列候选不写入。
+    async_mode=true 时整库迁移在后台执行并立即返回 job_id（宿主单次调用超时，如 Kimi Work 60s，下迁移数百篇建议开启），随后用 kb_status(job_id=...) 轮询直到 status=done。dry_run 与 async_mode 不应同时使用。"""
+    if async_mode:
+        return render_async(await engine.call("ingest_async", {
+            "command": "zotero", "zotero_db": zotero_db, "kb_root": _root(kb_root),
+            "limit": limit or None, "force": force, "dry_run": dry_run}))
     return render_ingest(await engine.call("zotero", {
         "zotero_db": zotero_db, "kb_root": _root(kb_root), "limit": limit or None,
         "force": force, "dry_run": dry_run}))
