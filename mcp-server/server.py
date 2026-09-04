@@ -36,12 +36,38 @@ def _root(kb_root):
     return kb_root or DEFAULT_KB_ROOT
 
 
+def _should_async(paths):
+    """估算待入库文件数：目录递归扫描、单文件计 1。超过阈值自动转后台，
+    避免宿主单次调用超时（Kimi Work 60s 等）导致大批量入库被掐断。
+    计数只看扩展名，不做内容读取——轻量、无引擎往返。KB_ASYNC_THRESHOLD 可覆盖（默认 25）。"""
+    import os
+    try:
+        threshold = int(os.environ.get("KB_ASYNC_THRESHOLD", "25"))
+    except ValueError:
+        threshold = 25
+    exts = {".pdf", ".txt", ".md", ".markdown", ".docx"}
+    n = 0
+    for p in paths or []:
+        p = str(p)
+        if os.path.isdir(p):
+            for root, _dirs, files in os.walk(p):
+                for f in files:
+                    if os.path.splitext(f)[1].lower() in exts:
+                        n += 1
+                        if n > threshold:
+                            return True
+        else:
+            n += 1
+    return n > threshold
+
+
 @mcp.tool()
 async def kb_ingest(paths: list[str], kb_root: str = "", force: bool = False,
                     async_mode: bool = False) -> str:
-    """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。
-    async_mode=true 时后台执行并立即返回 job_id（宿主单次调用超时限制内适用，如 Kimi Work 60s），随后用 kb_status(job_id) 轮询直到 done。大批量（几十个以上文件夹/数百篇）强烈建议 async_mode=true。"""
-    if async_mode:
+    """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。
+    大批量自动转后台：当待处理文件很多（目录或 ≥KB_ASYNC_THRESHOLD 个文件，默认 25），本工具自动改用后台执行并立即返回 job_id——宿主单次调用超时（如 Kimi Work 60s）不影响入库，随后用 kb_status(job_id=...) 轮询直到 status=done 拿到 totals。文件少时同步执行直接返回结果。显式 async_mode=true 强制后台，false 强制同步。"""
+    effective_async = async_mode or _should_async(paths)
+    if effective_async:
         return render_async(await engine.call("ingest_async", {
             "paths": paths, "kb_root": _root(kb_root), "force": force}))
     return render_ingest(await engine.call("ingest", {"paths": paths, "kb_root": _root(kb_root), "force": force}))
