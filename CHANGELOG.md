@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.2] - MCP 超时加固 + 健壮性修复
+
+- **MCP 大批量入库自动转后台（Kimi Work 60s 超时解药落地）**：`kb_ingest` 先轻量估算待处理文件数（目录递归/文件列表），超过 `KB_ASYNC_THRESHOLD`（默认 25）自动改用 async_mode，立即返回 `job_id` + `kb_status` 轮询指引——agent 无需知道 async_mode 存在，传整个文献库文件夹也不会超时；显式 `async_mode=true/false` 可强制
+- **`kb_zotero` 支持 async_mode=true**：async 任务分发泛化（job 带 command 字段，`run_async_job` 按命令分发 ingest/zotero），整库迁移可后台执行 + kb_status 轮询
+- **异步入库期间并发读不再锁死（高）**：`cmd_ingest` 由整批单事务改为**逐文件 commit**（写锁窗口从"整批"缩到"单文件+嵌入"）；`_migrate` 孤儿向量清理改 500ms 短超时探测、撞锁即跳过（读命令的 connect 不再干等 5s 或抛 database is locked）
+- **迁移健壮性**：`_migrate` 的 ALTER 只吞 "duplicate column"，锁冲突等其他 OperationalError 上抛（避免"版本号置新但列缺失"的静默不一致）
+- **后台任务卫生**：`cmd_status` 校验 job_id 为 12 位十六进制（阻断目录穿越）；done 后自动清理 job/progress 残留（result 保留可重复读）；超 1h 无进展提示可能卡死；`kb_clear` 一并清空 `.kb-jobs`
+- **启动即失败可感知**：`cmd_ingest_async` spawn 后短窗口 poll，子进程启动即退出时立即报错并清理，不再留"永久 running"的幽灵任务
+- **原子写**：progress/result 改为临时文件 + rename，轮询不会读到半截 JSON
+- **渲染修正**：DSH 宿主（`plugin/host.js` 与 `npm lib`）改用 `files_total` 显示真实文件数（引擎只回最近 20 条后不再误报"共 20 个文件"）；`kb_zotero` dry_run 返回完整候选清单（预览语义，不截断）；MCP `render_status` 展示 error 详情、`result.ok=false` 如实呈现失败而非假"完成"
+- 引擎同步进 npm-package 副本
+
 ## [1.6.1] - MCP 异步入库 + PDF 页码锚点（schema v3）
 
 - **异步入库（MCP 60s 超时解药）**：`kb_ingest` 支持 `async_mode=true`，fork 独立子进程跑 ingest 并立即返回 `job_id`；新增 `kb_status(job_id)` 轮询进度（`.kb-jobs/` 目录，与 kb.sqlite 同级），宿主超时不影响后台任务
