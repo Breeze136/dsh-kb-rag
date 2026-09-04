@@ -1763,8 +1763,10 @@ def cmd_zotero(req):
     finally:
         db.close()
     return {"ok": True, "zotero_db": zdb, "candidates": len(entries),
-            # 同 ingest：files 只回最近 20 条压缩 JSON，files_total 为真实总数
-            "dry_run": dry_run, "files": files[-20:], "files_total": len(files),
+            # dry_run 语义是"预览全部候选"，不截断；真实迁移才只回最近 20 条压缩 JSON
+            "dry_run": dry_run,
+            "files": files if dry_run else files[-20:],
+            "files_total": len(files),
             "totals": totals,
             "ms": round((time.time() - t0) * 1000)}
 
