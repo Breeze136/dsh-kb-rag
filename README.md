@@ -141,6 +141,26 @@ MCP 侧 `kb_ingest` 会自动估算待处理文件数，超过 `KB_ASYNC_THRESHO
 
 > 装完务必**重启 DSH 并开新会话**——工具在会话创建时注入，老会话不会自动获得。分步演练与常见坑见 [QUICKSTART.md](QUICKSTART.md)。
 
+### 5. 升级
+
+DSH 的 profile 是 **pnpm 工作区**（目录下有 `pnpm-lock.yaml`，`dsh plugin` 内部就是转发 pnpm），所以升级请用 dsh 自己的命令：
+
+```bash
+dsh plugin --profile web add dsh-kb-rag          # 升到 latest
+dsh plugin --profile web add dsh-kb-rag@1.6.3    # 或钉版本
+```
+
+等价做法是重跑安装器（顺带校准 Python 依赖）：
+
+```bash
+npx dsh-kb-rag-install --profile web
+```
+
+> [!WARNING]
+> **不要在 DSH profile 目录里跑 `npm install dsh-kb-rag`。** 那会铺出一份 npm 布局的 `node_modules`，与 pnpm 的符号链接结构/锁文件冲突，后续 `dsh plugin` 操作会变得难以预料。`npm install` 只适用于**完全手动、不经 dsh plugin 管理**的部署（见 [npm-package/README.md](npm-package/README.md) Option 3）。
+>
+> 升级后重启 DSH 并开新会话。旧 `.kb` 库 schema 会自动迁移（见 [docs/MIGRATION.md](docs/MIGRATION.md)），但 **v1.6.x 的页码锚点与上标角标是对旧数据 `force` 重入库后才会出现**（迁移只加列，不回填解析结果）。
+
 ---
 
 ## 工具参考
@@ -228,11 +248,12 @@ kb_engine.py —— resident `serve` daemon（常驻，模型只加载一次）
 | `KB_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 引擎 | 嵌入模型（首次使用自动下载到 HF 缓存）|
 | `KB_RERANK_MODEL` | `BAAI/bge-reranker-base` | 引擎 | 精排模型 |
 | `HF_ENDPOINT` | 无 | 引擎 | 受限网络设 `https://hf-mirror.com` 走镜像 |
-| `KB_AUTO_PIP` | `0` | DSH 插件 | `1` = 启动时自动 pip 安装缺失依赖（默认仅打印命令）|
+| `KB_AUTO_PIP` | `0` | npm 静态包 | `1` = 启动探测到缺依赖时自动 `pip install`（固定 argv；默认只打印命令）。动态插件 `plugin/host.js` 只提示、不自动装 |
 | `KB_RAG_ROOT` | DSH：会话工作区 `.kb`；MCP：`~/.kb-rag` | MCP | 知识库目录（各工具可用 `kb_root` 覆盖）|
 | `KB_RAG_PYTHON` | 当前解释器 | MCP | 引擎 Python 覆盖（避免裸 `python` 命中错误环境）|
 | `KB_ASYNC_THRESHOLD` | `25` | MCP | `kb_ingest` 待处理文件数超过即自动转后台 |
 | `KB_SQLITE_WAL` | 关 | 引擎 | `1` = 开 WAL（同步 `.kb` 目录时保持默认更安全）|
+| `UNPAYWALL_EMAIL` | 内置示例地址 | 引擎 | `kb_fetch` 走 Unpaywall 查询 OA 时使用；建议改成自己的邮箱 |
 
 ## 仓库布局
 

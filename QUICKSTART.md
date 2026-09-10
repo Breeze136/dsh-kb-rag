@@ -41,12 +41,23 @@ export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $en
 
 ### 升级到最新版
 
+DSH 的 profile 是 **pnpm 工作区**，升级走 dsh 命令（它会用 pnpm 保持锁文件一致）：
+
+```bash
+dsh plugin --profile web add dsh-kb-rag          # 升到 latest（推荐）
+dsh plugin --profile web add dsh-kb-rag@1.6.3    # 或钉版本
+```
+
+或重跑安装器（等价，顺带校准 Python 依赖与模型缓存）：
+
 ```bash
 npm cache clean --force   # 清掉 latest 元数据缓存（避免拉到旧版）
 npx dsh-kb-rag-install
 ```
 
-钉版本用 `--package dsh-kb-rag@1.6.3`。升级完同样要重启 DSH、开新会话；旧 `.kb` 库 schema 自动迁移（`PRAGMA user_version` 门控，见 `docs/MIGRATION.md`）。
+> ⚠️ 别在 profile 目录里跑 `npm install dsh-kb-rag`——那会铺出 npm 布局的 `node_modules`，与 pnpm 的符号链接结构/锁文件冲突。`npm install` 只适用于完全手动、不经 `dsh plugin` 管理的部署。
+
+升级完同样要重启 DSH、开新会话；旧 `.kb` 库 schema 自动迁移（`PRAGMA user_version` 门控，见 `docs/MIGRATION.md`）。注意 v1.6.x 的**页码锚点与上标角标是对旧数据 `force` 重入库后才有**（迁移只加列，不回填解析结果）。
 
 ## 第 2 分钟 · 建库
 

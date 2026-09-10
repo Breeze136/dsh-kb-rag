@@ -240,6 +240,10 @@ if [ -z "$PROFILE" ] && command -v dsh >/dev/null 2>&1; then
       else
         die "未选择有效 profile，已中止（dsh plugin 的 --profile 为必填项）"
       fi
+    elif [ "$DRY_RUN" -eq 1 ]; then
+      # dry-run 不执行任何安装：用一个候选走完演练流程，仅提示真实安装需显式指定
+      PROFILE=$(printf '%s' "$CANDIDATES" | head -1)
+      warn "dry-run：检测到多个 profile（$(printf '%s' "$CANDIDATES" | tr '\n' ' ')），演练暂用 $PROFILE；实际安装请带 --profile <名称>"
     else
       die "检测到多个 profile（$(printf '%s' "$CANDIDATES" | tr '\n' ' ')）但当前是非交互模式：请带 --profile <名称> 重跑"
     fi
