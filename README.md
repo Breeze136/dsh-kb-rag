@@ -115,7 +115,7 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 
 ### 3. Build a library
 
-In a DSH conversation, ask it to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Individual papers can be fetched first by identifier (`kb_fetch`, open access only).
+In a DSH conversation, ask it to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Individual papers can be fetched first by identifier (`kb_fetch` — it resolves the publisher version first, which works on campus or institutional networks, and falls back to open access).
 
 <details>
 <summary>Bulk ingestion — keeping host timeouts out of the way</summary>
@@ -166,7 +166,7 @@ npx dsh-kb-rag-install --profile web
 | `kb_dedup` | Remove duplicate documents, keeping the earliest copy | "Deduplicate" |
 | `kb_clear` | Wipe all documents and indexes; requires `confirm=true` | "Clear the knowledge base" |
 | `kb_stats` | Document, chunk and vector counts, plus recent ingests | "What is in the library?" |
-| `kb_fetch` | Download a PDF by DOI or arXiv ID (open access only, publisher version first) | "Download 10.5555/12345678" |
+| `kb_fetch` | Download a PDF by DOI or arXiv ID (publisher version first, so a campus or institutional subscription applies; open-access fallback) | "Download 10.5555/12345678" |
 
 The MCP server exposes the same nine tools with `kb_scope` replaced by `kb_status` (background job polling). Configuration and client snippets: [mcp-server/README.md](mcp-server/README.md).
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// doi_pdf.mjs — 给定 DOI,自动解析并下载 PDF(优先 OA,其次校园网订阅,靠 citation_pdf_url meta 而非按钮位置)
+// doi_pdf.mjs — 给定 DOI/arXiv ID 解析并下载 PDF。
+// 顺序:arXiv 直连 → 落地页 citation_pdf_url(出版商正式版;校园网/机构订阅可直接取得订阅版) →
+//      落地页内常见 pdf 链接模式 → Unpaywall(OA)兜底 → Crossref 记录的 PDF 链接。
+// 只按标准元标签与公开 API 解析,不绕过付费墙、不访问 Sci-Hub、不伪造凭据。
 // 用法:
 //   node doi_pdf.mjs "10.5555/12345680" "10.5555/12345681"
 //   node doi_pdf.mjs --file dois.txt
@@ -161,7 +164,7 @@ async function findPdf(doi) {
 
   // 2) Unpaywall(OA)
   try {
-    const r = await fetch(`https://api.unpaywall.org/v2/${encodeURIComponent(d)}?email=researcher@university.edu`, { headers: { "User-Agent": UA } });
+    const r = await fetch(`https://api.unpaywall.org/v2/${encodeURIComponent(d)}?email=${encodeURIComponent(process.env.UNPAYWALL_EMAIL || "researcher@university.edu")}`, { headers: { "User-Agent": UA } });
     if (r.ok) {
       const j = await r.json();
       const p = j.best_oa_location?.url_for_pdf || j.best_oa_location?.url;
