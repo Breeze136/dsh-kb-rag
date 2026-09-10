@@ -226,6 +226,10 @@ if (-not $Profile -and (Get-Command dsh -ErrorAction SilentlyContinue)) {
       $ans = Read-Host "  用哪个？输入名称后回车"
       if ($ans -and ($candidates -contains $ans)) { $Profile = $ans }
       else { Write-Fail "未选择有效 profile，已中止（dsh plugin 的 --profile 为必填项）"; exit 1 }
+    } elseif ($DryRun) {
+      # dry-run 不执行任何安装：用一个候选走完演练流程，仅提示真实安装需显式指定
+      $Profile = $candidates[0]
+      Write-Warn2 ("dry-run：检测到多个 profile（" + ($candidates -join ", ") + "），演练暂用 " + $Profile + "；实际安装请带 -Profile <名称>")
     } else {
       Write-Fail ("检测到多个 profile（" + ($candidates -join ", ") + "）但当前是非交互模式：请带 -Profile <名称> 重跑")
       exit 1

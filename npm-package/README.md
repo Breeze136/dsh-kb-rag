@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **最新版本 v1.6.3** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.3** — 安装：`dsh plugin --profile web add dsh-kb-rag@latest`（DSH profile 由 pnpm 管理，请勿在其中用 `npm install`；手动部署见 [Option 3](#option-3--manual-npm-install-bring-your-own-activation)）
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -79,6 +79,9 @@ Flags (Windows / bash): `-Mirror`/`--mirror` (pip mirror), `-Profile`/`--profile
 
 ### Option 3 — manual `npm install` (bring your own activation)
 
+> [!WARNING]
+> **Only for deployments you manage by hand.** A DSH profile created by `dsh plugin` is a **pnpm workspace** (it has `pnpm-lock.yaml`); running `npm install` there lays out a npm-style `node_modules` next to pnpm's symlink store and the two disagree from then on. If your plugin was installed via `dsh plugin add`, upgrade it the same way — see [Upgrading](#upgrading) below.
+
 Run **inside the DSH profile/deployment directory** (this is where the plugin loader resolves packages from):
 
 ```bash
@@ -94,6 +97,26 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 
 ---
 
+### Upgrading
+
+**Installed via `dsh plugin` (the normal case)** — that profile is a **pnpm workspace**, so upgrade through dsh and let it keep the lockfile consistent:
+
+```bash
+dsh plugin --profile web add dsh-kb-rag            # latest
+dsh plugin --profile web add dsh-kb-rag@1.6.3      # or pin
+```
+
+**Installed manually via npm** (Option 3) — stay with npm in that profile dir:
+
+```bash
+cd <your-dsh-profile-dir>
+npm install dsh-kb-rag@latest
+```
+
+Either way: **restart DSH and open a new session**. Existing `.kb` libraries migrate automatically (schema versioning), but **page anchors and superscript citation markers are parse-time data** — run `kb_ingest` with `force: true` over old documents to get them.
+
+---
+
 ### Troubleshooting (things that bite)
 
 | Symptom | Cause / Fix |
@@ -104,7 +127,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 | install.ps1 → `OSError: [WinError 123] ... C:\Users\??\...` (fails at engine smoke test) | Non-ASCII Windows username: PowerShell 5.1's default `$OutputEncoding` is ASCII, mangling Chinese chars in the piped JSON to `?` (≤ 1.6.2). Fixed by forcing UTF-8 pipe encoding (1.6.3+); workaround: `$env:TEMP='C:\kbragtmp'; $env:TMP='C:\kbragtmp'`, then re-run. |
 | Installed but tools don't appear | Tools are injected at **session creation** — restart DSH and open a **new** conversation. |
 | "模型首次检索自动下载" is slow / fails | Direct download failing now auto-retries via the `hf-mirror.com` mirror (installer `--models` and first-search). To pin it manually: `HF_ENDPOINT=https://hf-mirror.com`; models are `bge-small-zh-v1.5` (~95MB) + `bge-reranker-base` (~1.1GB). |
-| Upgrading from an older version | In the profile dir: `npm install dsh-kb-rag@latest`, restart, new session. Existing `.kb` libraries migrate automatically (schema versioning, see repo `docs/MIGRATION.md`). |
+| Upgrading from an older version | **Depends on how you installed it** — see [Upgrading](#upgrading) above: `dsh plugin --profile <name> add dsh-kb-rag` for pnpm-managed profiles, `npm install dsh-kb-rag@latest` only if you installed manually with npm. Restart DSH and open a new session; `.kb` libraries migrate automatically (see `docs/MIGRATION.md`), page anchors / citation markers need `force` re-ingest on old data. |
 | Tool call says Python deps missing | Default: only logs the `pip install` command. Set `KB_AUTO_PIP=1` in the host env to auto-install (fixed argv), or run the installer (Option 1b/2). |
 
 ### Guide for other Harness users
