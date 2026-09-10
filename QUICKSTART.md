@@ -1,4 +1,4 @@
-# QUICKSTART — 五分钟上手（v1.6.2）
+# QUICKSTART — 五分钟上手（v1.6.3）
 
 本页是 **DSH 插件形态** 的 5 分钟路线：装依赖 → 建库 → 检索 → 常见坑。想用 MCP（Claude Desktop / Kimi / Cursor 等桌面 agent）？直接看 [mcp-server/README.md](mcp-server/README.md)。
 
@@ -9,12 +9,12 @@
 **方式 A · npx 一行（最快，已装 Node 即可，直接复制）**：
 
 ```bash
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
+npx dsh-kb-rag-install
 ```
 
-> ⚠️ **最常踩的坑**：裸写 `npx dsh-kb-rag-install` 会 **E404** —— npx 会去找一个*名为 `dsh-kb-rag-install` 的包*（不存在）。必须带 `--package dsh-kb-rag`。`web` 是最常见的 profile 名；启动命令不同就把 `web` 换成你的名字（不确定时看 `~/.dsh/profiles/`，Windows 为 `C:\Users\<你>\.dsh\profiles\`）。
+> 安装器一条命令自动完成全链：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装，失败回退 corepack）→ `dsh plugin add` 安装激活（profile 未指定时自动检测 `~/.dsh/profiles/`，只有一个直接用）→ 模型预下载（直连失败自动切 hf-mirror.com 镜像重试）。不想预下载模型加 `--no-models`；指定 profile 加 `--profile web`；先演练加 `--dry-run`。（Windows 下参数自动翻译，全平台通用。）
 
-脚本自动完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 安装并激活。（Windows 下参数自动翻译，统一用 `--profile` / `--mirror` / `--models` / `--dry-run` 风格即可。）
+> 兼容旧写法（等价）：`npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"`。
 
 **方式 B · 下载仓库后运行脚本**：
 
@@ -43,10 +43,10 @@ export HF_ENDPOINT=https://hf-mirror.com   # 模型镜像（Windows: set 或 $en
 
 ```bash
 npm cache clean --force   # 清掉 latest 元数据缓存（避免拉到旧版）
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
+npx dsh-kb-rag-install
 ```
 
-钉版本用 `--package dsh-kb-rag@1.6.2`。升级完同样要重启 DSH、开新会话；旧 `.kb` 库 schema 自动迁移（`PRAGMA user_version` 门控，见 `docs/MIGRATION.md`）。
+钉版本用 `--package dsh-kb-rag@1.6.3`。升级完同样要重启 DSH、开新会话；旧 `.kb` 库 schema 自动迁移（`PRAGMA user_version` 门控，见 `docs/MIGRATION.md`）。
 
 ## 第 2 分钟 · 建库
 
@@ -75,7 +75,7 @@ npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ## 第 5 分钟 · 常见坑
 
 - **装完工具不出现**：工具在会话创建时注入 → 重启 DSH 并开**新**会话
-- **npx E404**：见第 1 分钟 ⚠️，必须 `--package dsh-kb-rag`
+- **npx E404**：老版本坑（包名与 bin 名不一致），`npx dsh-kb-rag-install` 已修复；若 npm 缓存了旧元数据，先 `npm cache clean --force`
 - **首次检索慢（约 15s）**：模型加载（守护进程只加载一次，之后亚秒级）
 - **工具报"缺少 Python 依赖"**：按工具返回里的命令 `python -m pip install <缺的包>`；或设 `KB_AUTO_PIP=1` 重启 DSH 自动装；或重跑一键安装（幂等，可反复跑）
 - **旧数据没有页码**：页码锚点是 schema v3 起的字段，旧行页码为 NULL、自动降级；`kb_ingest(force=true)` 重入库后恢复

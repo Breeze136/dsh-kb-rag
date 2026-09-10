@@ -94,29 +94,40 @@ async def kb_zotero(zotero_db: str = "", kb_root: str = "", limit: int = 0, forc
 
 
 @mcp.tool()
-async def kb_search(query: str, top_k: int = 5, snippet: int = 400, mode: str = "hybrid",
-                    rerank: bool = True, related: bool = True, kb_root: str = "",
-                    authors: str = "", title: str = "", journal: str = "", kind: str = "",
-                    section: str = "", year: str = "") -> str:
-    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合 + bge-reranker 精排），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节/得分）。query 可以是术语、数值、化学式或中文短语。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 \">=2020\" 形式）做元数据预过滤。related=true 附带关联文献列表（同作者/同期刊/年份相近/主题相似）。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
+async def kb_search(query: str, depth: str = "quick", top_k: int | None = None,
+                    snippet: int | None = None, mode: str = "hybrid",
+                    rerank: bool | None = None, related: bool | None = None,
+                    kb_root: str = "", authors: str = "", title: str = "",
+                    journal: str = "", kind: str = "", section: str = "",
+                    year: str = "") -> str:
+    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。depth 双模式：quick（默认）=快速检索，查到信息马上给——工具返回后立即作答，一两句话直接给用户要的信息，不展开背景不做延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 可以是术语、数值、化学式或中文短语。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
-    resp = await engine.call("search", {
-        "query": query, "top_k": top_k, "snippet": snippet, "mode": mode,
-        "rerank": rerank, "related": related, "kb_root": _root(kb_root), "filters": filters})
+    call = {"query": query, "depth": depth, "mode": mode,
+            "kb_root": _root(kb_root), "filters": filters}
+    # None 表示未传：不入请求，让引擎按 depth 取模式化缺省（top_k/snippet/rerank/related）
+    for key, val in [("top_k", top_k), ("snippet", snippet), ("rerank", rerank), ("related", related)]:
+        if val is not None:
+            call[key] = val
+    resp = await engine.call("search", call)
     return render_sources(resp)
 
 
 @mcp.tool()
-async def kb_rag(query: str, top_k: int = 3, rerank: bool = True, related: bool = True,
-                 kb_root: str = "", authors: str = "", title: str = "", journal: str = "",
-                 kind: str = "", section: str = "", year: str = "") -> str:
-    """在知识库中检索证据片段（混合检索 + 精排，默认 Top-3）供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议参考 related 关联文献列表。"""
+async def kb_rag(query: str, depth: str = "deep", top_k: int | None = None,
+                 rerank: bool | None = None, related: bool | None = None,
+                 kb_root: str = "", authors: str = "", title: str = "",
+                 journal: str = "", kind: str = "", section: str = "",
+                 year: str = "") -> str:
+    """在知识库中检索证据片段供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。depth 双模式：deep（默认）=深度检索，精排+引文链+关联文献全开，回答可跨文献综合论述（适合领域调研）；quick=快速检索，仅基于少量证据直接给答案、不展开。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里 ⭐ 库内命中的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内"；②「建议补库（循引文发现）」——citations 未命中条目，注明被 Ref n 引用、尚不在库内；③「相关文献」——related 列表（元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
-    resp = await engine.call("rag", {
-        "query": query, "top_k": top_k, "rerank": rerank, "related": related,
-        "kb_root": _root(kb_root), "filters": filters})
+    call = {"query": query, "depth": depth,
+            "kb_root": _root(kb_root), "filters": filters}
+    for key, val in [("top_k", top_k), ("rerank", rerank), ("related", related)]:
+        if val is not None:
+            call[key] = val
+    resp = await engine.call("rag", call)
     return render_sources(resp)
 
 

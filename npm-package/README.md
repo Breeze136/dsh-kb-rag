@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **最新版本 v1.6.2** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
+> **最新版本 v1.6.3** — 下载安装：`dsh plugin --profile web add dsh-kb-rag@latest`（或 `npm install dsh-kb-rag@latest`）
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -51,11 +51,14 @@ Runs the bundled installer (`scripts/install.ps1` / `scripts/install.sh`) straig
 Python deps → engine smoke test → Node/pnpm check → `dsh plugin add` activation → optional model pre-download.
 
 ```bash
-# ✅ correct — `--package dsh-kb-rag` tells npx which package provides the command
+# ✅ 推荐（1.6.3+）：裸命令即可 —— 由微包 dsh-kb-rag-install 提供（零逻辑转发本包安装器）
+npx dsh-kb-rag-install
+
+# 等价旧写法（不依赖微包；≤1.6.2 的老写法，仍然可用）
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-> ⚠️ **Common mistake**: a bare `npx dsh-kb-rag-install` **fails** — npx looks for a *package named* `dsh-kb-rag-install` on the registry (which doesn't exist). You must use `--package dsh-kb-rag` (and `-c` to run the bin inside that package's context).
+> ⚠️ **历史坑（≤ 1.6.2）**：当时注册表里**没有**名为 `dsh-kb-rag-install` 的包，裸 `npx dsh-kb-rag-install` 会 E404（npx 按包名查找）。1.6.3 起新增同名微包解决该问题；`--package dsh-kb-rag` 旧写法依旧等价可用。
 >
 > Bash-style flags (`--profile`, `--models`, `--dry-run`, `--mirror`) work on every OS — the entry translates them for Windows PowerShell. Add `--dry-run` to rehearse without changing anything.
 
@@ -80,7 +83,7 @@ Run **inside the DSH profile/deployment directory** (this is where the plugin lo
 
 ```bash
 cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
-npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.2 to pin
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.3 to pin
 ```
 
 Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
@@ -95,11 +98,12 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 
 | Symptom | Cause / Fix |
 |---|---|
-| `npx dsh-kb-rag-install` → "npm error code E404 / package not found" | Bare npx looks for a package **named** `dsh-kb-rag-install`. Use `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"` (Option 1b). |
+| `npx dsh-kb-rag-install` → "npm error code E404 / package not found" | 旧版（≤ 1.6.2）的坑：注册表无同名包。1.6.3+ 已由微包 `dsh-kb-rag-install` 修复；若 npm 缓存了旧元数据先 `npm cache clean --force`。临时替代：`npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"`。 |
 | `dsh plugin ... add` → pnpm errors | pnpm missing from PATH: `npm install -g pnpm`, then retry. |
 | install.ps1 → garbled Chinese / syntax error on Windows PowerShell 5.1 | The script ships with UTF-8 BOM (fixed in 1.3.1+). If you copied it manually, re-save as UTF-8 **with BOM**. |
+| install.ps1 → `OSError: [WinError 123] ... C:\Users\??\...` (fails at engine smoke test) | Non-ASCII Windows username: PowerShell 5.1's default `$OutputEncoding` is ASCII, mangling Chinese chars in the piped JSON to `?` (≤ 1.6.2). Fixed by forcing UTF-8 pipe encoding (1.6.3+); workaround: `$env:TEMP='C:\kbragtmp'; $env:TMP='C:\kbragtmp'`, then re-run. |
 | Installed but tools don't appear | Tools are injected at **session creation** — restart DSH and open a **new** conversation. |
-| "模型首次检索自动下载" is slow / fails | Set `HF_ENDPOINT=https://hf-mirror.com` (or run the installer with `--mirror`) for the HuggingFace mirror; models are `bge-small-zh-v1.5` (~95MB) + `bge-reranker-base` (~1.1GB). |
+| "模型首次检索自动下载" is slow / fails | Direct download failing now auto-retries via the `hf-mirror.com` mirror (installer `--models` and first-search). To pin it manually: `HF_ENDPOINT=https://hf-mirror.com`; models are `bge-small-zh-v1.5` (~95MB) + `bge-reranker-base` (~1.1GB). |
 | Upgrading from an older version | In the profile dir: `npm install dsh-kb-rag@latest`, restart, new session. Existing `.kb` libraries migrate automatically (schema versioning, see repo `docs/MIGRATION.md`). |
 | Tool call says Python deps missing | Default: only logs the `pip install` command. Set `KB_AUTO_PIP=1` in the host env to auto-install (fixed argv), or run the installer (Option 1b/2). |
 

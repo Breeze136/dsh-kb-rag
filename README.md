@@ -12,7 +12,7 @@
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![dsh.so security](https://www.dsh.so/badges/kb-rag.svg)](https://www.dsh.so/artifact/kb-rag/)
 
-> **最新版本 v1.6.2**（npm 包名：`dsh-kb-rag`）— Ingest once, search forever. Only the most relevant few sentences ever reach the LLM — and every claim carries exact provenance.
+> **最新版本 v1.6.3**（npm 包名：`dsh-kb-rag`）— Ingest once, search forever. Only the most relevant few sentences ever reach the LLM — and every claim carries exact provenance.
 
 ## Who it's for
 
@@ -98,11 +98,11 @@ kb_engine.py —— resident `serve` daemon（常驻，模型只加载一次）
 **方式 A · npx 一键（推荐，无需先安装包）**
 
 ```bash
-# ✅ 正确：--package dsh-kb-rag 指明命令来自哪个包（可 pin 版本：--package dsh-kb-rag@1.6.2）
-npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
+# ✅ 正确：--package dsh-kb-rag 指明命令来自哪个包（可 pin 版本：--package dsh-kb-rag@1.6.3）
+npx dsh-kb-rag-install
 ```
 
-> ⚠️ **常见坑**：裸写 `npx dsh-kb-rag-install` 会失败（npx 会去找一个**名为 `dsh-kb-rag-install` 的包**，注册表里不存在 → E404）。必须带 `--package dsh-kb-rag`。Windows 下 bash 风格参数（`--profile`/`--models`/`--dry-run`）会被自动翻译，全平台通用；`--dry-run` 可先演练。
+> 安装器一条命令自动完成全链（profile 自动检测、模型预下载 + hf-mirror.com 镜像回退、pnpm/corepack 自动装）；`--dry-run` 可先演练。旧写法 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` 仍然等价。
 
 **方式 B · 已装 dsh CLI 的 DSH 用户**
 
@@ -120,7 +120,7 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 # Windows：install.cmd（双击）或 npm-package\scripts\install.ps1
 ```
 
-装完务必**重启 DSH 并开新会话**（工具在会话创建时注入，老会话不会自动获得）。升级旧版：在 profile 目录 `npm install dsh-kb-rag@latest`（钉版本 `npm install dsh-kb-rag@1.6.2`），重启开新会话；旧 `.kb` 库 schema 自动迁移（见 `docs/MIGRATION.md`）。分步演练与常见坑见 [QUICKSTART.md](QUICKSTART.md)；老式动态插件手动路线（`cordis_define` 加载 `plugin/host.js` + `plugin/client.js`）也在 QUICKSTART 末尾。
+装完务必**重启 DSH 并开新会话**（工具在会话创建时注入，老会话不会自动获得）。升级旧版：在 profile 目录 `npm install dsh-kb-rag@latest`（钉版本 `npm install dsh-kb-rag@1.6.3`），重启开新会话；旧 `.kb` 库 schema 自动迁移（见 `docs/MIGRATION.md`）。分步演练与常见坑见 [QUICKSTART.md](QUICKSTART.md)；老式动态插件手动路线（`cordis_define` 加载 `plugin/host.js` + `plugin/client.js`）也在 QUICKSTART 末尾。
 
 ## MCP 配置（桌面 agent 用户）
 
@@ -188,17 +188,18 @@ kb-rag/
 ├─ npm-package/              # npm 静态包 dsh-kb-rag（发布内容）
 │  ├─ package.json           # 声明 dsh.bundle；bin: dsh-kb-rag-install
 │  ├─ cordis.patch.yml       # 激活补丁（dsh plugin add 自动应用）
-│  ├─ install.mjs            # npm bin 入口（npx 一键安装器，37 行薄分发）
+│  ├─ install.mjs            # npm bin 入口（npx 一键安装器；默认注入 --models / --yes）
 │  ├─ lib/index.js           # Host 插件（9 工具 + 依赖探测 + KB_AUTO_PIP）
 │  ├─ scripts/               # install.ps1 / install.sh / doi_pdf.mjs（kb_fetch 的 Node 下载器）
 │  └─ kb_engine.py           # 引擎副本（随包分发，无需手动放置）
+├─ dsh-kb-rag-install/       # 微包：裸 `npx dsh-kb-rag-install` 入口（零逻辑，转发主包安装器）
 ├─ mcp-server/               # MCP server（stdio）
 │  ├─ server.py              # 9 工具：kb_ingest / kb_status / kb_zotero / kb_search / kb_rag /
 │  │                         #   kb_stats / kb_dedup / kb_clear / kb_fetch（kb_scope → kb_status）
 │  ├─ engine_client.py       # 引擎 daemon 客户端 + 结果渲染（stdlib only）
 │  ├─ requirements.txt       # mcp SDK
 │  └─ README.md              # MCP 配置说明
-├─ docs/                     # DESIGN.md / MIGRATION.md / OUTPUT-FORMAT.md
+├─ docs/                     # DESIGN.md / MIGRATION.md / OUTPUT-FORMAT.md / install-winerror123-fix.md
 ├─ QUICKSTART.md · CHANGELOG.md · requirements.txt · SECURITY.md · UNINSTALL.md · LICENSE
 └─ tools/                    # 内部运维脚本（不入发布包）
 ```

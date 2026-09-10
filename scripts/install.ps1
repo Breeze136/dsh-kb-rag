@@ -1,12 +1,13 @@
 ﻿# dsh-kb-rag — one-click installer (Windows PowerShell 5.1+)
-# 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (可选)模型预下载。
-# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 [-Profile <name>] [-Mirror <url>] [-Models] [-WithDocx] [-DryRun] [-SkipPip] [-SkipNode] [-SkipDsh] [-Yes]
+# 完成一条链：Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → (默认)模型预下载。
+# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 [-Profile <name>] [-Mirror <url>] [-Models] [-NoModels] [-WithDocx] [-DryRun] [-SkipPip] [-SkipNode] [-SkipDsh] [-Yes]
 # 环境变量：HF_ENDPOINT（模型镜像，如 https://hf-mirror.com）、KB_EMBED_MODEL、KB_RERANK_MODEL、PIP_INDEX_URL。
 [CmdletBinding()]
 param(
   [string]$Profile = "",
   [string]$Mirror = "",
   [switch]$Models,
+  [switch]$NoModels,
   [switch]$WithDocx,
   [switch]$DryRun,
   [switch]$SkipPip,
@@ -16,6 +17,11 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+# [kb-rag-fix] Windows PowerShell 5.1 的 $OutputEncoding 默认是 ASCII：路径里的非 ASCII 字符
+# （例如中文用户名 C:\Users\<用户>\AppData\Local\Temp）写进原生进程的 stdin 时会变成 "?"，
+# 引擎因此拿到非法路径，报 OSError [WinError 123]。这里统一强制 UTF-8（不带 BOM：
+# 引擎用 raw.decode("utf-8") 解析 stdin），覆盖本脚本所有通向 python 的管道。
+$OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $PyProbeModules = @("fitz", "numpy", "faiss", "sentence_transformers", "torch")
 $PkgOf = @{ fitz = "PyMuPDF"; faiss = "faiss-cpu"; sentence_transformers = "sentence-transformers"; docx = "python-docx" }
 if (-not $Mirror -and $env:PIP_INDEX_URL) { $Mirror = $env:PIP_INDEX_URL }
@@ -59,6 +65,25 @@ Write-Host "  dsh-kb-rag - one-click installer (local literature knowledge-base 
 if ($DryRun) { Write-Warn2 "dry-run: 只打印将执行的动作，不安装" }
 if (-not (Test-Path $Engine)) { Write-Fail "kb_engine.py not found at: $Engine"; exit 1 }
 
+# ---------------------------------------------------------------- 内存检查
+# torch + bge-reranker-base（约 1.1GB）实际运行建议 8GB 以上内存，装前先告知。
+# -ErrorAction Stop 是必须的：CIM 的"拒绝访问"等是非终止错误，不加则 $ramGb 会留空/归零
+# 并被下面的分支误报成"本机内存 0 GB，很可能内存不足"。
+$ramGb = 0
+try {
+  $cs = Get-CimInstance Win32_ComputerSystem -Property TotalPhysicalMemory -ErrorAction Stop
+  $ramGb = [math]::Round($cs.TotalPhysicalMemory / 1GB, 1)
+} catch { $ramGb = 0 }
+if ($ramGb -le 0) {
+  Write-Warn2 "无法读取本机内存大小（不影响安装）"
+} elseif ($ramGb -ge 8) {
+  Write-Ok ("本机内存: $ramGb GB")
+} elseif ($ramGb -ge 4) {
+  Write-Warn2 ("本机内存: $ramGb GB，低于建议的 8GB —— 安装可继续，但运行重排模型（约 1.1GB）时内存偏紧")
+} else {
+  Write-Warn2 ("本机内存: $ramGb GB，远低于建议的 8GB —— 安装可继续，但运行 torch + 重排模型时很可能内存不足/极慢")
+}
+
 # ---------------------------------------------------------------- 1/5 python
 
 Write-Step "1/5 定位 Python (>= 3.9)"
@@ -71,7 +96,7 @@ foreach ($cand in @("python", "py", "python3")) {
   if ($ver) { $Py = $exe; Write-Ok "found: $cand ($ver)"; break }
   else { Write-Warn2 "$cand version < 3.9, skipped" }
 }
-if (-not $Py) { Write-Fail "未找到 Python >= 3.9。请安装后重跑：https://www.python.org/downloads/"; exit 1 }
+if (-not $Py) { Write-Fail "未找到 Python >= 3.9。请安装后重跑：https://www.python.org/downloads/  （或 winget install Python.Python.3.12）"; exit 1 }
 
 # ---------------------------------------------------------------- 2/5 python deps
 
@@ -157,7 +182,12 @@ if ($SkipNode) {
       else {
         npm install -g pnpm
         if ($LASTEXITCODE -eq 0 -and (Get-Command pnpm -ErrorAction SilentlyContinue)) { Write-Ok ("pnpm " + (pnpm --version) + " 已安装") }
-        else { Write-Warn2 "pnpm 安装失败，请手动：npm install -g pnpm" }
+        else {
+          Write-Warn2 "npm 全局安装失败，尝试 corepack 启用…"
+          corepack enable pnpm 2>$null
+          if (Get-Command pnpm -ErrorAction SilentlyContinue) { Write-Ok "pnpm 已经 corepack 启用" }
+          else { Write-Warn2 "pnpm 安装失败，请手动：npm install -g pnpm（或 corepack enable pnpm）" }
+        }
       }
     } else {
       Write-Warn2 "跳过（可稍后手动：npm install -g pnpm）"
@@ -172,27 +202,52 @@ if ($SkipNode) {
 # ---------------------------------------------------------------- 5/5 dsh plugin add
 
 Write-Step "5/5 安装并激活 DSH 插件 (dsh plugin add)"
+# profile 自动检测：未指定时扫 $DSH_HOME/profiles（默认 ~/.dsh/profiles）——
+# 唯一即用；多个时交互选择（非交互必须显式指定）；一个都没有则用 web（DSH 首次使用会自动创建）。
+# 注意：`dsh plugin` 的 --profile 是必填项（requiredOption），不带 --profile 调用必然失败，
+# 因此这里必须解析出一个非空 profile，或明确报错退出。
+if (-not $Profile -and (Get-Command dsh -ErrorAction SilentlyContinue)) {
+  $dshHome = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE ".dsh" }
+  $profilesDir = Join-Path $dshHome "profiles"
+  $candidates = @()
+  if ($profilesDir -and (Test-Path $profilesDir)) {
+    # 真实 profile 含 cordis.yml / package.json（DSH 部署目录）；node_modules 等杂物排除
+    $candidates = @(Get-ChildItem $profilesDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+      (Test-Path (Join-Path $_.FullName "cordis.yml")) -or
+      (Test-Path (Join-Path $_.FullName "package.json"))
+    } | ForEach-Object { $_.Name })
+  }
+  if ($candidates.Count -eq 1) {
+    $Profile = $candidates[0]
+    Write-Ok ("profile 自动检测: $Profile（$profilesDir 下唯一）")
+  } elseif ($candidates.Count -gt 1) {
+    if (-not $Yes -and -not $DryRun) {
+      Write-Warn2 ("检测到多个 profile: " + ($candidates -join ", "))
+      $ans = Read-Host "  用哪个？输入名称后回车"
+      if ($ans -and ($candidates -contains $ans)) { $Profile = $ans }
+      else { Write-Fail "未选择有效 profile，已中止（dsh plugin 的 --profile 为必填项）"; exit 1 }
+    } else {
+      Write-Fail ("检测到多个 profile（" + ($candidates -join ", ") + "）但当前是非交互模式：请带 -Profile <名称> 重跑")
+      exit 1
+    }
+  } else {
+    $Profile = "web"
+    Write-Warn2 "未检测到已有 profile，使用默认 web（DSH 首次使用会自动创建该 profile）"
+  }
+}
 if ($SkipDsh) {
   Write-Warn2 "-SkipDsh：跳过"
 } elseif (-not (Get-Command dsh -ErrorAction SilentlyContinue)) {
   Write-Warn2 "dsh CLI 未找到。插件市场路线：安装 dsh-plugin-registry 后在设置面板一键安装；或先安装 DSH 再重跑本脚本"
 } else {
-  if ($Profile) {
-    Write-Host ("    dsh plugin --profile $Profile add dsh-kb-rag") -ForegroundColor DarkGray
-    if ($DryRun) { Write-Warn2 "dry-run：未执行" }
+  Write-Host ("    dsh plugin --profile $Profile add dsh-kb-rag") -ForegroundColor DarkGray
+  if ($DryRun) { Write-Warn2 "dry-run：未执行" }
+  else {
+    dsh plugin --profile $Profile add dsh-kb-rag
+    if ($LASTEXITCODE -eq 0) { Write-Ok "插件已安装并自动激活（dsh.bundle 声明）" }
     else {
-      dsh plugin --profile $Profile add dsh-kb-rag
-      if ($LASTEXITCODE -eq 0) { Write-Ok "插件已安装并自动激活（dsh.bundle 声明）" }
-      else { Write-Warn2 "dsh 安装失败——请检查上方输出（网络 / pnpm / profile 名）" }
-    }
-  } else {
-    Write-Warn2 "未指定 -Profile，先尝试默认部署目录"
-    Write-Host "    dsh plugin add dsh-kb-rag" -ForegroundColor DarkGray
-    if ($DryRun) { Write-Warn2 "dry-run：未执行" }
-    else {
-      dsh plugin add dsh-kb-rag
-      if ($LASTEXITCODE -eq 0) { Write-Ok "插件已安装并自动激活（dsh.bundle 声明）" }
-      else { Write-Warn2 "默认部署失败。请带 profile 重跑：.\scripts\install.ps1 -Profile <name>" }
+      Write-Fail "dsh 插件安装失败（退出码 $LASTEXITCODE）——请检查上方输出（网络 / pnpm / profile 名）"
+      exit 1
     }
   }
 }
@@ -206,7 +261,7 @@ if ($embedCached -and $rerankCached) {
   Write-Step "模型已在本机缓存，无需下载"
   Write-Ok ("embed: $EmbedModel 已缓存")
   Write-Ok ("rerank: $RerankModel 已缓存")
-} elseif ($Models) {
+} elseif ($Models -and -not $NoModels) {
   Write-Step ("预下载模型 ($EmbedModel / $RerankModel)")
   if (-not $embedCached) { Write-Warn2 "embed 未缓存，将下载（约 95MB）" } else { Write-Ok "embed 已缓存，跳过" }
   if (-not $rerankCached) { Write-Warn2 "rerank 未缓存，将下载（约 1.1GB）" } else { Write-Ok "rerank 已缓存，跳过" }
@@ -215,8 +270,10 @@ if ($embedCached -and $rerankCached) {
     Write-Warn2 "dry-run：跳过"
   } else {
     if ($env:HF_ENDPOINT) { Write-Host ("    HF_ENDPOINT=$($env:HF_ENDPOINT)") -ForegroundColor DarkGray }
-    if (-not $env:HF_ENDPOINT) { Write-Warn2 "未设 HF_ENDPOINT；国内网络建议先 set `$env:HF_ENDPOINT='https://hf-mirror.com'" }
-    & $Py -c @"
+    else { Write-Host "    未设 HF_ENDPOINT；直连下载失败时会自动切换镜像 hf-mirror.com 重试" -ForegroundColor DarkGray }
+    $modelsReady = $false
+    while (-not $modelsReady) {
+      & $Py -c @"
 import os, sys
 os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '60')
 try:
@@ -226,12 +283,24 @@ try:
 except Exception as e:
     print('[fail] %s: %s' % (type(e).__name__, e)); sys.exit(1)
 "@ $EmbedModel $RerankModel
-    if ($LASTEXITCODE -eq 0) { Write-Ok "模型已就绪" }
+      $modelsReady = ($LASTEXITCODE -eq 0)
+      if ($modelsReady) { break }
+      if (-not $env:HF_ENDPOINT) {
+        Write-Warn2 "模型下载失败，自动切换镜像 HF_ENDPOINT=https://hf-mirror.com 重试…"
+        $env:HF_ENDPOINT = "https://hf-mirror.com"
+      } else { break }
+    }
+    if ($modelsReady) { Write-Ok "模型已就绪" }
     else { Write-Warn2 "模型下载失败——不影响安装；首次检索时会自动重试（受限网络先 `$env:HF_ENDPOINT='https://hf-mirror.com'）" }
   }
 } else {
-  Write-Step "模型状态"
-  Write-Warn2 "模型未全部缓存（首次检索时自动下载约 1.2GB）。想现在下载可加 --models；国内网络先 set `$env:HF_ENDPOINT='https://hf-mirror.com'"
+  if ($NoModels) {
+    Write-Step "模型状态"
+    Write-Warn2 "-NoModels：跳过模型下载（首次检索时自动下载约 1.2GB，直连失败会自动切 hf-mirror.com 镜像）"
+  } else {
+    Write-Step "模型状态"
+    Write-Warn2 "模型未全部缓存（首次检索时自动下载约 1.2GB，直连失败会自动切 hf-mirror.com 镜像）。想现在下载可加 --models"
+  }
 }
 
 # ---------------------------------------------------------------- summary
@@ -248,6 +317,6 @@ Write-Host @"
   4. 提问："石墨烯是怎么用化学气相沉积合成的？"（kb_rag，自动带 DOI 引用）
 
 受限网络提示：pip 加速   .\scripts\install.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
-              模型镜像   `$env:HF_ENDPOINT = 'https://hf-mirror.com'
+              模型镜像   下载失败时自动切换 hf-mirror.com 重试；也可手动 `$env:HF_ENDPOINT = 'https://hf-mirror.com'
 "@
 exit 0

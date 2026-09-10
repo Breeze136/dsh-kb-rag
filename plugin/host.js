@@ -15,6 +15,7 @@ return {
     let daemon = null
     let spawning = null
     let scopePref = 'kb'
+    let scopeDepth = 'deep'
     let scopeStrict = false
     let scopeAsked = false
     let netEnv = 'unknown'
@@ -84,6 +85,14 @@ return {
             { label: '知识库+全网', description: '库内检索为主，开放网络（web_search）补充' },
             { label: '仅全网', description: '只用开放网络检索，不用知识库' },
           ],
+        }, {
+          id: 'kb-depth',
+          header: '检索深度',
+          question: '检索与作答的深度？',
+          options: [
+            { label: '快速检索', description: '混合召回直出，跳过精排与引文扩展，亚秒级响应，适合事实性查询与单点数据检索' },
+            { label: '深度检索（推荐）', description: '重排序 + 引文关联 + 相关文献全链路，跨文献综合论述，适合领域调研与综述性问题' },
+          ],
         }],
       }
       if (agent !== undefined) request.agent = agent
@@ -93,7 +102,12 @@ return {
           if (typeof picked === 'string' && picked.indexOf('仅封闭') === 0) scopePref = 'kb'
           else if (typeof picked === 'string' && picked.indexOf('知识库+全网') === 0) scopePref = 'both'
           else if (typeof picked === 'string' && picked.indexOf('仅全网') === 0) scopePref = 'web'
-          console.log('[kb-rag] query scope:', scopePref)
+          const pickedDepth = answer && answer.answers && answer.answers[1] && answer.answers[1].selected && answer.answers[1].selected[0]
+          if (typeof pickedDepth === 'string') {
+            if (pickedDepth.indexOf('深度检索') === 0) scopeDepth = 'deep'
+            else if (pickedDepth.indexOf('快速检索') === 0) scopeDepth = 'quick'
+          }
+          console.log('[kb-rag] query scope:', scopePref, 'depth:', scopeDepth)
         }).catch(function (e) {
           console.error('[kb-rag] scope question failed:', String(e))
         }),
@@ -106,6 +120,7 @@ return {
       return engineCall.then(function (resp) {
         resp.scope = scopePref
         resp.scope_note = SCOPE_NOTE[scopePref]
+        resp.depth_note = scopeDepth === 'quick' ? '快速检索' : '深度检索'
         resp.strict = strict === true
         if (strict === true) resp.strict_note = STRICT_NOTE
         return resp
@@ -350,8 +365,23 @@ return {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : [])
       if (items.length === 0) return [{ type: 'text', text: JSON.stringify(value) }]
+      const refRange = function (cs) {
+        const ns = cs.map(function (c) { return c && c.n }).filter(function (n) { return n !== null && n !== undefined }).map(Number).sort(function (a, b) { return a - b })
+        const parts = []
+        let start = null, prev = null
+        ns.forEach(function (x) {
+          if (start === null) { start = prev = x }
+          else if (x === prev + 1) { prev = x }
+          else { parts.push(start === prev ? String(start) : start + '–' + prev); start = prev = x }
+        })
+        if (start !== null) parts.push(start === prev ? String(start) : start + '–' + prev)
+        return parts.join(', ')
+      }
+      // score 仅在精排后显示（bge 余弦相似度可校准；RRF 融合分无绝对含义，显示反而误导）
+      const scoreNote = value.reranker ? ' · score ' : ''
+      const quick = value.depth === 'quick'
       const lines = []
-      lines.push('**知识库来源 Top-' + items.length + '**')
+      lines.push('**知识库来源 Top-' + items.length + '**' + (quick ? '（快速检索）' : (value.depth === 'deep' ? '（深度检索）' : '')))
       lines.push('混合检索' + (value.reranker ? ' · 精排 ' + value.reranker.split(' ')[0] : '') + (value.cached === true ? ' · 缓存命中' : '') + (typeof value.ms === 'number' ? ' · ' + value.ms + 'ms' : '') + (value.strict === true ? ' · 严格模式' : ''))
       items.forEach(function (r, i) {
         const title = String(r.title || r.file || '')
@@ -365,14 +395,48 @@ return {
         ].filter(Boolean).join(' · ')
         lines.push('')
         lines.push((i + 1) + '. ' + t + (rest.length > 0 ? ' — ' + rest : ''))
-        lines.push('> ' + String(r.snippet || '').slice(0, 280).replace(/\n/g, ' '))
+        lines.push('> ' + String(r.snippet || '').slice(0, quick ? 200 : 280).replace(/\n/g, ' '))
+        if (quick) {
+          // 快速检索：不带图注/引文链/搜索串；无 DOI 时补文件名供引用
+          if (doi === null && r.file) lines.push('无 DOI · 文件：' + String(r.file))
+          return
+        }
         if (typeof r.figure === 'string' && r.figure.length > 0) {
           lines.push('↳ 图注坐标: ' + String(r.figure).slice(0, 220))
         }
+        // 引文关联：本证据的参考文献条目；库内命中（⭐）优先展示，未命中折叠到汇总行
+        if (Array.isArray(r.citations) && r.citations.length > 0) {
+          const hits = r.citations.filter(function (c) { return c && c.lib && typeof c.lib === 'object' })
+          const others = r.citations.filter(function (c) { return !(c && c.lib && typeof c.lib === 'object') })
+          lines.push(hits.length > 0
+            ? '↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）'
+            : '↳ 引文补充（本证据的参考文献，供补库/深读）')
+          hits.slice(0, 5).concat(others.slice(0, 3)).forEach(function (c) {
+            lines.push('  · [Ref ' + c.n + '] ' + String(c.text || '').slice(0, 150))
+            if (c.lib) {
+              const ldoi = typeof c.lib.doi === 'string' && c.lib.doi.length > 0 ? c.lib.doi : null
+              const lt = ldoi !== null ? '[' + String(c.lib.title || '') + '](https://doi.org/' + ldoi + ')' : String(c.lib.title || '')
+              const lmeta = [
+                typeof c.lib.authors === 'string' && c.lib.authors.length > 0 ? String(c.lib.authors).split(';').map(function (s) { return s.trim() }).filter(Boolean).slice(0, 2).join('; ') : null,
+                c.lib.year,
+                c.lib.journal,
+              ].filter(Boolean).join(' · ')
+              let tail = '（即本证据的 Ref ' + c.n + '，可检索引用）'
+              if (typeof c.lib.zotero_key === 'string' && c.lib.zotero_key.length > 0) {
+                tail += ' · [Zotero 打开](zotero://open-pdf/library/items/' + c.lib.zotero_key + ')'
+              }
+              lines.push('    ⭐ 库内命中：' + lt + (lmeta.length > 0 ? '（' + lmeta + '）' : '') + tail)
+            }
+          })
+          const rest = hits.slice(5).concat(others.slice(3))
+          if (rest.length > 0) {
+            lines.push('  ↳ 另有 ' + rest.length + ' 条引文未展开（Ref ' + refRange(rest) + '），补库时可按编号定位')
+          }
+        }
         if (doi !== null) {
-          lines.push('[DOI ' + doi + '](https://doi.org/' + doi + ')' + ' · score ' + r.score)
+          lines.push('[DOI ' + doi + '](https://doi.org/' + doi + ')' + (scoreNote !== '' ? scoreNote + r.score : ''))
         } else {
-          lines.push('无 DOI · score ' + r.score + ' · 文件：' + String(r.file || ''))
+          lines.push('无 DOI' + (scoreNote !== '' ? scoreNote + r.score : '') + ' · 文件：' + String(r.file || ''))
           if (typeof r.search === 'string' && r.search.length > 0) {
             lines.push('↳ 搜索串（Scholar 可复制）: ' + String(r.search).slice(0, 200))
           }
@@ -384,6 +448,11 @@ return {
           lines.push('[在 Zotero 中打开 PDF](zotero://open-pdf/library/items/' + r.zotero_key + ')')
         }
       })
+      if (quick) {
+        lines.push('')
+        lines.push('（快速检索：直接输出查到的信息即可，一两句话答完，无需展开分析；需要深入背景时用 depth=deep 重查）')
+        return [{ type: 'text', text: lines.join('\n') }]
+      }
       if (Array.isArray(value.related) && value.related.length > 0) {
         lines.push('')
         lines.push('**关联文献（可作补充建议）**')
@@ -397,7 +466,7 @@ return {
             r.year,
             r.journal,
           ].filter(Boolean).join(' · ')
-          lines.push('- ' + t + (meta.length > 0 ? ' — ' + meta : '') + '（' + String(r.reason || '内容相关') + ' · score ' + r.score + '）')
+          lines.push('- ' + t + (meta.length > 0 ? ' — ' + meta : '') + '（' + String(r.reason || '内容相关') + '）')
         })
       }
       return [{ type: 'text', text: lines.join('\n') }]
@@ -434,14 +503,15 @@ return {
 
     const kbSearch = harness.defineTool({
       name: 'kb_search',
-      description: '在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重，再经 bge-reranker-base 精排 Top-3），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节/得分）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。query 可以是术语、数值、化学式或中文短语；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 ">=2020" 形式）。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。',
+      description: '在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 可以是术语、数值、化学式或中文短语；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 ">=2020" 形式）。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。',
       parameters: {
         query: { type: 'string', required: true, description: '检索关键词或短语（中英文均可）。' },
-        top_k: { type: 'integer', description: '返回结果数（默认 5，上限 10）。' },
-        snippet: { type: 'integer', description: '片段长度字符数（默认 400）。' },
+        depth: { type: 'string', enum: ['quick', 'deep'], description: 'quick=快速检索（默认：无精排/引文链/关联文献，响应最快，适合查个信息）；deep=深度检索（精排+引文链+关联文献，适合领域调研与综述性问题）。默认继承 kb_scope 的会话 depth 设置。' },
+        top_k: { type: 'integer', description: '返回结果数（默认 quick 3 / deep 5，上限 10）。' },
+        snippet: { type: 'integer', description: '片段长度字符数（默认 quick 300 / deep 400）。' },
         mode: { type: 'string', enum: ['keyword', 'vector', 'hybrid'], description: '检索模式（默认 hybrid）。' },
-        rerank: { type: 'boolean', description: '是否启用 bge-reranker-base 精排（默认 true）。' },
-        related: { type: 'boolean', description: 'true 时附带 related 关联文献列表（同作者/同期刊/年份相近/主题相似，默认 true，供补充建议引用）。' },
+        rerank: { type: 'boolean', description: '是否启用 bge-reranker-base 精排（默认 quick 关 / deep 开）。' },
+        related: { type: 'boolean', description: 'true 时附带 related 关联文献列表（默认 quick 关 / deep 开，供补充建议引用）。' },
         strict: { type: 'boolean', description: '严格模式：true 时答案仅基于本次检索结果，禁止补充库外知识/常识外延（默认继承 kb_scope 的 strict 设置）。' },
         kb_root: { type: 'string', description: '知识库目录（默认：工作区下的 .kb）。' },
         filters: filterSchema,
@@ -451,6 +521,7 @@ return {
         const strict = args.strict === undefined ? scopeStrict : args.strict === true
         const call = runEngine('search', {
           query: args.query,
+          depth: args.depth === undefined ? scopeDepth : args.depth,
           top_k: args.top_k,
           snippet: args.snippet,
           mode: args.mode,
@@ -465,10 +536,11 @@ return {
 
     const kbRag = harness.defineTool({
       name: 'kb_rag',
-      description: '在知识库中检索证据片段（混合检索 + bge-reranker 精排，默认 Top-3）供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答"根据现有资料无法回答"；多源冲突时分别列出并说明来源。答案末尾的补充建议优先参考 related 关联文献列表（同作者/同期刊/年份相近/主题相似的库内文献）：若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。',
+      description: '在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答"根据现有资料无法回答"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里 ⭐ 库内命中的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问"；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。',
       parameters: {
         query: { type: 'string', required: true, description: '自然语言问题（中英文均可）。' },
-        top_k: { type: 'integer', description: '证据条数（默认 3，上限 10）。' },
+        depth: { type: 'string', enum: ['quick', 'deep'], description: 'deep=深度检索（默认：精排+引文链+关联文献，回答展开背景，适合不熟悉领域）；quick=快速检索（少量证据直接给答案，不展开）。默认继承 kb_scope 的会话 depth 设置。' },
+        top_k: { type: 'integer', description: '证据条数（默认 quick 2 / deep 3，上限 10）。' },
         rerank: { type: 'boolean', description: '是否启用精排（默认 true）。' },
         related: { type: 'boolean', description: 'true 时附带 related 关联文献列表供补充建议引用（默认 true）。' },
         strict: { type: 'boolean', description: '严格模式：true 时仅基于 evidence 作答，禁止库外知识补充（默认继承 kb_scope 的 strict 设置）。' },
@@ -480,6 +552,7 @@ return {
         const strict = args.strict === undefined ? scopeStrict : args.strict === true
         const call = runEngine('rag', {
           query: args.query,
+          depth: args.depth === undefined ? scopeDepth : args.depth,
           top_k: args.top_k,
           rerank: args.rerank,
           related: args.related,
@@ -556,17 +629,19 @@ return {
 
     const kbScope = harness.defineTool({
       name: 'kb_scope',
-      description: '设置/查看知识库查询范围与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false，允许模型在证据不足处用一般知识补充并说明）。用户说"封闭库/全网/都要/严格只按库内"等要求时，调本工具设定后再检索。',
+      description: '设置/查看知识库查询范围、回答深度与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。depth 可选：quick=快速检索（亚秒级响应，直出结果）；deep=深度检索（重排序+引文关联全链路，跨文献综合论述）。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false）。用户说"封闭库/全网/都要/严格只按库内/快速检索/深度检索"等要求时，调本工具设定后再检索。',
       parameters: {
         scope: { type: 'string', required: true, enum: ['kb', 'both', 'web'], description: 'kb=仅封闭库；both=知识库+全网；web=仅全网。' },
+        depth: { type: 'string', enum: ['quick', 'deep'], description: '可选：同时设置检索深度。quick=快速检索；deep=深度检索。' },
         strict: { type: 'boolean', description: '可选：同时设置严格模式。true=仅基于库内证据作答；false=关闭（默认）。' },
       },
       output: { schema: { type: 'json' }, render: renderJson },
       execute(args, exec) {
         scopePref = args.scope
+        if (args.depth !== undefined) scopeDepth = args.depth === 'deep' ? 'deep' : 'quick'
         if (args.strict !== undefined) scopeStrict = args.strict === true
-        console.log('[kb-rag] query scope:', scopePref, 'strict:', scopeStrict)
-        return Promise.resolve({ ok: true, scope: scopePref, strict: scopeStrict, scope_note: SCOPE_NOTE[scopePref], strict_note: scopeStrict ? STRICT_NOTE : undefined })
+        console.log('[kb-rag] query scope:', scopePref, 'depth:', scopeDepth, 'strict:', scopeStrict)
+        return Promise.resolve({ ok: true, scope: scopePref, depth: scopeDepth, strict: scopeStrict, scope_note: SCOPE_NOTE[scopePref], depth_note: scopeDepth === 'quick' ? '快速检索：kb_search 默认快速检索，kb_rag 可显式 depth=quick' : '深度检索：kb_search/kb_rag 均默认深度检索', strict_note: scopeStrict ? STRICT_NOTE : undefined })
       },
     })
 
