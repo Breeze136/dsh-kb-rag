@@ -7,7 +7,7 @@
 - **References 三级检测**（原两级）：③ 新增**递增条目链**——Nature 无标题 References（标题是图形，正文 refs 1–30 与 Methods refs 31–37 分两段离散出现）与 Science `1. Author` 行首风格；编号从 1 递增或续接上条链、过半条目带年份/et al 信号、链尾在 Acknowledgements/©/图注停止行截止，边界段落自动切分。阶段 ② 修复"文末连续段"被末页公式/坐标轴数字劫持（新增文献列表相似度门槛：过半条目带年份/et al）
 - **引文条目锚点修复**：References 长块改按**行边界**切分（`split_refs`）——原 `split_long` 句边界拼接把 2、3 号条目挤到行中间压平 `N.` 行首锚点，长引文列表只能解析第 1 条；`_parse_references` 多风格同时命中时取**编号链最完整**的模式（避免年被拆行的噪声风格劫持）
 - **实测**（11 篇各出版商 PDF）：Wiley 综述 0→399 条、Nature Letter 8→37、中文期刊 0→90、Science 0→29，全部只增不减
-- **被引文献库内匹配（引文关联深挖）**：`_match_cite_lib` 三规则——① 引文文本中 DOI 精确命中；② 库内标题（归一化 ≥30 字符）整串出现；③ 首作者姓（≥6 字符）+ 括号年份双命中。命中条目带 `lib` 字段（title/authors/year/journal/doi/zotero_key），三层渲染输出「⭐ 库内命中」行（DOI 链接 + 元数据 + 即本证据的 Ref n + Zotero 打开）
+- **被引文献库内匹配（引文关联深挖）**：`_match_cite_lib` 三规则——① 引文文本中 DOI 精确命中；② 库内标题（归一化 ≥30 字符）整串出现；③ 首作者姓（≥6 字符）+ 括号年份双命中。命中条目带 `lib` 字段（title/authors/year/journal/doi/zotero_key），三层渲染输出「[库内]」标记行（DOI 链接 + 元数据 + 即本证据的 Ref n + Zotero 打开）
 - **推荐输出格式（回答层三列制）**：`kb_rag` guidance 硬性要求答案末尾按来源分三列——①「库内可查（循引文找到）」必须带关系链《被引文献》被 [证据编号] 的引文 Ref n 引用；②「建议补库（循引文发现）」注明被 Ref n 引用尚不在库内；③「相关文献」（元数据相似）。不得混列，引文关联的必须带关系链
 - **渲染优化**：引文编号 `[n]` → `[Ref n]`（与证据编号消歧）；库内命中合并为单行（标题链接 + 元数据 + 关系 + Zotero 内联）；命中条目（≤5）优先、库外仅展开 3 条 + 一行折叠汇总（Ref 区间压缩如 `5–8`）；`score` 仅精排后显示（RRF 融合分无绝对含义）；snippet 起止按词边界对齐
 - 旧库需 `force` 重灌才有角标与全新 References 切分（入库时处理）
@@ -36,9 +36,12 @@
 - 兼容：`install.mjs` 旧写法 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` 等价不变
 
 ### 文档重写与隐私清理
-- **README 全面重写**：定位段 → 一图流示例输出 → Product Positioning（三条取舍 + 诚实边界 callout）→ 三种形态 → 快速开始（`<details>` 折叠 Windows/受限网络/大批量）→ 工具参考 → 架构 → 实测数据 → 文档地图 → 配置 → 仓库布局 → 已知限制 → 联系/相关工具；含页内导航与回到顶部
+- **README 双语化重写**：`README.md`（英文）与 `README_CN.md`（中文）两份逐节对应，顶部互链。结构：定位段 → 输出示例 → Positioning（三条取舍 + 「适用范围与预期」callout）→ 三种形态 → 快速开始（`<details>` 折叠 Windows/受限网络/大批量）→ 升级 → 工具参考 → 架构 → 实测数据 → 文档表格 → 配置 → 仓库布局 → 已知限制 → 联系/相关项目；术语与边界表述保持技术文档语气
+- **去除装饰性符号**：全仓库清理装饰性图标字符（README 与 docs 的表格图标列、状态标记等），渲染输出中的星形库内命中标记改为纯文本 `[库内]`——同步 `plugin/host.js`、`npm-package/lib/index.js`、`mcp-server/engine_client.py` 三处渲染器与 `kb_engine.py`/`server.py` 的 guidance 文本；`→ ↳ ✓ ✗` 等技术符号保留
+- **升级路径修正**：DSH profile 是 pnpm 工作区（含 `pnpm-lock.yaml`，`dsh plugin` 内部即转发 pnpm），原文档让用户在 profile 里跑 `npm install dsh-kb-rag` 会与 pnpm 布局冲突。现统一为 `dsh plugin --profile <name> add dsh-kb-rag[@版本]`（或重跑安装器），`npm install` 仅标注为手动部署场景（npm README 的 Option 3 加醒目警告 + 新增 Upgrading 章节）
 - **隐私清理**：`docs/OUTPUT-FORMAT.md` 的示例改为中性占位数据（原示例使用具体真实文献与 Zotero item key）；全部文档/脚本描述中的具体 DOI 与 arXiv ID 统一换成占位符（`10.5555/…`、`arXiv:2401.00001`），作者/期刊改为 `Author A` / `J. Appl. Phys.` 形式；`tools/README.md` 的领域相关示例参数改为中性措辞
-- 安装脚本侧修复（审查发现）：HF 缓存目录探测在 sh 下用单连字符 `tr '/' '-'` 导致缓存恒判未命中（应为双连字符 `--`）；未指定 profile 时 `dsh plugin add` 缺 `--profile` 必然失败却仍 `exit 0`（现改为：唯一 profile 自动用 / 多个非交互报错退出 / 无 profile 默认 web / 安装失败 `exit 1`）；内存探测的 CIM 非终止错误导致误报"0 GB 内存"（补 `-ErrorAction Stop` + 守卫）；微包嵌套布局兜底路径修正
+- 安装脚本侧修复（审查发现）：HF 缓存目录探测在 sh 下用单连字符 `tr '/' '-'` 导致缓存恒判未命中（应为双连字符 `--`）；未指定 profile 时 `dsh plugin add` 缺 `--profile` 必然失败却仍 `exit 0`（现改为：唯一 profile 自动用 / 多个非交互报错退出 / 无 profile 默认 web / 安装失败 `exit 1`；dry-run 下多 profile 不中断演练）；内存探测的 CIM 非终止错误导致误报"0 GB 内存"（补 `-ErrorAction Stop` + 守卫）；微包嵌套布局兜底路径修正
+- 配置表订正：`KB_AUTO_PIP` 仅在 npm 静态包 `lib/index.js` 实现（动态插件 host 只提示不自动装）；补充 `UNPAYWALL_EMAIL`
 
 ## [1.6.2] - MCP 超时加固 + 健壮性修复
 

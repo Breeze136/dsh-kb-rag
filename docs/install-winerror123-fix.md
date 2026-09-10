@@ -142,7 +142,7 @@ diff --git a/npm-package/scripts/install.ps1 b/npm-package/scripts/install.ps1
 ```
 
 > 补丁本身**没有任何其他改动**，净增 5 行。
-> ⚠️ 合并时请保持该文件原有的 **UTF-8 BOM** —— PS 5.1 读无 BOM 的 UTF-8 会按系统 ANSI
+> 注意：合并时请保持该文件原有的 **UTF-8 BOM** —— PS 5.1 读无 BOM 的 UTF-8 会按系统 ANSI
 > 代码页解析，文件里的中文注释会变乱码并可能报语法错。
 
 ---
@@ -154,9 +154,9 @@ diff --git a/npm-package/scripts/install.ps1 b/npm-package/scripts/install.ps1
 
 | 场景 | 结果 |
 |---|---|
-| 原版 1.6.2 + 中文临时目录 | ❌ 退出码 1<br>`OSError [WinError 123] ... 'D:\\workspace\\????\\kbrag-smoke-9b9bf473'` |
-| **修复版** + 中文临时目录 | ✅ 退出码 0<br>`[OK] engine v3.0.0 自检通过` |
-| 原版 1.6.2 + 纯 ASCII 临时目录 | ✅ 退出码 0（即当前的临时绕行办法） |
+| 原版 1.6.2 + 中文临时目录 | 失败，退出码 1<br>`OSError [WinError 123] ... 'D:\\workspace\\????\\kbrag-smoke-9b9bf473'` |
+| **修复版** + 中文临时目录 | 通过，退出码 0<br>`[OK] engine v3.0.0 自检通过` |
+| 原版 1.6.2 + 纯 ASCII 临时目录 | 通过，退出码 0（即当前的临时绕行办法） |
 
 修复版完整输出：
 

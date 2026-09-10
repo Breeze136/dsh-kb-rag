@@ -317,12 +317,12 @@ def render_sources(resp):
             continue
         if isinstance(r.get("figure"), str) and r["figure"]:
             lines.append("↳ 图注坐标: " + str(r["figure"])[:220])
-        # 引文关联：本证据的参考文献条目；库内命中（⭐）优先展示，未命中折叠到汇总行
+        # 引文关联：本证据的参考文献条目；库内命中（[库内]）优先展示，未命中折叠到汇总行
         cites = r.get("citations")
         if isinstance(cites, list) and cites:
             hits = [c for c in cites if isinstance(c.get("lib"), dict)]
             others = [c for c in cites if not isinstance(c.get("lib"), dict)]
-            lines.append("↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）" if hits
+            lines.append("↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）" if hits
                          else "↳ 引文补充（本证据的参考文献，供补库/深读）")
             for c in hits[:5] + others[:3]:
                 lines.append("  · [Ref %s] %s" % (c.get("n"), str(c.get("text") or "")[:150]))
@@ -338,7 +338,7 @@ def render_sources(resp):
                     tail = "（即本证据的 Ref %s，可检索引用）" % c.get("n")
                     if lib.get("zotero_key"):
                         tail += " · [Zotero 打开](zotero://open-pdf/library/items/%s)" % lib["zotero_key"]
-                    lines.append("    ⭐ 库内命中：%s%s%s" % (
+                    lines.append("    [库内] %s%s%s" % (
                         lt, ("（%s）" % lmeta) if lmeta else "", tail))
             rest = hits[5:] + others[3:]
             if rest:

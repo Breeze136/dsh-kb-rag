@@ -119,7 +119,7 @@ async def kb_rag(query: str, depth: str = "deep", top_k: int | None = None,
                  kb_root: str = "", authors: str = "", title: str = "",
                  journal: str = "", kind: str = "", section: str = "",
                  year: str = "") -> str:
-    """在知识库中检索证据片段供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。depth 双模式：deep（默认）=深度检索，精排+引文链+关联文献全开，回答可跨文献综合论述（适合领域调研）；quick=快速检索，仅基于少量证据直接给答案、不展开。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里 ⭐ 库内命中的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内"；②「建议补库（循引文发现）」——citations 未命中条目，注明被 Ref n 引用、尚不在库内；③「相关文献」——related 列表（元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列。"""
+    """在知识库中检索证据片段供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。depth 双模式：deep（默认）=深度检索，精排+引文链+关联文献全开，回答可跨文献综合论述（适合领域调研）；quick=快速检索，仅基于少量证据直接给答案、不展开。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内"；②「建议补库（循引文发现）」——citations 未命中条目，注明被 Ref n 引用、尚不在库内；③「相关文献」——related 列表（元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
     call = {"query": query, "depth": depth,

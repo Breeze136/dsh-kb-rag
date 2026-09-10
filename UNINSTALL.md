@@ -64,9 +64,9 @@ pip uninstall pymupdf faiss-cpu sentence-transformers
 
 ## 绝不删除的清单（对照）
 
-- ❌ 你的原始 PDF / 文献文件夹
-- ❌ `Zotero/`（zotero.sqlite + storage）
-- ❌ DSH 会话、其他插件、其他工作区
+- 你的原始 PDF 与文献文件夹
+- `Zotero/`（zotero.sqlite + storage）
+- DSH 会话、其他插件、其他工作区
 
 ## 彻底卸载的最小操作
 

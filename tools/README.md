@@ -32,10 +32,10 @@ node .\tools\doi_pdf.mjs --file dois.txt
 MDPI 的 `bm-verify` 令牌跟随尝试、Cloudflare/Akamai 挑战页识别(明确报"需真实浏览器手动下载")。
 
 **已知限制(实测,2026-09):**
-- ❌ Cloudflare JS 挑战:Wiley(onlinelibrary)、Science(science.org)、Cambridge(cambridge.org) → 脚本 403 "Just a moment",需真实浏览器
-- ❌ Akamai Bot Manager:MDPI(mdpi.com)`ak_bmsc` cookie 令牌跟随后仍 403 Access Denied,需真实浏览器
-- ❌ APS(journals.aps.org,PRB/PRL)同样 403
-- ✅ 以上场景请用 Zotero 浏览器插件抓取,再 `kb_zotero` 同步入库
+- Cloudflare JS 挑战：Wiley(onlinelibrary)、Science(science.org)、Cambridge(cambridge.org) → 脚本 403 "Just a moment",需真实浏览器
+- Akamai Bot Manager：MDPI(mdpi.com)`ak_bmsc` cookie 令牌跟随后仍 403 Access Denied,需真实浏览器
+- APS（journals.aps.org，PRB/PRL）同样 403
+- 以上场景请用 Zotero 浏览器插件抓取，再 `kb_zotero` 同步入库
 
 ## 2. 入库
 
