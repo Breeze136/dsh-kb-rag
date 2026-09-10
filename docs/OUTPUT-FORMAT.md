@@ -80,14 +80,16 @@
 - **打开文献细看时**：证据卡片携带 `§<section> · p.<页码>`（可折叠/悬浮），或直接
   Zotero 跳页（`?page=N`，Zotero 7 支持）。
 - **追问时**：用户问"这句话在文献哪里？"→ agent 读证据 JSON 的 `page` 字段回答，
-  例如："出自 [3]（Ederer & Spaldin 2005, PRB）的 §Results · p.4"。
+  例如："出自 [3]（Author A et al. 2024, J. Appl. Phys.）的 §Results · p.4"。
 - **数据支持**：`chunks` 表 `page_start/page_end`（schema v3），来自 read_document
   的 `meta['_paras']` 段落→页码映射；检索结果/evidence 带 `page` 字段。
   txt/md/docx 与旧数据无页码（NULL）→ 降级为仅章节。
 
-### 示例（真实数据驱动的完整推演，v2 页码版）
+### 示例（完整推演，v2 页码版）
 
-> 问：BFO 的反铁磁序和自旋摆线是什么结构？这个结论能在原文哪里找到？
+> 下面用一组**中性示例数据**演示输出形态（作者/期刊/DOI 均为占位，非真实文献）。
+>
+> 问：这类层状氧化物的畴结构在外场下如何演化？这个结论能在原文哪里找到？
 >
 > **工具返回（MCP 渲染，agent 可见）：**
 >
@@ -95,39 +97,38 @@
 > **知识库来源 Top-2**
 > 混合检索 · 精排 BAAI/bge-reranker-base · 386ms
 >
-> 1. [Switching the spin cycloid in BiFeO3 with an electric field](https://doi.org/10.1038/s41467-024-47232-5) — Peter Meisenheimer; Guy Moore · 2024 · Nature Communications · §Results · p.4
-> > the spin rotates in the plane defined by k and P ... with a period of ~65 nm
+> 1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.0000/example.2024.001) — Author A; Author B · 2024 · J. Appl. Phys. · §Results · p.4
+> > the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
 > ↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）
->   · [Ref 4] Sosnowska, M. et al. J. Phys. C 15, 4835 (1982)
->     ⭐ 库内命中：[Spiral magnetic ordering in bismuth ferrite](https://doi.org/…)（Sosnowska · 1982 · J. Phys. C）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/…)
->   · [Ref 9] Kadomtseva, A. et al. — 摆线磁电理论
+>   · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
+>     ⭐ 库内命中：[Long-range ordering in layered oxides](https://doi.org/10.0000/example.1982.004)（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
+>   · [Ref 9] Author D, et al. — 相关唯象模型
 >   ↳ 另有 3 条库外引文未展开（Ref 6–8），补库时可按编号定位
-> [DOI 10.1038/s41467-024-47232-5](https://doi.org/10.1038/s41467-024-47232-5) · score 0.98
+> [DOI 10.0000/example.2024.001](https://doi.org/10.0000/example.2024.001) · score 0.98
 >
-> 2. [Weak ferromagnetism and magnetoelectric coupling in bismuth ferrite](https://doi.org/10.1103/PhysRevB.71.060401) — Ederer; Spaldin · 2005 · Physical Review B · §Body · p.2
-> > If the magnetic moments are oriented perpendicular to the {111} direction, the symmetry also permits a canting…
-> [DOI 10.1103/PhysRevB.71.060401](https://doi.org/10.1103/PhysRevB.71.060401) · score 0.87
+> 2. [Symmetry-allowed canting in oxide thin films](https://doi.org/10.0000/example.2005.002) — Author E; Author F · 2005 · Phys. Rev. B · §Body · p.2
+> > If the moments are oriented perpendicular to the {111} direction, the symmetry also permits a canting…
+> [DOI 10.0000/example.2005.002](https://doi.org/10.0000/example.2005.002) · score 0.87
 >
 > **关联文献（可作补充建议）**
-> - [The Experimentalist's Guide to the Cycloid](https://doi.org/10.1002/adma.202003711) — Burns et al. · 2020（同作者·主题相似 · score 4.4）
+> - [A Practical Guide to Domain Imaging](https://doi.org/10.0000/example.2020.003) — Author G et al. · 2020（同作者·主题相似 · score 4.4）
 > ```
 >
 > **Agent 回答：**
 >
-> BFO 的磁结构是"G 型反铁磁 + 长程自旋摆线"的复合序：
-> - 本征 **G 型反铁磁序**（Fe³⁺ 最近邻反平行，T_N≈643 K），自旋 ⊥[111] 时子晶格倾斜产生弱铁磁[2]；
-> - 叠加**非公度自旋摆线**：自旋在 k 与 P 张成平面内旋转，**P∥[111]、k∥[1̄10]，周期 ≈65 nm**，
->   M(r)=m[cos(k·r)êₖ+sin(k·r)êₚ][1]。
+> 该体系的序参量是"长程有序 + 外场可调畴结构"的复合形态：
+> - 本征长程有序给出基本对称性约束（低温下稳定）；取向偏离主轴时允许次级有序参量[2]；
+> - 外场驱动畴重取向：畴在易轴与外场张成的平面内旋转，特征尺度 ≈65 nm，
+>   由唯象自由能描述[1]。
 >
 > **引文补充建议（出自本次证据的参考文献）**
-> - [Sosnowska et al., 1982, J. Phys. C](https://doi.org/10.1038/s41467-024-47232-5)（出自 Meisenheimer 2024 的引文 Ref 4：摆线首次中子发现）
-> - [Kadomtseva 摆线磁电理论](https://doi.org/10.1038/s41467-024-47232-5)（出自 Meisenheimer 2024 的引文 Ref 9）
+> - [Author C et al., 1982, J. Phys.: Condens. Matter](https://doi.org/10.0000/example.1982.004)（出自证据 1 的引文 Ref 4：该有序结构的早期实验发现）
+> - [Author D 唯象模型](https://doi.org/10.0000/example.2024.001)（出自证据 1 的引文 Ref 9）
 >
 > **追问示例** —— "这个结论原文在哪？" → agent 读 `page` 字段：
-> > 出自 [1]（Meisenheimer et al. 2024, Nat. Commun.）**§Results · 第 4 页**，点击直达：
-> > **[在 Zotero 打开到 p.4](zotero://open-pdf/library/items/FVPJFV8Q?page=4)**
-> > [2] 出自 Ederer & Spaldin 2005, PRB **§Body · 第 2 页**：[跳转 p.2](zotero://open-pdf/library/items/V2AKVNXW?page=2)
-
+> > 出自 [1]（Author A et al. 2024, J. Appl. Phys.）**§Results · 第 4 页**，点击直达：
+> > **[在 Zotero 打开到 p.4](zotero://open-pdf/library/items/EXAMPLEKEY1?page=4)**
+> > [2] 出自 Author E & Author F 2005, Phys. Rev. B **§Body · 第 2 页**：[跳转 p.2](zotero://open-pdf/library/items/EXAMPLEKEY2?page=2)
 > 说明：`§Results · p.4` 中 p = **PDF 物理页码**（1 基），对两栏/扫描排版同样可靠（实测两栏
 > PDF 全部块均带页码）；段落号仅作降级辅助。DSH 侧页码是工具 JSON 的隐式字段，平时正文不显示；
 > MCP 侧因 agent 只读文本而显式呈现。txt/md/docx 与旧数据无页码（NULL）→ 自动退化为仅章节。

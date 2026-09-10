@@ -615,7 +615,7 @@ return {
       name: 'kb_fetch',
       description: '按 DOI / arXiv ID 定点下载开放获取(OA)文献 PDF 到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。只下载 OA 文献，不碰付费墙/Sci-Hub。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。',
       parameters: {
-        identifiers: { type: 'array', required: true, items: { type: 'string' }, description: 'DOI 或 arXiv ID 列表（如 10.1038/nature04233 或 arXiv:1503.03833）。' },
+        identifiers: { type: 'array', required: true, items: { type: 'string' }, description: 'DOI 或 arXiv ID 列表（如 10.5555/12345679 或 arXiv:2401.00001）。' },
         target_dir: { type: 'string', description: '下载目录（默认 ~/.kb-rag/downloads）。' },
       },
       output: { schema: { type: 'json' }, render: renderFetch },

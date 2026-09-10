@@ -35,6 +35,11 @@
 - 引擎 `kb_engine.py` 运行期 HF 镜像回退真正生效：`HF_ENDPOINT` 在 huggingface_hub import 时固化，同进程后置 `os.environ.setdefault` 是空操作——新增 `_apply_hf_mirror()` 直接 patch `constants.ENDPOINT` + 派生的 URL 模板，embedder/reranker 直连失败自动切镜像重试
 - 兼容：`install.mjs` 旧写法 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` 等价不变
 
+### 文档重写与隐私清理
+- **README 全面重写**：定位段 → 一图流示例输出 → Product Positioning（三条取舍 + 诚实边界 callout）→ 三种形态 → 快速开始（`<details>` 折叠 Windows/受限网络/大批量）→ 工具参考 → 架构 → 实测数据 → 文档地图 → 配置 → 仓库布局 → 已知限制 → 联系/相关工具；含页内导航与回到顶部
+- **隐私清理**：`docs/OUTPUT-FORMAT.md` 的示例改为中性占位数据（原示例使用具体真实文献与 Zotero item key）；全部文档/脚本描述中的具体 DOI 与 arXiv ID 统一换成占位符（`10.5555/…`、`arXiv:2401.00001`），作者/期刊改为 `Author A` / `J. Appl. Phys.` 形式；`tools/README.md` 的领域相关示例参数改为中性措辞
+- 安装脚本侧修复（审查发现）：HF 缓存目录探测在 sh 下用单连字符 `tr '/' '-'` 导致缓存恒判未命中（应为双连字符 `--`）；未指定 profile 时 `dsh plugin add` 缺 `--profile` 必然失败却仍 `exit 0`（现改为：唯一 profile 自动用 / 多个非交互报错退出 / 无 profile 默认 web / 安装失败 `exit 1`）；内存探测的 CIM 非终止错误导致误报"0 GB 内存"（补 `-ErrorAction Stop` + 守卫）；微包嵌套布局兜底路径修正
+
 ## [1.6.2] - MCP 超时加固 + 健壮性修复
 
 - **MCP 大批量入库自动转后台（Kimi Work 60s 超时解药落地）**：`kb_ingest` 先轻量估算待处理文件数（目录递归/文件列表），超过 `KB_ASYNC_THRESHOLD`（默认 25）自动改用 async_mode，立即返回 `job_id` + `kb_status` 轮询指引——agent 无需知道 async_mode 存在，传整个文献库文件夹也不会超时；显式 `async_mode=true/false` 可强制
