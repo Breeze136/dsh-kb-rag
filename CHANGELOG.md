@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.6.3] - 引文关联深挖 + Nature 角标识别 + 快速/深度双模式 + 真·一键安装
+
+### 引文关联（citation linking）
+- **Nature 系上标角标识别**：PDF 文本层会把上标引用压平成 `graphene1,2`，引擎在 `read_document` 按**字体度量**检测（字号 ≤ 行内正文 80% + 基线抬高 ≥ 12%），转写为 `graphene[1,2]` 方括号形式入库；宁缺勿错：跳过作者行（≥3 个上标簇）、指数（锚点以数字结尾）、单位标记（`1*` 等非纯数字簇）
+- **References 三级检测**（原两级）：③ 新增**递增条目链**——Nature 无标题 References（标题是图形，正文 refs 1–30 与 Methods refs 31–37 分两段离散出现）与 Science `1. Author` 行首风格；编号从 1 递增或续接上条链、过半条目带年份/et al 信号、链尾在 Acknowledgements/©/图注停止行截止，边界段落自动切分。阶段 ② 修复"文末连续段"被末页公式/坐标轴数字劫持（新增文献列表相似度门槛：过半条目带年份/et al）
+- **引文条目锚点修复**：References 长块改按**行边界**切分（`split_refs`）——原 `split_long` 句边界拼接把 2、3 号条目挤到行中间压平 `N.` 行首锚点，长引文列表只能解析第 1 条；`_parse_references` 多风格同时命中时取**编号链最完整**的模式（避免年被拆行的噪声风格劫持）
+- **实测**（11 篇各出版商 PDF）：Wiley 综述 0→399 条、Nature Letter 8→37、中文期刊 0→90、Science 0→29，全部只增不减
+- **被引文献库内匹配（引文关联深挖）**：`_match_cite_lib` 三规则——① 引文文本中 DOI 精确命中；② 库内标题（归一化 ≥30 字符）整串出现；③ 首作者姓（≥6 字符）+ 括号年份双命中。命中条目带 `lib` 字段（title/authors/year/journal/doi/zotero_key），三层渲染输出「⭐ 库内命中」行（DOI 链接 + 元数据 + 即本证据的 Ref n + Zotero 打开）
+- **推荐输出格式（回答层三列制）**：`kb_rag` guidance 硬性要求答案末尾按来源分三列——①「库内可查（循引文找到）」必须带关系链《被引文献》被 [证据编号] 的引文 Ref n 引用；②「建议补库（循引文发现）」注明被 Ref n 引用尚不在库内；③「相关文献」（元数据相似）。不得混列，引文关联的必须带关系链
+- **渲染优化**：引文编号 `[n]` → `[Ref n]`（与证据编号消歧）；库内命中合并为单行（标题链接 + 元数据 + 关系 + Zotero 内联）；命中条目（≤5）优先、库外仅展开 3 条 + 一行折叠汇总（Ref 区间压缩如 `5–8`）；`score` 仅精排后显示（RRF 融合分无绝对含义）；snippet 起止按词边界对齐
+- 旧库需 `force` 重灌才有角标与全新 References 切分（入库时处理）
+
+### 快速/深度双模式（depth）
+- `kb_search` 默认 `quick`（快速检索：混合召回直出、跳过精排/引文扩展/相关文献，亚秒级响应）、`kb_rag` 默认 `deep`（深度检索：重排序 + 引文关联 + 相关文献全链路）——按入口定位自动分流，显式传参永远优先；实测 34ms vs 2.8s
+- 会话级深度：`kb_scope` 新增 depth 参数；会话启动询问新增「检索深度」问题（快速检索 / 深度检索，默认推荐深度检索）；选择解析双向显式（快速检索→quick）
+- 快速检索 guidance 反长思考：立即作答、一两句内直给、禁止背景铺垫/延伸分析/二次检索；渲染尾注提示 `depth=deep` 升级路径
+- 深度检索 guidance：跨文献综合论述 + 三列推荐格式；快速检索渲染压缩（无引文链/相关文献、短 snippet），体积约 57%
+- 术语统一（五文件）：快查→快速检索、详细→深度检索（会话询问/工具 description/guidance/渲染标签/尾注）
+- MCP `server.py`：`kb_search`/`kb_rag` 签名改 Optional，未传参不再以默认值覆盖引擎模式化缺省；请求剔除 null 值；引擎 `_depth_flag` null 语义兜底
+
+### 真·一键安装
+- **新微包 `dsh-kb-rag-install`**（待发布）：裸 `npx dsh-kb-rag-install` 直接可用，根治"包名与 bin 名不一致导致裸命令 E404"的老坑；微包零逻辑（定位依赖转发），安装逻辑仍在主包维护；npm 平铺/嵌套双布局验证通过
+- **profile 自动检测**：未指定 `-Profile` 时扫 `~/.dsh/profiles/`（含 cordis.yml/package.json 才算，排除 node_modules 误报）——唯一 profile 直接用；多个时列出（交互可选、非交互走默认目录）
+- **模型预下载默认开**：`install.mjs` 默认注入 `--models`（配合直连失败自动切 hf-mirror.com 镜像重试，装完即全就绪），`--no-models` 可跳过（两平台脚本均支持）
+- **非交互默认**：`install.mjs` 默认注入 `--yes`（npx 场景不再被 pnpm 确认卡住）；pnpm 全局安装失败自动回退 `corepack enable pnpm`
+- **中文用户名安装修复**：Windows PowerShell 5.1 的 `$OutputEncoding` 默认 ASCII，管道送 python 的中文路径变 `?` 报 WinError 123——脚本顶部强制 UTF-8（无 BOM）管道编码
+- **安装前内存提示**：装前读物理内存并按阈值提示（≥8GB 正常 / 4–8 偏紧 / <4 可能不足）
+- 模型下载失败自动镜像重试（两平台）；Python 缺失提示补 winget/brew/apt
+- 文档：QUICKSTART/README 换裸命令为推荐写法；npm README 排错表补 WinError 123 行
+
+### 其他
+- `docs/OUTPUT-FORMAT.md`：新增 §2 双模式章节、三列推荐模板、实施记录与局限全面修订（角标/References 三级检测/库内匹配），章节重编号
+- 引擎 `kb_engine.py` 运行期 HF 镜像回退真正生效：`HF_ENDPOINT` 在 huggingface_hub import 时固化，同进程后置 `os.environ.setdefault` 是空操作——新增 `_apply_hf_mirror()` 直接 patch `constants.ENDPOINT` + 派生的 URL 模板，embedder/reranker 直连失败自动切镜像重试
+- 兼容：`install.mjs` 旧写法 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` 等价不变
+
 ## [1.6.2] - MCP 超时加固 + 健壮性修复
 
 - **MCP 大批量入库自动转后台（Kimi Work 60s 超时解药落地）**：`kb_ingest` 先轻量估算待处理文件数（目录递归/文件列表），超过 `KB_ASYNC_THRESHOLD`（默认 25）自动改用 async_mode，立即返回 `job_id` + `kb_status` 轮询指引——agent 无需知道 async_mode 存在，传整个文献库文件夹也不会超时；显式 `async_mode=true/false` 可强制

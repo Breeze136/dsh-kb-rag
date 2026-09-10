@@ -239,6 +239,23 @@ def render_stats(resp):
     return "\n".join(lines)
 
 
+def _ref_nums(ns):
+    """[4,5,6,9] -> '4–6, 9'（引文汇总行用）。"""
+    nums = sorted(int(n) for n in ns if n is not None)
+    parts, start, prev = [], None, None
+    for x in nums:
+        if start is None:
+            start = prev = x
+        elif x == prev + 1:
+            prev = x
+        else:
+            parts.append(str(start) if start == prev else "%d–%d" % (start, prev))
+            start = prev = x
+    if start is not None:
+        parts.append(str(start) if start == prev else "%d–%d" % (start, prev))
+    return ", ".join(parts)
+
+
 def render_sources(resp):
     """Render search/rag results as markdown (port of the DSH renderSources)."""
     if not isinstance(resp, dict):
@@ -248,7 +265,16 @@ def render_sources(resp):
         return render_json(resp)
     lines = []
     lines.append("**知识库来源 Top-%d**" % len(items))
+    # 查询/详细双模式：quick 压缩输出（无引文链/关联文献、短片段），deep 全量
+    depth = resp.get("depth")
+    quick = depth == "quick"
+    # score 仅在精排后显示（bge 余弦相似度可校准；RRF 融合分无绝对含义，显示反而误导）
+    score_note = " · score %s" if resp.get("reranker") else ""
     meta = []
+    if quick:
+        meta.append("快速检索")
+    elif depth == "deep":
+        meta.append("深度检索（deep）")
     if resp.get("reranker"):
         meta.append("精排 " + str(resp["reranker"]).split(" ")[0])
     if resp.get("cached") is True:
@@ -283,21 +309,53 @@ def render_sources(resp):
         lines.append("")
         lines.append("%d. %s%s" % (i, t, (" — " + " · ".join(map(str, rest))) if rest else ""))
         if r.get("snippet"):
-            lines.append("> " + str(r["snippet"])[:280].replace("\n", " "))
+            lines.append("> " + str(r["snippet"])[:200 if quick else 280].replace("\n", " "))
+        if quick:
+            # 快速检索：不带图注/引文链/搜索串，只留来源与片段；无 DOI 时补文件名供引用
+            if not doi and r.get("file"):
+                lines.append("无 DOI · 文件：%s" % r["file"])
+            continue
         if isinstance(r.get("figure"), str) and r["figure"]:
             lines.append("↳ 图注坐标: " + str(r["figure"])[:220])
-        # 引文关联：本证据正文引用的参考文献条目（隐式元数据，按需暴露给 agent）
+        # 引文关联：本证据的参考文献条目；库内命中（⭐）优先展示，未命中折叠到汇总行
         cites = r.get("citations")
         if isinstance(cites, list) and cites:
-            lines.append("↳ 引文补充（出自本证据文献的引文，供补库/深读）")
-            for c in cites[:5]:
-                lines.append("  · [%s] %s" % (c.get("n"), str(c.get("text") or "")[:150]))
+            hits = [c for c in cites if isinstance(c.get("lib"), dict)]
+            others = [c for c in cites if not isinstance(c.get("lib"), dict)]
+            lines.append("↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）" if hits
+                         else "↳ 引文补充（本证据的参考文献，供补库/深读）")
+            for c in hits[:5] + others[:3]:
+                lines.append("  · [Ref %s] %s" % (c.get("n"), str(c.get("text") or "")[:150]))
+                lib = c.get("lib")
+                if isinstance(lib, dict):
+                    lt = str(lib.get("title") or "")
+                    ldoi = lib.get("doi") if isinstance(lib.get("doi"), str) and lib.get("doi") else None
+                    if ldoi:
+                        lt = "[%s](https://doi.org/%s)" % (lt, ldoi)
+                    lmeta = " · ".join(str(x) for x in [
+                        _authors_short(lib.get("authors")), lib.get("year"),
+                        lib.get("journal")] if x)
+                    tail = "（即本证据的 Ref %s，可检索引用）" % c.get("n")
+                    if lib.get("zotero_key"):
+                        tail += " · [Zotero 打开](zotero://open-pdf/library/items/%s)" % lib["zotero_key"]
+                    lines.append("    ⭐ 库内命中：%s%s%s" % (
+                        lt, ("（%s）" % lmeta) if lmeta else "", tail))
+            rest = hits[5:] + others[3:]
+            if rest:
+                lines.append("  ↳ 另有 %d 条引文未展开（Ref %s），补库时可按编号定位" % (
+                    len(rest), _ref_nums([c.get("n") for c in rest])))
         if doi:
-            lines.append("[DOI %s](https://doi.org/%s) · score %s" % (doi, doi, r.get("score")))
+            lines.append("[DOI %s](https://doi.org/%s)%s" % (
+                doi, doi, score_note % r.get("score") if score_note else ""))
         else:
-            lines.append("无 DOI · score %s · 文件：%s" % (r.get("score"), r.get("file") or ""))
+            lines.append("无 DOI%s · 文件：%s" % (
+                score_note % r.get("score") if score_note else "", r.get("file") or ""))
             if isinstance(r.get("search"), str) and r["search"]:
                 lines.append("↳ 搜索串（Scholar 可复制）: " + str(r["search"])[:200])
+    if quick:
+        lines.append("")
+        lines.append("（快速检索：直接输出查到的信息即可，一两句作答，不展开分析；需深度调研时用 depth=deep 重查）")
+        return "\n".join(lines)
     related = resp.get("related") or []
     if related:
         lines.append("")
@@ -307,7 +365,7 @@ def render_sources(resp):
             doi = r.get("doi") if isinstance(r.get("doi"), str) and r["doi"] else None
             t = "[%s](https://doi.org/%s)" % (title, doi) if doi else title
             rest = [x for x in [_authors_short(r.get("authors"), 2), r.get("year"), r.get("journal")] if x]
-            lines.append("- %s%s（%s · score %s）" % (
+            lines.append("- %s%s（%s）" % (
                 t, (" — " + " · ".join(map(str, rest))) if rest else "",
-                r.get("reason") or "内容相关", r.get("score")))
+                r.get("reason") or "内容相关"))
     return "\n".join(lines)

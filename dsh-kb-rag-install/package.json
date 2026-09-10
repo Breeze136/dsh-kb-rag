@@ -1,0 +1,36 @@
+{
+  "name": "dsh-kb-rag-install",
+  "version": "1.0.0",
+  "description": "One-command installer for dsh-kb-rag (local literature knowledge-base RAG for DSH): `npx dsh-kb-rag-install` does everything — Python deps, engine smoke test, pnpm, DSH plugin install+activate, model pre-download (auto HF mirror retry).",
+  "type": "module",
+  "bin": {
+    "dsh-kb-rag-install": "./bin.mjs"
+  },
+  "files": [
+    "bin.mjs",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "kb-rag",
+    "installer",
+    "rag",
+    "knowledge-base",
+    "literature"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Breeze136/dsh-kb-rag.git",
+    "directory": "dsh-kb-rag-install"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dsh-kb-rag": "^1.6.3"
+  }
+}

@@ -163,6 +163,27 @@ def split_long(text, limit=1000):
     return parts
 
 
+def split_refs(text, limit=1200):
+    """按行边界切分 References 长块。
+
+    引文条目解析（_parse_references 的 'N.' 行首锚点）依赖换行结构，
+    不能用 split_long（句边界拼接会把 '2.'、'3.' 挤到行中间压平锚点）。
+    超长单行（无换行的极端排版）退化为 split_long。"""
+    if "\n" not in text:
+        return split_long(text, limit=limit)
+    lines = text.split("\n")
+    parts, buf, n = [], [], 0
+    for line in lines:
+        if buf and n + len(line) + 1 > limit:
+            parts.append("\n".join(buf))
+            buf, n = [], 0
+        buf.append(line)
+        n += len(line) + 1
+    if buf:
+        parts.append("\n".join(buf))
+    return [p for p in parts if p.strip()]
+
+
 def _promote_abstract(sectioned):
     """Science-style papers often lack a literal 'Abstract' heading: promote the
     first long prose paragraph of a BOUNDED front-matter block to Abstract x1.5."""
@@ -188,6 +209,16 @@ def _promote_abstract(sectioned):
 _REF_HEAD_RE = re.compile(r"(?m)^\s*(references|bibliography|参考文献|引用文献)\b", re.I)
 # 参考文献条目风格：'1. Author' / '1 Author' / '[1] Author'（Wiley） / '1Author'（紧贴式）
 _REF_ENTRY_BRACKET_RE = re.compile(r"(?m)^\s*\[\s*(\d{1,3})\s*\]\s+(?=\S)")
+# 引文链条目行（stage-3 链式检测用）：'[N] ...' / 'N.\t...' / 'N.' 独占行 / 'N. Author...'
+_REF_CHAIN_ENTRY_RE = re.compile(r"^\s*(?:\[\s*(\d{1,3})\s*\]|(\d{1,3})\.)(?:\s|\t|$)")
+# 引文链尾部的"停止行"：链末条内容到这些行截止（Acknowledgements / © / 图注 / Methods 等）
+_REF_STOP_RE = re.compile(
+    r"^(?:©|Letter\b|RESEARCH\b|ARTICLE\b|Article\b|Extended\s+Data\b|"
+    r"Fig(?:ure)?\.?\s*\d|Table\.?\s*\d|Acknowledg\w*|Methods?\b|Materials\s+and\s+methods\b|"
+    r"Data\s+availability\b|Author\s+contribution|Correspondence\b|Supplementary\b|"
+    r"Online\s+Content\b|[Rr]eceived\b|References\b|Bibliography\b|Appendix\b|"
+    r"Abstract\b|Introduction\b|Results?\b|Discussions?\b|Conclusions?\b|"
+    r"致谢|参考文献|引用文献|方法|实验|结果|讨论|结论|附录|图\s*\d|表\s*\d)")
 
 
 def _ref_entry_count(text):
@@ -197,14 +228,139 @@ def _ref_entry_count(text):
     return n
 
 
+def _ascending_ref_spans(text, min_chain=6, max_gap=900):
+    """无标题 References：全文任意位置（偏后半）的递增条目链。
+
+    Nature 系论文的参考文献没有可检索的标题行（标题是图形），且正文 refs（1..30）
+    与 Methods refs（31..37）分成两段、中间隔着正文/图注；Science/PRB 的 '1. Author'
+    行首风格同理。这里按"编号从 1 开始递增（或续接上一条已接受链）、条目过半含
+    年份/et al 信号"识别引文链，返回 [(链首字符位, 链尾字符位)]。"""
+    lines = []
+    pos = 0
+    for line in text.split("\n"):
+        lines.append((pos, line))
+        pos += len(line) + 1
+    entries = []
+    for (pos, line) in lines:
+        m = _REF_CHAIN_ENTRY_RE.match(line)
+        if m:
+            num = int(m.group(1) or m.group(2))
+            entries.append((pos, num))
+    chains, cur = [], []
+    for (pos, num) in entries:
+        if cur and num == cur[-1][1] + 1 and pos - cur[-1][0] < max_gap:
+            cur.append((pos, num))
+        else:
+            if len(cur) >= min_chain:
+                chains.append(cur)
+            cur = [(pos, num)]
+    if len(cur) >= min_chain:
+        chains.append(cur)
+    spans, last_num = [], 0
+    for ch in chains:
+        first = ch[0][1]
+        if first != 1 and first != last_num + 1:
+            continue  # 不从头开始也不续接：多为 Methods 编号步骤等，宁缺勿错
+        if ch[0][0] < len(text) * 0.3:
+            continue  # 引文链不会出现在全文前 30%
+        if not _chain_citation_like(text, ch):
+            continue
+        spans.append((ch[0][0], _chain_end(text, ch[-1][0], lines)))
+        last_num = ch[-1][1]
+    return spans
+
+
+def _chain_citation_like(text, ch, min_frac=0.6):
+    """链上过半条目含文献信号（括号年份 / et al / & 姓氏首字母），排除编号步骤列表。"""
+    hits = 0
+    for k, (pos, _num) in enumerate(ch):
+        nxt = ch[k + 1][0] if k + 1 < len(ch) else min(pos + 700, len(text))
+        if re.search(r"\((?:18|19|20)\d{2}\)|et\s+al\.?|\&\s+[A-Z]", text[pos:nxt]):
+            hits += 1
+    return hits >= max(3, int(len(ch) * min_frac))
+
+
+def _chain_end(text, last_pos, lines):
+    """链末条内容截止：空行或停止行（Acknowledgements / © / 图注 / Methods 等）。"""
+    end = last_pos
+    for (pos, line) in lines:
+        if pos < last_pos:
+            continue
+        if pos > last_pos + 4000:
+            break
+        if pos > last_pos and (not line.strip() or _REF_STOP_RE.match(line.strip())):
+            break
+        end = pos + len(line)
+    return end
+
+
+def _apply_ref_spans(paragraphs, pages, spans):
+    """把字符级引文链区间映射到段落（边界段落按区间切开）。
+
+    返回 (新段落列表, refs 段落下标集合, 平行页列表)；pages 为 None 时保持 None。"""
+    joined = "\n\n".join(paragraphs)
+    offs, pos = [], 0
+    for p in paragraphs:
+        offs.append(pos)
+        pos += len(p) + 2
+    ref_paras = set()
+    out_p, out_g = [], []
+    for i, p in enumerate(paragraphs):
+        s, e = offs[i], offs[i] + len(p)
+        cuts = sorted((max(cs, s), min(ce, e)) for (cs, ce) in spans if cs < e and s < ce)
+        if not cuts:
+            out_p.append(p)
+            if pages is not None:
+                out_g.append(pages[i])
+            continue
+        cur = s
+        for (cs, ce) in cuts:
+            if cs > cur:
+                out_p.append(joined[cur:cs].strip())
+                if pages is not None:
+                    out_g.append(pages[i])
+            piece = joined[cs:ce].strip()
+            if piece:
+                out_p.append(piece)
+                if pages is not None:
+                    out_g.append(pages[i])
+                ref_paras.add(len(out_p) - 1)
+            cur = max(cur, ce)
+        if cur < e:
+            out_p.append(joined[cur:e].strip())
+            if pages is not None:
+                out_g.append(pages[i])
+    return out_p, ref_paras, out_g
+
+
+def _refs_block_like(text, min_entries=4, min_frac=0.5):
+    """段块整体是否像参考文献列表：过半条目带年份/et al/& 信号。
+
+    挡住 stage-2 的图注/坐标轴数字误报（末页图区满是行首数字，但几乎无年份）。"""
+    ms = list(_REF_ENTRY_RE.finditer(text or "")) + \
+        list(_REF_ENTRY_TIGHT_RE.finditer(text or "")) + \
+        list(_REF_ENTRY_BRACKET_RE.finditer(text or ""))
+    if len(ms) < min_entries:
+        return False
+    hits = 0
+    for i, m in enumerate(ms):
+        nxt = ms[i + 1].start() if i + 1 < len(ms) else min(m.start() + 250, len(text))
+        if re.search(r"\((?:18|19|20)\d{2}\)|\b(?:19|20)\d{2}\b|et\s+al\.?|\&\s+[A-Z]", text[m.end():nxt]):
+            hits += 1
+    return hits >= max(2, int(len(ms) * min_frac))
+
+
 def _find_ref_index(paragraphs, pages=None):
-    """后置 References 兜底：在段落列表中按行级标题拆分。
-    返回 (新段落列表, 首个参考文献段的下标, 平行页列表)。
-    两阶段：
+    """后置 References 兜底：在段落列表中定位参考文献。
+    返回 (段落列表, refs 段落下标集合, 平行页列表)。
+    三阶段：
     1) 有标题：文档后半段中最后一个带 references/bibliography/参考文献 行首标题、
-       且标题之后出现序号条目的段（避免表格单元格里的 "references" 字样），在该行拆段；
-    2) 无标题：文末【连续】序号条目高密度段（参考文献总在文末成片出现；
-       多栏排版的正文页偶发 [n] 行首，因不连续而被排除）。"""
+       且标题之后出现序号条目的段（避免表格单元格里的 "references" 字样），在该行拆段，
+       标题之后全部段落归 References；
+    2) 无标题：文末【真正连续】的序号条目高密度段（每段 ≥2 条目；允许跳过 1 个
+       尾部噪声段。修复：旧实现用 n-run_start 判断"成片"，单段公式噪声即可劫持）；
+    3) Nature 式无标题引文链：递增 'N.' 条目链（正文 refs + Methods refs 两段离散链），
+       见 _ascending_ref_spans。"""
     n = len(paragraphs)
     idx = None
     for i, p in enumerate(paragraphs):
@@ -227,17 +383,26 @@ def _find_ref_index(paragraphs, pages=None):
         out_g = pages
         if pages is not None:
             out_g = pages[:idx] + newpg + pages[idx + 1:]
-        return out_p, idx + (1 if body else 0), out_g
-    # 无标题阶段：文末连续序号条目高密度段
+        start = idx + (1 if body else 0)
+        return out_p, set(range(start, len(out_p))), out_g
+    # 阶段 2：文末连续序号条目高密度段（从文末向前走，允许跳过 1 个尾部噪声段）
+    i = n - 1
+    if i >= 0 and _ref_entry_count(paragraphs[i]) < 2:
+        i -= 1                             # 最多跳过 1 个无条目尾段（如版权行）
     run_start = None
-    for i in range(n - 1, int(n * 0.5) - 1, -1):
-        if _ref_entry_count(paragraphs[i]) >= 2:
-            run_start = i
-        elif run_start is not None:
-            break
-    if run_start is not None and (n - run_start) >= 3:
-        return paragraphs, run_start, pages
-    return paragraphs, None, pages
+    while i >= 0 and _ref_entry_count(paragraphs[i]) >= 2:
+        run_start = i
+        i -= 1
+    if run_start is not None and n - run_start >= 2 and \
+            _refs_block_like("\n\n".join(paragraphs[run_start:])):
+        return paragraphs, set(range(run_start, n)), pages
+    # 阶段 3：Nature 式无标题递增引文链（离散多段）
+    spans = _ascending_ref_spans("\n\n".join(paragraphs))
+    if spans:
+        out_p, ref_paras, out_g = _apply_ref_spans(paragraphs, pages, spans)
+        if ref_paras:
+            return out_p, ref_paras, out_g
+    return paragraphs, set(), pages
 
 
 def chunk_document(full_text, paras=None):
@@ -253,8 +418,7 @@ def chunk_document(full_text, paras=None):
     if paras is not None:
         pages = [pg for pg, _ in paras]
         paragraphs = [t for _, t in paras]
-    paragraphs, ref_idx, pages = _find_ref_index(paragraphs, pages)
-    ref_para_no = (ref_idx + 1) if ref_idx is not None else None
+    paragraphs, ref_paras, pages = _find_ref_index(paragraphs, pages)
 
     def _pg_of(pno):
         """段落序号 -> PDF 页码（无页信息返回 None）。"""
@@ -274,8 +438,20 @@ def chunk_document(full_text, paras=None):
             sectioned.append((section, weight, buf))
         buf = []
 
-    for p in paragraphs:
+    for pi, p in enumerate(paragraphs):
         para_no += 1
+        if pi in ref_paras:
+            # 引文链段（无标题 References，可能离散多段）：整段归 References，不做 heading 切分
+            if section != "References":
+                structured = True
+                flush()
+                section, weight = "References", 0.0
+            buf.append((para_no, p))
+            continue
+        if section == "References":
+            # 引文链结束，回到正文
+            flush()
+            section, weight = "Front matter", 1.0
         segs = [(para_no, s) for s in split_inline_headings(p) if s]
         for j, (pno, seg) in enumerate(segs):
             hit = match_section_prefix(seg, allow_long=(j > 0))
@@ -298,15 +474,13 @@ def chunk_document(full_text, paras=None):
     flush()
 
     if not structured:
-        return fallback_chunks(paragraphs, ref_idx=ref_idx, pages=pages)
+        return fallback_chunks(paragraphs, ref_paras=ref_paras, pages=pages)
 
     sectioned = _promote_abstract(sectioned)
 
     chunks = []
     for sec, w, paras in sectioned:
         ps, pe = paras[0][0], paras[-1][0]
-        if ref_para_no is not None and ps >= ref_para_no:
-            sec, w = "References", 0.0          # 后置兜底：标题之后全部归 References
         pgs = [pg for pg in (_pg_of(pno) for (pno, _) in paras) if pg is not None]
         pg_s = min(pgs) if pgs else None
         pg_e = max(pgs) if pgs else None
@@ -320,17 +494,21 @@ def chunk_document(full_text, paras=None):
         if w <= 0 and sec != "References":
             continue                     # 仅 References 保留（引文关联数据源），其余权重 0 章节丢弃
         if len(text) > 1200:
-            chunks.extend((sec, w, piece, ps, pe, pg_s, pg_e) for piece in split_long(text))
+            if sec == "References":
+                pieces = split_refs(text)          # 行边界切分，保留 'N.' 行首锚点
+            else:
+                pieces = split_long(text)
+            chunks.extend((sec, w, piece, ps, pe, pg_s, pg_e) for piece in pieces)
         else:
             chunks.append((sec, w, text, ps, pe, pg_s, pg_e))
     return chunks
 
 
-def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None, pages=None):
+def fallback_chunks(paragraphs, low=300, high=800, ref_paras=None, pages=None):
     """Paragraph merging with sentence-level splitting for oversized blocks.
     返回 [(section, weight, text, para_start, para_end, page_start, page_end)]，
     段落号为全局序号；pages 为平行页列表（无页信息传 None）。
-    ref_idx 非空时，其后的段落归入 References（weight 0，入库供引文关联）。"""
+    ref_paras：References 段落下标集合（可离散多段，weight 0，入库供引文关联）。"""
     pieces = []                      # (para_no, text)
 
     def _pg_of(pno):
@@ -339,7 +517,7 @@ def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None, pages=None):
         return pages[pno - 1]
 
     for i, p in enumerate(paragraphs, start=1):
-        if ref_idx is not None and i > ref_idx:
+        if ref_paras and (i - 1) in ref_paras:
             pieces.append((i, p))    # References 段落整段保留（不拆分）
             continue
         if len(p) > high:
@@ -353,7 +531,7 @@ def fallback_chunks(paragraphs, low=300, high=800, ref_idx=None, pages=None):
         return len(clean(" ".join(t for _, t in buf)))
 
     for pno, p in pieces:
-        if ref_idx is not None and pno > ref_idx:
+        if ref_paras and (pno - 1) in ref_paras:
             ref_buf.append((pno, p))
             continue
         if buf and buf_len() + len(p) + 1 > high and buf_len() >= low:
@@ -385,7 +563,13 @@ def read_document(path):
         import fitz  # PyMuPDF
         doc = fitz.open(str(path))
         try:
-            pages_text = [page.get_text() for page in doc]
+            pages_text = []
+            for page in doc:
+                txt = page.get_text()
+                sups = _superscript_cites(page)
+                if sups:
+                    txt = _bracket_superscripts(txt, sups)
+                pages_text.append(txt)
             text = "\n".join(pages_text)
             meta = dict(doc.metadata or {})
             # First-page signals for reliable identifier extraction.
@@ -419,6 +603,91 @@ def read_document(path):
         except ImportError:
             return _docx_fallback(path), None
     raise ValueError(f"unsupported file type: {ext}")
+
+
+def _superscript_cites(page):
+    """Nature 系上标数字引用检测（角标识别）。
+
+    PDF 文本层会把上标角标压平成紧贴单词的普通数字（如 'graphene1,2'），
+    丢失"这是引用"的信号；只有字体度量还能救：上标 span 的字号 ≈ 行内正文的
+    70% 且基线抬高。这里按 (锚点尾部, 上标簇文本) 返回命中，供
+    _bracket_superscripts 转写成 '[1,2]' 方括号形式，让 _INCITE_RE 能解析。
+
+    宁缺勿错：跳过作者行（一串通讯/同等贡献上标）、锚点以数字结尾（指数
+    10¹² 之类）、含非数字/逗号/连字符的簇（如作者单位 '1*'）。"""
+    try:
+        d = page.get_text("dict")
+    except Exception:
+        return []
+    out = []
+    for b in d.get("blocks", []):
+        if b.get("type") != 0:
+            continue
+        for l in b.get("lines", []):
+            spans = [s for s in (l.get("spans") or []) if s.get("text")]
+            if len(spans) < 2:
+                continue
+            body = max(s["size"] for s in spans)
+            if body < 4:
+                continue
+            base = [s["origin"][1] for s in spans if s["size"] >= body * 0.9]
+            if not base:
+                continue
+            baseline = min(base)
+            small = [s["size"] <= body * 0.80 and s["origin"][1] <= baseline - body * 0.12
+                     for s in spans]
+            if not any(small):
+                continue
+            # 相邻小上标 span 合并为簇（'1' + ',' + '2' -> 一个簇）
+            groups, i = [], 0
+            while i < len(spans):
+                if small[i]:
+                    j = i
+                    while j + 1 < len(spans) and small[j + 1]:
+                        j += 1
+                    groups.append((i, j))
+                    i = j + 1
+                else:
+                    i += 1
+            if len(groups) >= 3:
+                continue  # 作者行/致谢名单：一串上标，宁缺勿错
+            for (a, b2) in groups:
+                cluster = "".join(spans[k]["text"] for k in range(a, b2 + 1)).strip()
+                core = re.sub(r"\s+", "", cluster)
+                if not re.fullmatch(r"[\d,;–\-—]+", core) or not any(c.isdigit() for c in core):
+                    continue  # '1*'、'a,b' 等非纯数字角标（单位/脚注字母）
+                if len(re.findall(r"\d{1,3}(?!\d)", core)) > 8:
+                    continue
+                if a == 0:
+                    continue  # 行首无锚点
+                tail = spans[a - 1]["text"].rstrip()[-12:]
+                if not tail or tail[-1].isdigit():
+                    continue  # 锚点以数字结尾：多为指数（10¹²）
+                out.append((tail, cluster))
+    return out
+
+
+def _bracket_superscripts(text, cites, cap=60):
+    """把已识别的上标引用簇写成方括号形式：'graphene1,2' -> 'graphene[1,2]'。
+
+    只有在锚点尾部 + 簇文本能整串在页面文本中找到时才替换（span 拼接与
+    get_text 的行内拼接一致），找不到就跳过，不猜位置。"""
+    n = 0
+    for tail, cluster in cites:
+        if n >= cap:
+            break
+        core = re.sub(r"\s+", "", cluster)
+        new_text, k = text, 0
+        for needle in (tail + cluster, tail + core):
+            if needle == tail + "[" + core + "]":
+                continue
+            new_text, k = re.subn(re.escape(needle), tail + "[" + core + "]", text)
+            if k:
+                break
+        if k:
+            text = new_text
+            n += k
+    return text
 
 
 def _largest_font_title(page):
@@ -822,9 +1091,25 @@ _EMBED_NAME = None
 
 BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 
+_HF_MIRROR = "https://hf-mirror.com"
+
+
+def _apply_hf_mirror():
+    """Switch huggingface_hub to the CN mirror after a direct-download failure.
+    HF_ENDPOINT is baked into huggingface_hub.constants at import time (ENDPOINT
+    and the derived HUGGINGFACE_CO_URL_TEMPLATE), so setting os.environ alone is
+    a no-op once hub is imported — patch the constants instead."""
+    os.environ.setdefault("HF_ENDPOINT", _HF_MIRROR)
+    try:
+        import huggingface_hub.constants as _hfc
+        _hfc.ENDPOINT = _HF_MIRROR
+        _hfc.HUGGINGFACE_CO_URL_TEMPLATE = _HF_MIRROR + "/{repo_id}/resolve/{revision}/{filename}"
+    except Exception:
+        pass
+
 
 def get_embedder():
-    """Lazy singleton; prefers the local HF cache, never waits on the network."""
+    """Lazy singleton; prefers the local HF cache, downloads with mirror auto-retry."""
     global _EMBEDDER, _EMBED_ERR, _EMBED_NAME
     if _EMBEDDER is not None or _EMBED_ERR is not None:
         return _EMBEDDER
@@ -834,7 +1119,11 @@ def get_embedder():
         try:
             model = SentenceTransformer(name, local_files_only=True)
         except Exception:
-            model = SentenceTransformer(name)
+            try:
+                model = SentenceTransformer(name)
+            except Exception:
+                _apply_hf_mirror()  # direct download failed; retry via mirror
+                model = SentenceTransformer(name)
         _EMBEDDER = model
         _EMBED_NAME = name
     except Exception as e:
@@ -869,8 +1158,8 @@ _RERANK_NAME = None
 
 
 def get_reranker():
-    """Stage-2 scorer: cached bge-reranker-base Cross-Encoder first, then an
-    attempted mirror download (bounded), then the local bge-large-en bi-encoder."""
+    """Stage-2 scorer: cached bge-reranker-base Cross-Encoder first, then a
+    download with mirror auto-retry (bounded), then the local bge-large-en bi-encoder."""
     global _RERANKER, _RERANK_ERR, _RERANK_NAME
     if _RERANKER is not None or _RERANK_ERR is not None:
         return _RERANKER
@@ -882,11 +1171,14 @@ def get_reranker():
         return _RERANKER
     except Exception:
         pass
-    try:  # bounded download attempt (HF mirror for CN networks)
-        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    try:  # bounded download attempt; direct first, then auto-retry via the CN mirror
         os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")
         from sentence_transformers import CrossEncoder
-        _RERANKER = CrossEncoder(name)
+        try:
+            _RERANKER = CrossEncoder(name)
+        except Exception:
+            _apply_hf_mirror()
+            _RERANKER = CrossEncoder(name)
         _RERANK_NAME = name
         return _RERANKER
     except Exception as e1:
@@ -1154,7 +1446,16 @@ def make_snippet(text, term, width):
         return text[:width] + ("…" if len(text) > width else "")
     i = text.lower().find(term)
     start = max(0, i - width // 3)
+    if start > 0:
+        # 对齐到词边界起截：避免 "…ng1, Emma" 这类半个名字/单词开头
+        ws = text.find(" ", start)
+        if 0 <= ws <= start + 40:
+            start = ws + 1
     end = min(len(text), start + width)
+    if end < len(text):
+        we = text.rfind(" ", start, end)
+        if we > start:
+            end = we
     pre = "…" if start > 0 else ""
     post = "…" if end < len(text) else ""
     return pre + text[start:end].strip() + post
@@ -1231,9 +1532,29 @@ def rrf_fuse(kw_ranked, v_ranked):
 
 _FIGREF_RE = re.compile(r"(?:fig(?:ure|s)?\.?\s*|图\s*)(\d+)([a-zA-Z])?(?!\d)", re.I)
 _CAPTION_NUM_RE = re.compile(r"\d+")
-_INCITE_RE = re.compile(r"\[(\d{1,3})(?:\s*[–\-]\s*(\d{1,3}))?\]")
+_INCITE_RE = re.compile(
+    r"\[(\d{1,3}(?:\s*[–\-]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[–\-]\s*\d{1,3})?)*)\]")
 _REF_ENTRY_RE = re.compile(r"(?m)^\s*(\d{1,3})\s*(?:[\.\)]\s+|\s+)(?=\S)")
 _REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(\d{1,3})(?=[A-Z])")
+_CITE_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s,;\"'<>\)\]]+", re.I)
+_CITE_YEAR_RE = re.compile(r"\((\d{4})\)\s*[.\s]*$")
+
+
+def _expand_incite_nums(group, cap=60):
+    """"1", "1-3", "1,2,5", "1–3,7" -> 引文编号展开列表。"""
+    nums = []
+    for part in group.split(","):
+        m = re.match(r"\s*(\d{1,3})(?:\s*[–\-]\s*(\d{1,3}))?\s*$", part)
+        if not m:
+            continue
+        a = int(m.group(1))
+        b = int(m.group(2) or m.group(1))
+        if b < a:
+            b = a
+        if b > a + 50:
+            b = a + 50
+        nums.extend(range(a, b + 1))
+    return nums[:cap]
 
 
 def _doc_references(db, doc_id, cache=None):
@@ -1251,37 +1572,41 @@ def _doc_references(db, doc_id, cache=None):
 
 
 def _parse_references(text, cap=400):
-    """References 文本 -> {编号: 引文文本}。支持 '1. ' / '1 ' / '[1] ' / '1Author' 四种风格。"""
+    """References 文本 -> {编号: 引文文本}。支持 '1. ' / '1 ' / '[1] ' / '1Author' 四种风格。
+
+    多种风格同时命中条目时，取"编号链最完整"的模式（含 1 且前后相连的编号最多）——
+    避免换行噪声风格（如年被拆行后 '10 Domains ...' 行首）劫持真实条目。"""
     if not text:
         return {}
-    refs = {}
+    best, best_score = {}, -1
     for pat in (_REF_ENTRY_RE, _REF_ENTRY_BRACKET_RE, _REF_ENTRY_TIGHT_RE):
         ms = list(pat.finditer(text))
         if len(ms) < 2 and len(text) > 200:
             continue  # 单条匹配不可靠，跳过该模式
+        refs = {}
         for i, m in enumerate(ms):
             end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
             body = text[m.end():end].strip()
             body = re.sub(r"\s+", " ", body)
             if body:
                 refs[int(m.group(1))] = body[:cap]
-        if refs:
-            return refs
-    return refs
+        if not refs:
+            continue
+        keys = set(refs)
+        score = (1 if 1 in keys else 0) + sum(1 for kk in keys if kk - 1 in keys)
+        if score > best_score:
+            best, best_score = refs, score
+    return best
 
 
 def _cited_refs(db, doc_id, chunk_text, cache):
-    """取本块正文引用的 [n] 对应参考文献条目（含范围展开），供引文关联建议使用。"""
+    """取本块正文引用的 [n] 对应参考文献条目（含范围/逗号列表展开），供引文关联建议使用。"""
     refs = _parse_references(_doc_references(db, doc_id, cache))
     if not refs:
         return []
     nums = []
     for m in _INCITE_RE.finditer(chunk_text or ""):
-        a = int(m.group(1))
-        b = int(m.group(2)) if m.group(2) else a
-        if b > a + 50:
-            b = a + 50
-        nums.extend(range(a, b + 1))
+        nums.extend(_expand_incite_nums(m.group(1)))
     out, seen = [], set()
     for n in nums:
         if n in refs and n not in seen:
@@ -1289,7 +1614,75 @@ def _cited_refs(db, doc_id, chunk_text, cache):
             out.append({"n": n, "text": refs[n]})
         if len(out) >= 8:
             break
+    _annotate_lib_matches(db, doc_id, out, cache)
     return out
+
+
+def _lib_docs(db, cache=None):
+    """库内全部文献的轻量元数据行（引文关联库内匹配的数据源）；带 per-search 缓存。"""
+    if cache is not None and "libdocs" in cache:
+        return cache["libdocs"]
+    rows = db.execute(
+        "SELECT id, title, authors, year, journal, doi, zotero_key FROM docs").fetchall()
+    rows = [dict(r) for r in rows]
+    if cache is not None:
+        cache["libdocs"] = rows
+    return rows
+
+
+def _cite_norm(s):
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", (s or "").lower())
+
+
+def _match_cite_lib(cite_text, libdocs):
+    """引文条目文本 -> 库内文献（宁缺勿错）。
+
+    三级匹配：① 引文文本里的 DOI 精确命中；② 库内标题（归一化后 ≥30 字符）
+    整串出现在引文文本里；③ 首作者姓（≥6 字符，排除 Wang/Li 类大姓）+ 括号年份
+    双命中。命中即返回 doc dict，否则 None。"""
+    if not cite_text:
+        return None
+    for doi in _CITE_DOI_RE.findall(cite_text):
+        doi_n = doi.rstrip(".,;").lower()
+        for d in libdocs:
+            if d.get("doi") and d["doi"].lower() == doi_n:
+                return d
+    ct = _cite_norm(cite_text)
+    for d in libdocs:
+        dt = _cite_norm(d.get("title"))
+        if len(dt) >= 30 and dt in ct:
+            return d
+    first_seg = re.split(r"[,;]", cite_text.strip(), 1)[0]
+    mw = re.search(r"[A-Za-z\u4e00-\u9fff]{3,}", first_seg)  # 跳过缩写/序号，取首作者姓
+    my = _CITE_YEAR_RE.search(cite_text.strip())
+    if mw and len(mw.group(0)) >= 6 and my:
+        surname = mw.group(0)
+        year = int(my.group(1))
+        for d in libdocs:
+            if d.get("year") == year and surname.lower() in (d.get("authors") or "").lower():
+                return d
+    return None
+
+
+def _annotate_lib_matches(db, doc_id, cites, cache):
+    """引文关联深挖：被引条目若命中库内文献，标注 lib 字段，写出"谁引谁"的关系数据。
+
+    渲染层据此显示引文关联：本证据文献的引文 [n] == 库内某篇文献（可直接检索/
+    引用/打开），即 <证据文献> --引用[n]--> <库内文献>。"""
+    if not cites:
+        return
+    try:
+        lib = _lib_docs(db, cache)
+    except Exception:
+        return
+    if not lib:
+        return
+    for c in cites:
+        d = _match_cite_lib(c.get("text"), lib)
+        if d and d["id"] != doc_id:
+            c["lib"] = {"id": d["id"], "title": d["title"], "authors": d["authors"],
+                        "year": d["year"], "journal": d["journal"], "doi": d["doi"],
+                        "zotero_key": d.get("zotero_key") or None}
 
 
 def _doc_captions(db, doc_id):
@@ -1576,18 +1969,37 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     return resp
 
 
+def _depth_of(req, default):
+    """快速/深度双模式：quick=快速检索（无精排/无关联文献/更少更短），deep=深度检索（全链路）。
+
+    显式传参（top_k/snippet/rerank/related）永远优先于模式缺省。"""
+    depth = req.get("depth") or default
+    return depth if depth in ("quick", "deep") else default
+
+
+def _depth_flag(req, key, depth, quick_default, deep_default):
+    """rerank/related 的模式化缺省：未传或传 null 时按 depth 取，显式传 bool 就尊重。
+
+    MCP 客户端未传的参数会以 null 编进请求（server 侧已剔除，raw 协议兜底）。"""
+    if key in req and req.get(key) is not None:
+        return req.get(key) is not False
+    return quick_default if depth == "quick" else deep_default
+
+
 def cmd_search(req):
     t0 = time.time()
     query = (req.get("query") or "").strip()
     if not query:
         return {"ok": False, "error": "query is required"}
-    top_k = min(max(int(req.get("top_k") or 5), 1), 10)
-    snippet_w = min(max(int(req.get("snippet") or 400), 100), 2000)
+    depth = _depth_of(req, "quick")           # kb_search 是查信息入口：默认快速检索
+    quick = depth == "quick"
+    top_k = min(max(int(req.get("top_k") or (3 if quick else 5)), 1), 10)
+    snippet_w = min(max(int(req.get("snippet") or (300 if quick else 400)), 100), 2000)
     filters = req.get("filters") or {}
     mode = req.get("mode") or "hybrid"
     use_cache = req.get("cache") is not False
-    rerank_flag = req.get("rerank") is not False
-    related_flag = req.get("related") is not False
+    rerank_flag = _depth_flag(req, "rerank", depth, False, True)
+    related_flag = _depth_flag(req, "related", depth, False, True)
     related_k = min(max(int(req.get("related_k") or 5), 1), 10)
     db = connect(req.get("kb_root") or ".kb")
     try:
@@ -1597,6 +2009,7 @@ def cmd_search(req):
     finally:
         db.close()
     resp["ok"] = True
+    resp["depth"] = depth
     resp["ms_total"] = round((time.time() - t0) * 1000)
     return resp
 
@@ -1606,23 +2019,43 @@ def cmd_rag(req):
     query = (req.get("query") or "").strip()
     if not query:
         return {"ok": False, "error": "query is required"}
-    top_k = min(max(int(req.get("top_k") or 3), 1), 10)
+    depth = _depth_of(req, "deep")            # kb_rag 是问答入口：默认深度检索
+    quick = depth == "quick"
+    top_k = min(max(int(req.get("top_k") or (2 if quick else 3)), 1), 10)
+    snippet_w = 400 if quick else 600
     filters = req.get("filters") or {}
-    rerank_flag = req.get("rerank") is not False
-    related_flag = req.get("related") is not False
+    rerank_flag = _depth_flag(req, "rerank", depth, False, True)
+    related_flag = _depth_flag(req, "related", depth, False, True)
     related_k = min(max(int(req.get("related_k") or 5), 1), 10)
     db = connect(req.get("kb_root") or ".kb")
     try:
-        resp = _search_core(db, query, top_k, 600, filters, "hybrid", True,
+        resp = _search_core(db, query, top_k, snippet_w, filters, "hybrid", True,
                             rerank_flag, related_flag, related_k)
         db.commit()
     finally:
         db.close()
     resp["ok"] = True
+    resp["depth"] = depth
     resp["evidence"] = resp.pop("results")
-    resp["guidance"] = ("基于 evidence 作答，每个事实标注来源编号 [n]（对应 evidence 下标）；"
-                        "资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出；"
-                        "答案末尾的补充建议可参考 related 关联文献列表（若相关）。")
+    if quick:
+        resp["guidance"] = ("快速检索：拿到 evidence 立即作答，不要长思考/长推理——"
+                            "用户是单点查询。回答控制在一两句内：直接给查到的文献信息/数据/术语，"
+                            "标注来源编号 [n]（对应 evidence 下标）即可；"
+                            "禁止背景铺垫、延伸分析、二次检索、追加说明；"
+                            "用户想要更多背景/延伸时再改用 depth=deep 重查。")
+    else:
+        resp["guidance"] = (
+            "深度检索：基于 evidence 作答，每个事实标注来源编号 [n]（对应 evidence 下标），"
+            "可综合多篇证据展开论述（适合领域调研，注意给出背景与脉络）；"
+            "资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出；"
+            "答案末尾按来源分三列给补充建议（哪列为空就整列省略，全空则整块省略）："
+            "①「库内可查（循引文找到）」：evidence 各条 citations 里标 ⭐ 库内命中的文献——"
+            "必须写出关系链：《被引文献》(作者, 年份) 被 [证据编号] 《证据文献》的引文 Ref n 引用，"
+            "并注明已在库内、可直接对其提问；"
+            "②「建议补库（循引文发现）」：citations 里未命中库内的条目——写成 (作者, 年份, 期刊/标题)，"
+            "注明被 [证据编号] 的 Ref n 引用、尚不在库内，需要时用 Ref 编号定位下载；"
+            "③「相关文献」：related 列表（同作者/同期刊/主题相似，元数据相似，无引文关系）。"
+            "每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得把三种混为一列。")
     return resp
 
 
