@@ -63,7 +63,7 @@ npx dsh-kb-rag-install
 
 - **文件夹/文件入库**：说"把 `D:/papers` 文件夹入库" → `kb_ingest(paths=[...])`。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库的标记 duplicate 跳过——重复跑是增量同步，安全。
 - **Zotero 迁移**：说"同步 Zotero" → `kb_zotero()`（自动定位 zotero.sqlite，带 PDF 附件的条目逐篇入库）。想先看会迁哪些：`kb_zotero(dry_run=true)`。附件文件缺失的条目标 `missing` 跳过（正常）。
-- **按标识符补库（可选）**：`kb_fetch` 按 DOI / arXiv ID 下载 OA PDF（出版商正式版优先），下载后把 PDF 拖进 Zotero 或直接让 `kb_ingest` 入库。
+- **按标识符补库（可选）**：`kb_fetch` 按 DOI / arXiv ID 下载 PDF（优先出版商正式版：校园网/机构订阅网络下可直接下订阅版；无权限时回退开放获取），下载后把 PDF 拖进 Zotero 或直接让 `kb_ingest` 入库。
 
 ## 第 3 分钟 · 检索与问答
 

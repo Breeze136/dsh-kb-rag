@@ -115,7 +115,7 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 
 ### 3. 构建文库
 
-在 DSH 会话中，让它入库某个文件夹（`kb_ingest`）或同步 Zotero（`kb_zotero`）。单篇论文也可先按标识符获取（`kb_fetch`，仅限开放获取）。
+在 DSH 会话中，让它入库某个文件夹（`kb_ingest`）或同步 Zotero（`kb_zotero`）。单篇论文也可先按标识符获取（`kb_fetch` 优先解析出版商正式版，在校园网或机构订阅网络下可直接取得订阅版；无权限时回退开放获取）。
 
 <details>
 <summary>批量入库 — 避免宿主超时干扰任务</summary>
@@ -166,7 +166,7 @@ npx dsh-kb-rag-install --profile web
 | `kb_dedup` | 删除重复文档，保留最早的一份 | “去重” |
 | `kb_clear` | 清空全部文档与索引；需要 `confirm=true` | “清空知识库” |
 | `kb_stats` | 文档、分块与向量数量，以及最近的入库记录 | “文库中有什么？” |
-| `kb_fetch` | 按 DOI 或 arXiv ID 下载 PDF（仅限开放获取，优先出版商版本） | “下载 10.5555/12345678” |
+| `kb_fetch` | 按 DOI 或 arXiv ID 下载 PDF（优先出版商正式版，校园网/机构订阅可直接下订阅版；无权限回退开放获取） | “下载 10.5555/12345678” |
 
 MCP 服务器暴露同样的九个工具，其中 `kb_scope` 由 `kb_status`（后台任务轮询）替代。配置与客户端配置片段见 [mcp-server/README.md](mcp-server/README.md)。
 

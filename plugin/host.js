@@ -613,7 +613,7 @@ return {
 
     const kbFetch = harness.defineTool({
       name: 'kb_fetch',
-      description: '按 DOI / arXiv ID 定点下载开放获取(OA)文献 PDF 到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。只下载 OA 文献，不碰付费墙/Sci-Hub。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。',
+      description: '按 DOI / arXiv ID 把论文 PDF 下载到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。按标准元标签与公开 API 解析地址，顺序为：arXiv 直连 → 出版商正式版（落地页 citation_pdf_url；在校园网/机构订阅网络下可直接取得订阅版 PDF，无需额外配置）→ 落地页内常见 pdf 链接 → 开放获取兜底（Unpaywall / Crossref）。只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。',
       parameters: {
         identifiers: { type: 'array', required: true, items: { type: 'string' }, description: 'DOI 或 arXiv ID 列表（如 10.5555/12345679 或 arXiv:2401.00001）。' },
         target_dir: { type: 'string', description: '下载目录（默认 ~/.kb-rag/downloads）。' },

@@ -77,7 +77,7 @@ python "<本仓库路径>/mcp-server/server.py"
 
 1. 首次建库：`kb_ingest(paths=["D:/papers"])`，或 `kb_zotero()`（建议先 `dry_run=true` 预览再真迁移）
 2. 提问/检索：`kb_rag(query="...")`（默认 Top-3 证据 + 逐条编号引用）或 `kb_search(query="...")`
-3. 维护：`kb_stats()` / `kb_dedup()` / `kb_clear(confirm=true)`；补库用 `kb_fetch(identifiers=["DOI 或 arXiv ID"])` 下载 OA PDF（出版商正式版优先，下载目录可用 `target_dir` 覆盖），再把 PDF 拖进 Zotero 或直接入库
+3. 维护：`kb_stats()` / `kb_dedup()` / `kb_clear(confirm=true)`；补库用 `kb_fetch(identifiers=["DOI 或 arXiv ID"])` 下载 PDF（优先出版商正式版——校园网/机构订阅可直接取得订阅版；无权限时回退开放获取。下载目录可用 `target_dir` 覆盖），再把 PDF 拖进 Zotero 或直接入库
 
 数据默认在 `~/.kb-rag/kb.sqlite`；多个 agent 共用同一个库，想要隔离就设不同的 `KB_RAG_ROOT` 或每次传 `kb_root`。
 

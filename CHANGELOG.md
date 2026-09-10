@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.4]（未发布）- kb_fetch 描述订正与下载器配置
+
+- **`kb_fetch` 行为描述订正**：实现一直是"出版商正式版优先"（先解析落地页 `citation_pdf_url`，**校园网/机构订阅网络下可直接取得订阅版 PDF**，无权限再回退 Unpaywall/Crossref 的开放获取），但工具描述却写成"只下载 OA 文献，不碰付费墙"，与实际行为不符。现统一为完整顺序说明，并保留合规边界：只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。同步 `plugin/host.js`、`npm-package/lib/index.js`、`mcp-server/server.py` 三处工具描述与 README（中英）、npm/mcp 文档、QUICKSTART
+- **`doi_pdf.mjs` 尊重 `UNPAYWALL_EMAIL`**：Node 下载器的 Unpaywall 请求此前硬编码示例邮箱（`researcher@university.edu`），配置项只对 Python 回退路径生效；现与引擎一致读取该环境变量
+- **`doi_pdf.mjs` 头部注释订正**：原注释写"优先 OA，其次校园网订阅"，与实际实现顺序相反，已按实际顺序重写（arXiv → 出版商正式版 → 落地页 pdf 链接 → Unpaywall OA → Crossref）
+
 ## [1.6.3] - 引文关联深挖 + Nature 角标识别 + 快速/深度双模式 + 真·一键安装
 
 ### 引文关联（citation linking）
