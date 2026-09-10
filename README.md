@@ -7,7 +7,7 @@
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![dsh.so security](https://www.dsh.so/badges/kb-rag.svg)](https://www.dsh.so/artifact/kb-rag/)
 
-**English** | [中文](./README_CN.md)
+**English** | [Chinese](./README_CN.md)
 
 kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and any MCP-capable agent. It indexes PDFs and Zotero libraries into a single SQLite file, then answers questions with passages rather than paraphrases: every result carries its section, physical PDF page, and a clickable DOI — and every in-text citation in the retrieved passage can be traced back to the referenced work, including whether that work is already in your library.
 
@@ -23,20 +23,20 @@ Indexing, embedding, and reranking all run locally. There is no API cost and no 
 
 ## What the output looks like
 
-A single `kb_rag` call returns evidence in this form. The block below is the actual rendered output, with the interface strings translated for readability — the tool currently renders in Chinese, and `[库内]` is the in-library marker it prints:
+A single `kb_rag` call returns evidence in this form. The tool renders its interface in Chinese today, so the block below is that output translated; the in-library marker it prints appears here as `[in-library]`:
 
 ```text
-**Knowledge base sources Top-2**                      [知识库来源 Top-2]
-deep · reranked with BAAI/bge-reranker-base · cache hit   [深度检索（deep） · 精排 ... · 缓存命中]
+**Knowledge base sources Top-2**
+deep · reranked with BAAI/bge-reranker-base · cache hit
 
 1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · J. Appl. Phys. · Results · p.4
 > the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
-citations from this evidence ([库内] = already held, searchable)      [↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）]
+citations from this evidence ([in-library] = already held, searchable)
   · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
-    [库内] [Long-range ordering in layered oxides](https://doi.org/10.5555/12345684) (Author C · 1982 · J. Phys.: Condens. Matter) (this evidence's Ref 4) · [open in Zotero](zotero://open-pdf/library/items/EXAMPLEKEY1)
-  ↳ 3 further citations collapsed (Ref 6-8); use the numbers to fetch them
+    [in-library] [Long-range ordering in layered oxides](https://doi.org/10.5555/12345684) (Author C · 1982 · J. Phys.: Condens. Matter) (this evidence's Ref 4) · [open in Zotero](zotero://open-pdf/library/items/EXAMPLEKEY1)
+  · 3 further citations collapsed (Ref 6-8); use the numbers to fetch them
 
-**Related work**                                      [关联文献（可作补充建议）]
+**Related work**
 - [A Practical Guide to Domain Imaging] — Author G et al. · 2020 (same author, related topic)
 ```
 
@@ -176,7 +176,7 @@ The MCP server exposes the same nine tools with `kb_scope` replaced by `kb_statu
 - **Hybrid retrieval.** BM25 keyword matching with CJK bigram support, bge-small vector cosine, RRF fusion, section weights.
 - **Reranking.** bge-reranker-base cross-encoder, top 20 to top 3, with automatic fallback to a bge-large-en bi-encoder when the cross-encoder is unavailable.
 - **Page anchors** (schema v3). Results carry the physical PDF page and render as `section · p.N`, which maps onto Zotero's `?page=N` deep link.
-- **Citation linking.** In-text `[n]` markers resolve to reference entries; Nature-style superscripts are detected from font metrics (`graphene1,2` becomes `graphene[1,2]`); cited works are matched against the library by DOI, normalised title, or first author plus year, and matches are marked `[库内]` in the rendered result.
+- **Citation linking.** In-text `[n]` markers resolve to reference entries; Nature-style superscripts are detected from font metrics (`graphene1,2` becomes `graphene[1,2]`); cited works are matched against the library by DOI, normalised title, or first author plus year, and matches are marked as in-library in the rendered result.
 - **Fast and deep modes.** `quick` returns hybrid hits directly (no reranking, citation linking, or related work), `deep` runs the full chain.
 - **Incremental indexing and deduplication.** SHA-256 content hashes skip unchanged files (about 40× faster on re-runs) and intercept duplicates across paths.
 - **Query cache.** Identical query and filters are not recomputed; any ingest invalidates it.
