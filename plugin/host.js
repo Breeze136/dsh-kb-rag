@@ -339,7 +339,7 @@ return {
         if (Array.isArray(p.env) && p.env.length) proxyMsgs.push('环境变量代理')
         if (Array.isArray(p.localPorts) && p.localPorts.length) proxyMsgs.push('本机代理端口:' + p.localPorts.join(','))
         if (p.system === true) proxyMsgs.push('系统代理')
-        if (proxyMsgs.length) lines.push('⚠ 检测到代理(' + proxyMsgs.join('; ') + ')——代理可能干扰下载(TLS/反爬)，如失败请关闭代理后重试')
+        if (proxyMsgs.length) lines.push('注意：检测到代理(' + proxyMsgs.join('; ') + ')——代理可能干扰下载(TLS/反爬)，如失败请关闭代理后重试')
       }
       if (value.target) lines.push('保存到：' + value.target)
       const files = Array.isArray(value.files) ? value.files : []
@@ -404,12 +404,12 @@ return {
         if (typeof r.figure === 'string' && r.figure.length > 0) {
           lines.push('↳ 图注坐标: ' + String(r.figure).slice(0, 220))
         }
-        // 引文关联：本证据的参考文献条目；库内命中（⭐）优先展示，未命中折叠到汇总行
+        // 引文关联：本证据的参考文献条目；库内命中（[库内]）优先展示，未命中折叠到汇总行
         if (Array.isArray(r.citations) && r.citations.length > 0) {
           const hits = r.citations.filter(function (c) { return c && c.lib && typeof c.lib === 'object' })
           const others = r.citations.filter(function (c) { return !(c && c.lib && typeof c.lib === 'object') })
           lines.push(hits.length > 0
-            ? '↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）'
+            ? '↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）'
             : '↳ 引文补充（本证据的参考文献，供补库/深读）')
           hits.slice(0, 5).concat(others.slice(0, 3)).forEach(function (c) {
             lines.push('  · [Ref ' + c.n + '] ' + String(c.text || '').slice(0, 150))
@@ -425,7 +425,7 @@ return {
               if (typeof c.lib.zotero_key === 'string' && c.lib.zotero_key.length > 0) {
                 tail += ' · [Zotero 打开](zotero://open-pdf/library/items/' + c.lib.zotero_key + ')'
               }
-              lines.push('    ⭐ 库内命中：' + lt + (lmeta.length > 0 ? '（' + lmeta + '）' : '') + tail)
+              lines.push('    [库内] ' + lt + (lmeta.length > 0 ? '（' + lmeta + '）' : '') + tail)
             }
           })
           const rest = hits.slice(5).concat(others.slice(3))
@@ -442,7 +442,7 @@ return {
           }
         }
         if (typeof r.path === 'string' && r.path.length > 0) {
-          lines.push('📂 ' + r.path)
+          lines.push(r.path)
         }
         if (typeof r.zotero_key === 'string' && r.zotero_key.length > 0) {
           lines.push('[在 Zotero 中打开 PDF](zotero://open-pdf/library/items/' + r.zotero_key + ')')
@@ -536,7 +536,7 @@ return {
 
     const kbRag = harness.defineTool({
       name: 'kb_rag',
-      description: '在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答"根据现有资料无法回答"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里 ⭐ 库内命中的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问"；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。',
+      description: '在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答"根据现有资料无法回答"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问"；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。',
       parameters: {
         query: { type: 'string', required: true, description: '自然语言问题（中英文均可）。' },
         depth: { type: 'string', enum: ['quick', 'deep'], description: 'deep=深度检索（默认：精排+引文链+关联文献，回答展开背景，适合不熟悉领域）；quick=快速检索（少量证据直接给答案，不展开）。默认继承 kb_scope 的会话 depth 设置。' },

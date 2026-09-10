@@ -51,14 +51,14 @@ Runs the bundled installer (`scripts/install.ps1` / `scripts/install.sh`) straig
 Python deps → engine smoke test → Node/pnpm check → `dsh plugin add` activation → optional model pre-download.
 
 ```bash
-# ✅ 推荐（1.6.3+）：裸命令即可 —— 由微包 dsh-kb-rag-install 提供（零逻辑转发本包安装器）
+# 推荐（1.6.3+）：裸命令即可 —— 由微包 dsh-kb-rag-install 提供（零逻辑转发本包安装器）
 npx dsh-kb-rag-install
 
 # 等价旧写法（不依赖微包；≤1.6.2 的老写法，仍然可用）
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-> ⚠️ **历史坑（≤ 1.6.2）**：当时注册表里**没有**名为 `dsh-kb-rag-install` 的包，裸 `npx dsh-kb-rag-install` 会 E404（npx 按包名查找）。1.6.3 起新增同名微包解决该问题；`--package dsh-kb-rag` 旧写法依旧等价可用。
+> **历史坑（≤ 1.6.2）**：当时注册表里**没有**名为 `dsh-kb-rag-install` 的包，裸 `npx dsh-kb-rag-install` 会 E404（npx 按包名查找）。1.6.3 起新增同名微包解决该问题；`--package dsh-kb-rag` 旧写法依旧等价可用。
 >
 > Bash-style flags (`--profile`, `--models`, `--dry-run`, `--mirror`) work on every OS — the entry translates them for Windows PowerShell. Add `--dry-run` to rehearse without changing anything.
 

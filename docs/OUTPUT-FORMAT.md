@@ -6,7 +6,7 @@
 > 状态：**已按方案 A + 段落列 + 页码锚点实施并通过引擎级实测**（schema v3：段落列 + PDF 页码列；
 > References 保留、检索透传、引文解析、页码跳页）；**Nature 上标角标识别 + 三级 References
 > 检测 + 引文关联库内匹配已实施**，三层渲染（MCP / DSH 插件 / npm 包）统一输出引文块与
-> 「⭐ 库内命中」行。检测局限见 §5/§7。
+> 「[库内]」标记行。检测局限见 §5/§7。
 
 ---
 
@@ -57,11 +57,11 @@
 *（可选一行）检索说明：混合检索 · 精排 BAAI/bge-reranker-base · 命中 N 块*
 
 **补充建议（按来源分三列，哪列为空就整列省略，全空整块省略）**
-📚 **库内可查（循引文找到）**
+**库内可查（循引文找到）**
 - <《被引文献标题》(作者, 年份)> —— 被 [证据编号] 的引文 Ref k 引用；已在库内，可直接对其提问
-📥 **建议补库（循引文发现）**
+**建议补库（循引文发现）**
 - <被引文献作者, 年份, 标题/期刊> —— 被 [证据编号] 的 Ref k 引用，尚不在库内（可用 Ref k 定位下载）
-🔗 **相关文献**
+**相关文献**
 - <相关文献>(作者, 年份, 期刊) —— 同作者/同期刊/主题相似（元数据相似，无引文关系）
 
 规则：每条推荐的理由必须写明属于哪种；引文关联的两列必须带关系链（谁引谁、Ref 编号），
@@ -99,9 +99,9 @@
 >
 > 1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.0000/example.2024.001) — Author A; Author B · 2024 · J. Appl. Phys. · §Results · p.4
 > > the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
-> ↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）
+> ↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）
 >   · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
->     ⭐ 库内命中：[Long-range ordering in layered oxides](https://doi.org/10.0000/example.1982.004)（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
+>     [库内] [Long-range ordering in layered oxides](https://doi.org/10.0000/example.1982.004)（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
 >   · [Ref 9] Author D, et al. — 相关唯象模型
 >   ↳ 另有 3 条库外引文未展开（Ref 6–8），补库时可按编号定位
 > [DOI 10.0000/example.2024.001](https://doi.org/10.0000/example.2024.001) · score 0.98
@@ -216,7 +216,7 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
 | 证据正文无 `[n]` 标记 | 引文建议区留空，提示"证据未含可引出的参考文献" |
 | `[n]` 超出 References 条数 / 编号错位 | 跳过该条，不猜测；宁缺勿错 |
 | 证据文献为书籍/无 References | 同上降级 |
-| 库内匹配到被引文献 | 建议条目附「⭐ 库内命中」行：命中文献标题为 DOI 链接 + （作者 · 年份 · 期刊）+（即本证据的 Ref n，可检索引用）+ Zotero 打开（有 zotero_key 时）；命中条目排在引文块最前 |
+| 库内匹配到被引文献 | 建议条目附「[库内]」标记：：命中文献标题为 DOI 链接 + （作者 · 年份 · 期刊）+（即本证据的 Ref n，可检索引用）+ Zotero 打开（有 zotero_key 时）；命中条目排在引文块最前 |
 | 证据来自**旧库**（page/para 为 NULL） | 页码/段号不可用：追问时只答"§章节"；重新入库（force）后恢复（隐式字段，不影响平时回答） |
 | 同段信息被拆成多块 / 多段合并一块 | 段区间仅在被追问/展开时展示；页码区间同理（如 p.4–5） |
 | 证据为 txt/md/docx（无 PDF 页） | `page` 为 NULL → 定位降级为章节 |
@@ -258,7 +258,7 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
   （≥6 字符，避开 Wang/Li 类大姓）+ 括号年份双命中。命中条目带 `lib` 字段
   （title/authors/year/journal/doi/zotero_key），三层渲染（MCP `engine_client.py` /
   DSH `plugin/host.js` / npm `lib/index.js`）统一输出
-  「⭐ 库内命中：<被引文献（DOI 链接）>（作者 · 年份 · 期刊）（即本证据的 Ref n，可检索引用）· Zotero 打开」；未命中引文折叠：命中条目（≤5）优先，未命中只展开前 3 条 + 一行「另有 N 条引文未展开（Ref x–y）」汇总
+  「[库内] <被引文献（DOI 链接）>（作者 · 年份 · 期刊）（即本证据的 Ref n，可检索引用）· Zotero 打开」；未命中引文折叠：命中条目（≤5）优先，未命中只展开前 3 条 + 一行「另有 N 条引文未展开（Ref x–y）」汇总
   + Zotero 打开链接（有 zotero_key 时）；
 - 检索结果 entry 新增 `para`、**`page`**（[起,止]）与 `citations`（[{n,text,lib?}]）；
 - MCP 渲染：`§<章节> · p.<页码>`（有页显页，无页退段号）；引文补充建议块；
