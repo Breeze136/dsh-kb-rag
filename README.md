@@ -1,48 +1,183 @@
-# kb-rag — Local Literature Knowledge-Base RAG
-
-<p align="center">
-  <b>把脑子里的模糊记忆，变成一条能点开的文献坐标。</b><br/>
-  <i>Turn a fuzzy memory into an exact passage / figure — one-click DOI to source.</i>
-</p>
+# kb-rag — Local literature RAG that lands on the exact passage
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![GitHub release](https://img.shields.io/github/v/release/Breeze136/dsh-kb-rag)](https://github.com/Breeze136/dsh-kb-rag/releases)
-[![MIT](https://img.shields.io/github/license/Breeze136/dsh-kb-rag)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
 [![dsh.so security](https://www.dsh.so/badges/kb-rag.svg)](https://www.dsh.so/artifact/kb-rag/)
 
-> **最新版本 v1.6.3**（npm 包名：`dsh-kb-rag`）— Ingest once, search forever. Only the most relevant few sentences ever reach the LLM — and every claim carries exact provenance.
+<p align="center">
+  <b>把脑子里的模糊记忆，变成一条能点开的文献坐标。</b><br/>
+  <i>Ingest once, search forever — only the few relevant sentences ever reach the model, and every claim carries exact provenance.</i>
+</p>
 
-## Who it's for
+> **别人给你一段像样的答案，kb-rag 给你一个能点开的坐标。** 混合检索（BM25 + 向量）+ 精排定位到具体段落，命中结果带 **PDF 页码**（Zotero `?page=N` 一键跳页）与 **DOI 链接**；循着正文引用还能反查出**这个结论引用了哪篇文献、而它是否就在你自己的库里**。索引、嵌入、重排全部在本地完成——零 API 费用、零上传。
 
-Graduate students and PhD researchers. An idea strikes, and you *know* it's somewhere in your library — but which paper said it, and where? kb-rag makes the whole pile queryable: hybrid retrieval + reranking surface the right passages, every answer lands on a clickable DOI (or the exact file), and the reply tells you what your library is still missing. **Think it → find it → cite it.**
+<p align="center">
+  <a href="#快速开始"><strong>快速开始</strong></a> ·
+  <a href="#三种形态"><strong>三种形态</strong></a> ·
+  <a href="#工具参考"><strong>工具参考</strong></a> ·
+  <a href="#文档"><strong>文档</strong></a> ·
+  <a href="#实测数据"><strong>实测数据</strong></a> ·
+  <a href="CHANGELOG.md"><strong>更新日志</strong></a>
+</p>
 
-kb-rag 是给 **DSH（DeepSeek Harness）** 的轻量本地文献知识库 RAG 插件：把 PDF/Zotero 文献变成带章节结构与向量索引的 SQLite 知识库，提供混合检索 + 精排 + 带引文问答的全流程。索引、嵌入、重排全部在本地完成——零 API 费用、零上传，dsh.so 安全扫描 passed。
+---
 
-**面向两类读者：**
+## 它看起来是什么样
 
-- **DSH 用户** — 本文的安装指引围绕 DSH 插件展开（9 个工具，含 `kb_scope` 查询范围控制），往下看「快速安装」。
-- **MCP 桌面 agent 用户**（Claude Desktop / Cherry Studio / Kimi / DeepSeek / Cursor 等）— 共用同一引擎，但没有 DSH 会话概念（`kb_scope` 换成 `kb_status`）。直接看 [mcp-server/README.md](mcp-server/README.md)。
+一次 `kb_rag` 调用返回的证据（MCP 渲染，agent 可见）：
 
-## 三种消费形态 Three ways to consume
+```text
+**知识库来源 Top-2**
+深度检索（deep） · 精排 BAAI/bge-reranker-base · 缓存命中
+
+1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · J. Appl. Phys. · §Results · p.4
+> the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
+↳ 引文补充（本证据的参考文献；⭐=已在库内，可检索引用）
+  · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
+    ⭐ 库内命中：[Long-range ordering in layered oxides]（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
+  ↳ 另有 3 条库外引文未展开（Ref 6–8），补库时可按编号定位
+
+**关联文献（可作补充建议）**
+- [A Practical Guide to Domain Imaging] — Author G et al. · 2020（同作者·主题相似）
+```
+
+> 完整推演（含 agent 回答、追问页码）见 [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md)。上例为**中性示例数据**（DOI/作者为占位符）。
+
+---
+
+## 定位 Product Positioning
+
+**"能检索"已经是底线，真正的问题是：检索结果离"原始证据"有多远。** kb-rag 交付的不是一段可疑的摘要，而是**文献坐标**——章节、PDF 物理页码、可点击 DOI，以及这条结论在原文里引用了谁。
+
+它有三条明确的取舍：
+
+- **本地优先，零上传** — 嵌入与重排都是本地 bge 模型，文献内容不出机器；索引就是一个 `kb.sqlite` 文件，可直接备份/搬移。
+- **垂直文献，不做通用网盘** — 章节感知分块（摘要 ×1.5 / 方法 ×1.2 权重）、原生 Zotero 迁移、DOI 引文规范；面向"论文开箱即用"，不做通用知识库管理器。
+- **诚实边界** — 扫描版 PDF（无文字层）不入库、图注只索引文字不索引图像、跨语言检索偏弱。做不到的写在[已知限制](#已知限制)里，不写成"即将支持"。
+
+> [!IMPORTANT]
+> ### 这是工具，不是许愿池
+> 检索质量的天花板来自**你的库**：库里没有的文献，它答不出来；库里是扫描版 PDF，它读不出来。模型只负责把拿到的证据组织成答案。
+>
+> 另外三件要有预期的事：① **首次使用**会下载嵌入模型（~95MB）与精排模型（~1.1GB），首次查询要等十几秒加载，之后常驻亚秒级；② **旧库升级**后页码/角标需要 `force` 重入库才有（schema 迁移不会回填解析结果）；③ 单次入库上千篇请用 `async_mode`（MCP 侧超阈值自动转后台），别让宿主超时掐断。
+
+---
+
+## 三种形态
 
 同一套引擎（`kb_engine.py`）、同一份数据格式，三个入口：
 
-1. **DSH 插件（主形态）** — `plugin/`。在 DSH 会话里以 9 个工具对话式使用：入库、检索、带引文问答、范围控制。引擎 `kb_engine.py` 由插件 Host 拉起（常驻 serve daemon），数据默认在会话工作区 `.kb/`。
-2. **MCP server** — `mcp-server/server.py`，stdio 协议，把同一知识库暴露给支持 MCP 的桌面 agent。9 个工具与插件同源，但用 `kb_status`（后台任务轮询）替换 `kb_scope`——scope/strict 是 DSH 会话概念，MCP 版由调用方（agent 的提示词）自行把握。配置见下方「MCP 配置」与 [mcp-server/README.md](mcp-server/README.md)。
-3. **npm 静态包 `dsh-kb-rag`** — 面向其他 DSH/Harness 部署用户。包声明了 `dsh.bundle` 并随包分发 `cordis.patch.yml`，`dsh plugin --profile <name> add dsh-kb-rag` 即可一步安装 + 激活；包内还带 `install.mjs`（npx 一键安装器入口）与 `scripts/doi_pdf.mjs`（`kb_fetch` 的 Node 下载器）。安装命令见「快速安装」方式 B。
+| 形态 | 入口 | 工具差异 |
+|---|---|---|
+| **DSH 插件**（主形态） | `plugin/` — 会话内对话式使用 | 9 工具，含 `kb_scope`（查询范围/严格模式，DSH 会话概念）|
+| **MCP server** | `mcp-server/server.py` — stdio，给 Claude Desktop / Cherry Studio / Kimi / DeepSeek / Cursor 等 | 9 工具，`kb_scope` → `kb_status`（后台任务轮询）|
+| **npm 静态包** | `dsh-kb-rag` — 声明 `dsh.bundle`，`dsh plugin add` 一步装+激活 | 同 DSH 插件 |
 
-## What's new（v1.6.x）
+---
 
-- **异步入库 async（MCP 宿主 60s 超时的解药）**：MCP 端 `kb_ingest` 待处理文件数超过 `KB_ASYNC_THRESHOLD`（默认 25）自动转后台（agent 无需知道 async_mode 的存在），`async_mode=true` 可强制、`false` 强制同步；MCP 端 `kb_zotero(async_mode=true)` 可整库后台。两者立即返回 `job_id`，用 `kb_status(job_id=...)` 轮询直到 done——宿主超时（如 Kimi Work 60s）不影响后台任务，任务照常跑完。
-- **PDF 页码锚点（schema v3）**：chunks 表新增 `page_start/page_end`（PDF 物理页码），检索结果带页码，渲染为「§章节 · p.N」，可配合 Zotero `zotero://open-pdf?page=N` 一键跳页。旧库自动迁移（`PRAGMA user_version` 门控）；旧数据页码为 NULL，`force` 重入库后恢复。
-- **引擎健壮性**：逐文件 commit（async 期间并发读不锁库）；`job_id` 严格校验（12 位十六进制，杜绝路径穿越）；任务结束自动清理 `.kb-jobs/` 残留（`kb_clear` 一并清空）；spawn 后短窗口 poll，启动即失败的任务立即报错，不留"幽灵任务"。
-- **渲染与体积**：证据引文关联（正文 `[n]` 引用 → References 条目，渲染「↳ 引文补充」，供补库/深读）；ingest/zotero 的文件清单只回最近 20 条 + `files_total` 真实总数（针对 Kimi Work 等宿主体积限制）。
+## 快速开始
 
-## Architecture
+### 1. 前置
 
+只需要 **Python ≥ 3.9**。Node/pnpm 由安装器检查（缺 pnpm 会自动装）。DSH 用户在 DSH profile 下操作，MCP 用户只需 Python。
+
+<details>
+<summary><strong>Windows</strong> — 中文用户名/编码相关的坑已修（v1.6.3）</summary>
+
+Windows PowerShell 5.1 默认把管道编码当 ASCII，中文用户名路径会让引擎冒烟测试报 `WinError 123`。v1.6.3 起安装脚本已在顶部强制 UTF-8 管道编码修复，细节见 [`docs/install-winerror123-fix.md`](docs/install-winerror123-fix.md)。
+</details>
+
+<details>
+<summary><strong>受限网络</strong> — 模型下载走镜像</summary>
+
+安装器与引擎都支持自动回退 `hf-mirror.com`（`_apply_hf_mirror` 会真正 patch `huggingface_hub` 常量，不只是设环境变量）。手动固定：`HF_ENDPOINT=https://hf-mirror.com`。
+</details>
+
+### 2. 安装
+
+**方式 A · 一行命令（推荐）**
+
+```bash
+npx dsh-kb-rag-install
 ```
+
+安装器一条链完成：Python 依赖 → 引擎冒烟测试 → Node/pnpm 检查 → `dsh plugin add` 激活 → 模型预下载（默认开启，`--no-models` 可跳过）。profile 未指定时会自动检测 `~/.dsh/profiles/`（唯一即用；多个会询问；都没有则用 `web`）。
+
+> 兼容旧写法（等价，不依赖微包）：`npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"`
+
+**方式 B · DSH 用户直接装插件**
+
+```bash
+dsh plugin --profile web add dsh-kb-rag
+```
+
+**方式 C · 从源码**
+
+```bash
+git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
+./npm-package/scripts/install.sh        # macOS / Linux / Git Bash
+# Windows：install.cmd（双击）或 npm-package\scripts\install.ps1
+```
+
+### 3. 建库
+
+在 DSH 对话里说 **"把 downloads 目录入库"**（`kb_ingest`），或 **"同步 Zotero"**（`kb_zotero`）。也可以先按 DOI 抓取：**"下载 10.5555/12345678"**（`kb_fetch`，仅 OA）。
+
+<details>
+<summary>大批量入库（几百篇）——别让宿主超时</summary>
+
+MCP 侧 `kb_ingest` 会自动估算待处理文件数，超过 `KB_ASYNC_THRESHOLD`（默认 25）**自动转后台**：立即返回 `job_id`，用 `kb_status` 轮询直到 `done`。Zotero 整库迁移用 `kb_zotero(async_mode=true)`。任务在独立子进程跑，宿主 60s 超时不会中断它。
+</details>
+
+### 4. 提问
+
+- "库里关于磁电耦合的文献有哪些？" → `kb_search`
+- "这个结论在哪篇文献的第几页？" → 读证据的 `page` 字段，或点击 Zotero 跳页链接
+- "严格只按库内回答" → `kb_scope` 切严格模式（DSH）
+- "快速看看" / "深入分析" → `kb_search` 默认 `quick`（亚秒）、`kb_rag` 默认 `deep`（精排+引文关联+相关文献）
+
+> 装完务必**重启 DSH 并开新会话**——工具在会话创建时注入，老会话不会自动获得。分步演练与常见坑见 [QUICKSTART.md](QUICKSTART.md)。
+
+---
+
+## 工具参考
+
+### DSH 插件（9 个）
+
+| Tool | 用途 | 示例说法 |
+|---|---|---|
+| `kb_ingest` | 文件/文件夹入库：增量跳过 + 去重、章节切分、向量化（PDF/TXT/MD/DOCX）| "把 papers 文件夹入库" |
+| `kb_zotero` | 批量迁移本地 Zotero 库（带 PDF 附件的条目）| "同步 Zotero" |
+| `kb_search` | 混合检索 Top-N 片段 + 精确来源（标题/作者/年份/期刊/DOI/页码/章节）| "搜 graphene CVD on copper" |
+| `kb_rag` | 证据问答：默认 Top-3，逐条编号引用 | "这个体系的外场调控机制是什么？" |
+| `kb_scope` | 查询范围（封闭库 / 库+全网 / 仅全网）+ 严格模式 + 检索深度 | "切到严格模式" |
+| `kb_dedup` | 清理重复文档（保留最早，可反复调用）| "去重" |
+| `kb_clear` | 清空全部文献与索引（须显式 `confirm=true`）| "清空知识库" |
+| `kb_stats` | 文档/分块/向量统计 + 最近入库清单 | "看看库里有什么？" |
+| `kb_fetch` | 按 DOI/arXiv ID 下载 PDF（OA only，出版商正式版优先）| "下载 10.5555/12345678" |
+
+> MCP 版同为 9 个：`kb_scope` 换成 `kb_status`（后台任务轮询）。配置见 [mcp-server/README.md](mcp-server/README.md)。
+
+### 引擎能力
+
+- **章节感知分块** — 摘要 ×1.5、方法 ×1.2 权重；行内标题检测、摘要自动提升、图注块；非论文按段落兜底
+- **混合检索** — 关键词 BM25（CJK 双字友好）+ bge-small 向量余弦，RRF 融合 × 章节权重
+- **精排** — bge-reranker-base Cross-Encoder，Top-20 → Top-3（缺失时回退 bge-large-en bi-encoder）
+- **页码锚点**（schema v3）— 检索结果带 PDF 物理页码，渲染 `§章节 · p.N`，可 Zotero 一键跳页
+- **引文关联** — 正文 `[n]` → References 条目；Nature 系上标角标按**字体度量**识别（`graphene1,2` → `graphene[1,2]`）；被引文献**库内匹配**（DOI / 标题 / 作者+年份）标注 ⭐
+- **快速/深度双模式** — `quick` 混合召回直出（跳过精排/引文/关联），`deep` 全链路
+- **增量与去重** — sha256 增量跳过（重跑 40× 提速）、跨路径重复拦截
+- **查询缓存** — 同 query+filters 不重算；任何入库自动失效
+- **引擎 daemon** — 模型只加载一次、崩溃自愈、插件停止自动回收
+
+---
+
+## 架构
+
+```text
 DSH model / MCP client (Claude · Cherry · Kimi · Cursor …)
    │  tool call: kb_ingest / kb_search / kb_rag / kb_stats …
    ▼
@@ -58,161 +193,95 @@ kb_engine.py —— resident `serve` daemon（常驻，模型只加载一次）
                 PRAGMA user_version 门控迁移）
 ```
 
-数据流：raw PDF → 逐字提取 + 章节切分 → 分块入 SQLite（带元数据与向量）→ 查询时混合检索 + 精排 → Top-N 片段（含 DOI/文件/页码/章节/得分）→ 当前会话的模型据此作答并逐条引用。模型全本地：`BAAI/bge-small-zh-v1.5`（嵌入）+ `bge-reranker-base`（精排），首次使用自动下载到 HF 缓存，受限网络可用 `HF_ENDPOINT` 走镜像。
+---
 
-## Features
+## 实测数据
 
-### 9 个工具（DSH 插件）
+| 项目 | 结果 |
+|---|---|
+| 入库吞吐 | 242 篇 PDF/DOCX（1.8GB）→ **85.9s**（约 355ms/篇）|
+| 增量重跑 | 同目录重入库 **2.17s**（40× 提速）|
+| 检索延迟 | 20k chunks 热查询 **0.4–1.3s**（含精排）；`quick` 模式 **~16ms** |
+| 库规模 | 209 篇 / 19,832 块 / 19,832 向量，单 SQLite 文件 |
+| 引文解析 | 11 篇各出版商 PDF：Wiley 综述 0→399 条、Nature Letter 8→37、Science 0→29（只增不减）|
 
-| Tool | 用途 Purpose | 示例说法 |
+---
+
+## 文档
+
+| | 文档 | 内容 |
 |---|---|---|
-| `kb_ingest` | 文件/文件夹入库：增量跳过 + 去重、章节切分、向量化（PDF/TXT/MD/DOCX）| "把 papers 文件夹入库" |
-| `kb_zotero` | 批量迁移本地 Zotero 库（带 PDF 附件的条目）| "同步 Zotero" |
-| `kb_search` | 混合检索 Top-N 片段 + 精确来源（标题/作者/年份/期刊/DOI/页码/章节）| "Search chemical vapor deposition of graphene" |
-| `kb_rag` | 证据问答：默认 Top-3，逐条编号引用 | "How does graphene CVD growth proceed on copper?" |
-| `kb_scope` | 查询范围（封闭库 / 库+全网 / 仅全网）+ 严格模式 | "切到严格模式" |
-| `kb_dedup` | 清理重复文档（保留最早，可反复调用）| "去重" |
-| `kb_clear` | 清空全部文献与索引（须显式 `confirm=true`）| "清空知识库" |
-| `kb_stats` | 文档/分块/向量统计 + 最近入库清单 | "看看库里有什么？" |
-| `kb_fetch` | 按 DOI/arXiv ID 下载 PDF（OA only，出版商正式版优先；Node 下载器 `scripts/doi_pdf.mjs` + Python 回退）| "Download 10.1038/s41467-025-56065-9" |
+| 🚀 | [QUICKSTART.md](QUICKSTART.md) | 5 分钟上手：装依赖 → 建库 → 检索 → 常见坑 |
+| 🏗️ | [docs/DESIGN.md](docs/DESIGN.md) | 设计文档：存储模型、分块策略、检索流水线、引擎协议 |
+| 📐 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出格式与引文规范：页码锚点、引文关联、快速/深度模式 |
+| 🗄️ | [docs/MIGRATION.md](docs/MIGRATION.md) | schema 迁移：`PRAGMA user_version` 门控、v1→v2→v3 升级 |
+| 🔌 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具对照、异步/超时行为 |
+| 📦 | [npm-package/README.md](npm-package/README.md) | npm 包文档 + Troubleshooting 表 |
+| 🔐 | [SECURITY.md](SECURITY.md) | 执行模型与安全边界（spawn/读写/下载清单）|
+| 🧹 | [UNINSTALL.md](UNINSTALL.md) | 卸载：停插件、删索引，不动你的 PDF 与 Zotero 库 |
+| 📝 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 
-> MCP 版同为 9 个工具：`kb_ingest` / `kb_status` / `kb_zotero` / `kb_search` / `kb_rag` / `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch` —— 用 `kb_status`（后台任务轮询）替换 DSH 会话概念 `kb_scope`。
+## 配置（环境变量）
 
-### 引擎能力
-
-- **Structured chunking**：章节识别（摘要 ×1.5、方法 ×1.2 权重）、行内标题检测、摘要自动提升、图注块；非论文按段落兜底
-- **Hybrid retrieval**：关键词 BM25（CJK 双字友好）+ bge-small 向量余弦，RRF 融合 × 章节权重
-- **Reranking**：bge-reranker-base Cross-Encoder，Top-20 → Top-3（缺失时自动回退 bge-large-en bi-encoder）
-- **Incremental & dedup**：sha256 增量跳过（重跑 40× 提速）、跨路径重复拦截、`kb_dedup` 兜底
-- **Query cache**：同 query+filters 永不重算；任何入库自动失效
-- **Citation standard**：有 DOI → `[作者, 年份, 期刊](https://doi.org/DOI)`；无 DOI → `[作者, 年份, 文件名]`；规范细节见 `docs/OUTPUT-FORMAT.md`
-- **Related literature**：每次检索附带关联文献（同作者/同期刊/年份相近/主题相似），答案末尾的"建议补充"优先引用它们
-- **Scope & strict**：closed-KB / KB+web / web-only 三档 + strict（禁止库外知识外延，证据不足明说无法回答）
-- **Engine daemon**：模型只加载一次、热查询亚秒级、崩溃自愈、插件停止自动回收
-- **刻意零 UI**：一切操作经由对话与工具返回完成（检索结果渲染可点击 DOI 链接），无管理面板、无前端状态——定位选择，不是缺失
-
-## 快速安装 Quick Start（DSH 用户）
-
-三种方式选一即可（安装器一条链完成：Python 依赖 → 引擎冒烟 → Node/pnpm 检查（缺 pnpm 自动装）→ `dsh plugin add` 激活 → 可选 `--models` 预下载模型，尊重 `HF_ENDPOINT`）。
-
-**方式 A · npx 一键（推荐，无需先安装包）**
-
-```bash
-# ✅ 正确：--package dsh-kb-rag 指明命令来自哪个包（可 pin 版本：--package dsh-kb-rag@1.6.3）
-npx dsh-kb-rag-install
-```
-
-> 安装器一条命令自动完成全链（profile 自动检测、模型预下载 + hf-mirror.com 镜像回退、pnpm/corepack 自动装）；`--dry-run` 可先演练。旧写法 `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install"` 仍然等价。
-
-**方式 B · 已装 dsh CLI 的 DSH 用户**
-
-```bash
-dsh plugin --profile web add dsh-kb-rag       # 依赖 dsh.bundle 声明，一步安装 + 激活
-```
-
-需要 pnpm on PATH（DSH 官方插件流程用 pnpm）。Python 依赖两种补法：设 `KB_AUTO_PIP=1` 重启 DSH 由插件自动 pip 安装（默认关闭、仅打印命令），或直接跑一次方式 A 的安装器。
-
-**方式 C · git clone 后从源码安装**
-
-```bash
-git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
-./npm-package/scripts/install.sh        # macOS / Linux / Git Bash
-# Windows：install.cmd（双击）或 npm-package\scripts\install.ps1
-```
-
-装完务必**重启 DSH 并开新会话**（工具在会话创建时注入，老会话不会自动获得）。升级旧版：在 profile 目录 `npm install dsh-kb-rag@latest`（钉版本 `npm install dsh-kb-rag@1.6.3`），重启开新会话；旧 `.kb` 库 schema 自动迁移（见 `docs/MIGRATION.md`）。分步演练与常见坑见 [QUICKSTART.md](QUICKSTART.md)；老式动态插件手动路线（`cordis_define` 加载 `plugin/host.js` + `plugin/client.js`）也在 QUICKSTART 末尾。
-
-## MCP 配置（桌面 agent 用户）
-
-给 Claude Desktop / Cherry Studio / Kimi / DeepSeek / Cursor 等任意支持 MCP 的桌面 agent 添加 stdio server：
-
-```bash
-pip install "mcp>=1.2.0" pymupdf faiss-cpu sentence-transformers numpy   # mcp SDK + 引擎依赖
-python mcp-server/server.py                                               # stdio，引擎自动拉起
-```
-
-- 各客户端的配置片段（`claude_desktop_config.json`、Cherry Studio 等）与异步/超时行为 → **[mcp-server/README.md](mcp-server/README.md)**。
-- 默认库目录 `~/.kb-rag`（`KB_RAG_ROOT` 可改；每个工具也支持 `kb_root` 参数覆盖）。
-- MCP 与 DSH 插件共用同一 `kb_engine.py`，可指向同一个库；隔离多套库就设不同 `KB_RAG_ROOT`。
-
-## Benchmarks (measured)
-
-| Item | Result |
-|---|---|
-| Ingest throughput | 242 PDF/DOCX（1.8GB）→ **85.9s**（约 355ms/篇）|
-| Incremental rerun | 同目录重入库 **2.17s**（40× 提速）|
-| Search latency | 20k chunks 热查询 **0.4–1.3s**（含精排）|
-| Library size | 209 docs / 19,832 chunks / 19,832 vectors，单 SQLite 文件 |
-
-（Windows/CPU 实测，详见 `docs/DESIGN.md` §10。）
-
-## 文档地图 Documentation map
-
-| 文档 | 内容 |
-|---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | 设计文档：存储模型、分块策略、检索流水线、引擎协议、性能 |
-| [docs/MIGRATION.md](docs/MIGRATION.md) | schema 迁移：`PRAGMA user_version` 门控、v1→v2→v3 变更与升级清单 |
-| [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出格式与引文规范：页码锚点、引文关联、边界与降级 |
-| [QUICKSTART.md](QUICKSTART.md) | 5 分钟快速上手（装依赖 → 建库 → 检索 → 常见坑）|
-| [npm-package/README.md](npm-package/README.md) | npm 包内文档 + Troubleshooting 表（不随本 README 同步维护）|
-| [mcp-server/README.md](mcp-server/README.md) | MCP server 配置、工具对照、异步/超时说明 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
-| [UNINSTALL.md](UNINSTALL.md) | 卸载：停插件、删索引/`kb.sqlite`，不动 PDF 与 Zotero 库 |
-| [SECURITY.md](SECURITY.md) | 执行模型与安全边界（spawn/读写/下载清单）|
-
-## Configuration（环境变量）
-
-| Variable | Default | 适用 | Description |
+| 变量 | 默认 | 适用 | 说明 |
 |---|---|---|---|
 | `KB_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 引擎 | 嵌入模型（首次使用自动下载到 HF 缓存）|
 | `KB_RERANK_MODEL` | `BAAI/bge-reranker-base` | 引擎 | 精排模型 |
 | `HF_ENDPOINT` | 无 | 引擎 | 受限网络设 `https://hf-mirror.com` 走镜像 |
-| `KB_AUTO_PIP` | `0` | DSH 插件 | `1` = 启动时自动 pip 安装缺失 Python 依赖（固定 argv；默认仅打印命令）|
-| `KB_RAG_ROOT` | DSH：会话工作区 `.kb`；MCP：`~/.kb-rag` | MCP | 知识库目录（各工具可用 `kb_root` 参数覆盖）|
-| `KB_RAG_PYTHON` | 当前解释器 `sys.executable` | MCP | 引擎 Python 覆盖（默认用拉起 server.py 的解释器，避免裸 `python` 命中错误环境）|
-| `KB_ASYNC_THRESHOLD` | `25` | MCP | `kb_ingest` 待处理文件数超过即自动转后台的阈值 |
-| `KB_SQLITE_WAL` | 关 | 引擎 | `1` = 开启 SQLite WAL（需同步 `.kb` 目录时保持默认 DELETE 模式更安全）|
+| `KB_AUTO_PIP` | `0` | DSH 插件 | `1` = 启动时自动 pip 安装缺失依赖（默认仅打印命令）|
+| `KB_RAG_ROOT` | DSH：会话工作区 `.kb`；MCP：`~/.kb-rag` | MCP | 知识库目录（各工具可用 `kb_root` 覆盖）|
+| `KB_RAG_PYTHON` | 当前解释器 | MCP | 引擎 Python 覆盖（避免裸 `python` 命中错误环境）|
+| `KB_ASYNC_THRESHOLD` | `25` | MCP | `kb_ingest` 待处理文件数超过即自动转后台 |
+| `KB_SQLITE_WAL` | 关 | 引擎 | `1` = 开 WAL（同步 `.kb` 目录时保持默认更安全）|
 
-## 仓库布局 Repository Layout
+## 仓库布局
 
-```
+```text
 kb-rag/
 ├─ kb_engine.py              # Python 引擎：章节切分/检索/精排 + 常驻 serve daemon
-│                            #   schema v3（page_start/page_end），PRAGMA user_version 门控迁移
 ├─ install.cmd               # Windows 一键入口（双击 → scripts\install.ps1）
-├─ scripts/                  # 一键安装脚本（install.ps1 / install.sh，与 npm 包内同源）
-├─ plugin/                   # DSH 插件（动态）
-│  ├─ kbrag.plugin.json      # 插件清单（9 工具 / engine.commands / models / dataDir=.kb）
-│  ├─ host.js                # Host 半：9 工具注册 + 引擎 daemon 拉起 + RPC
-│  └─ client.js              # Client 半（来源卡片渲染，可选）
-├─ npm-package/              # npm 静态包 dsh-kb-rag（发布内容）
-│  ├─ package.json           # 声明 dsh.bundle；bin: dsh-kb-rag-install
-│  ├─ cordis.patch.yml       # 激活补丁（dsh plugin add 自动应用）
-│  ├─ install.mjs            # npm bin 入口（npx 一键安装器；默认注入 --models / --yes）
-│  ├─ lib/index.js           # Host 插件（9 工具 + 依赖探测 + KB_AUTO_PIP）
-│  ├─ scripts/               # install.ps1 / install.sh / doi_pdf.mjs（kb_fetch 的 Node 下载器）
-│  └─ kb_engine.py           # 引擎副本（随包分发，无需手动放置）
-├─ dsh-kb-rag-install/       # 微包：裸 `npx dsh-kb-rag-install` 入口（零逻辑，转发主包安装器）
-├─ mcp-server/               # MCP server（stdio）
-│  ├─ server.py              # 9 工具：kb_ingest / kb_status / kb_zotero / kb_search / kb_rag /
-│  │                         #   kb_stats / kb_dedup / kb_clear / kb_fetch（kb_scope → kb_status）
-│  ├─ engine_client.py       # 引擎 daemon 客户端 + 结果渲染（stdlib only）
-│  ├─ requirements.txt       # mcp SDK
-│  └─ README.md              # MCP 配置说明
-├─ docs/                     # DESIGN.md / MIGRATION.md / OUTPUT-FORMAT.md / install-winerror123-fix.md
-├─ QUICKSTART.md · CHANGELOG.md · requirements.txt · SECURITY.md · UNINSTALL.md · LICENSE
-└─ tools/                    # 内部运维脚本（不入发布包）
+├─ scripts/                  # 一键安装脚本（install.ps1 / install.sh）
+├─ plugin/                   # DSH 动态插件（kbrag.plugin.json + host.js + client.js）
+├─ npm-package/              # npm 静态包 dsh-kb-rag（发布内容；含 cordis.patch.yml）
+├─ dsh-kb-rag-install/       # 微包：裸 `npx dsh-kb-rag-install` 入口（零逻辑转发）
+├─ mcp-server/               # MCP server（server.py + engine_client.py）
+├─ docs/                     # DESIGN / OUTPUT-FORMAT / MIGRATION / install-winerror123-fix
+├─ tools/                    # 内部运维脚本（不入发布包）
+└─ QUICKSTART.md · CHANGELOG.md · SECURITY.md · UNINSTALL.md · LICENSE
 ```
 
-**运行时数据**：DSH 插件默认写入会话工作区 `.kb/kb.sqlite`（`docs`/`chunks`/`vecs`/`cache` 表）；MCP 默认 `~/.kb-rag/kb.sqlite`。异步后台任务文件在 `<kb_root>/.kb-jobs/`（与 kb.sqlite 同级），任务完结后由 `kb_status` 自动清理。
+**运行时数据**：DSH 插件写会话工作区 `.kb/kb.sqlite`；MCP 默认 `~/.kb-rag/kb.sqlite`。后台任务文件在 `<kb_root>/.kb-jobs/`，完结后自动清理。
 
-## Known Limitations & Roadmap
+## 已知限制
 
-- 页码锚点仅 PDF 有效：txt/md/docx 与 schema v3 之前入库的旧数据无页码（NULL，自动降级为章节/段落定位），`force` 重入库后恢复
-- 元数据年份：PDF 元数据缺失时从正文启发式抓取，可能错抓（Zotero 元数据可覆盖）
-- 检索性能：关键词扫描为内存实现；几十万 chunk 以上建议 FAISS HNSW / SQLite FTS5
-- Roadmap：中→英 query 翻译（本地 opus-mt）、图注 OCR、引文网络图谱
+- **扫描版 PDF 不支持** — 无文字层即跳过（不做 OCR，属设计取舍）
+- **页码仅 PDF 有效** — txt/md/docx 与 v3 之前入库的旧数据无页码（NULL，自动降级为章节定位），`force` 重入库后恢复
+- **引文关联需重灌** — 上标角标与新版 References 切分在入库时处理，旧库需 `force` 重入库
+- **元数据可能错抓** — PDF 元数据缺失时从正文启发式抓取；Zotero 元数据可覆盖
+- **跨语言检索偏弱** — 中文 query 对英文正文主要靠向量兜底（roadmap：本地中→英翻译）
+- **图注只是文字** — 能搜到图注写到的词，搜不到图里的内容
+- **检索规模** — 关键词扫描为内存实现；几十万 chunk 以上建议 FAISS HNSW / SQLite FTS5
+
+## 联系与协作
+
+- 🐛 **Bug / 功能建议** — [GitHub Issues](https://github.com/Breeze136/dsh-kb-rag/issues)
+- 💬 **讨论** — [GitHub Discussions](https://github.com/Breeze136/dsh-kb-rag/discussions)
+- 🔒 **安全问题** — 见 [SECURITY.md](SECURITY.md)
+
+## 相关工具
+
+- [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) — DSH 插件收录列表
+- [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) — 设置面板里的插件市场
 
 ## License
 
-MIT — see [LICENSE](LICENSE)。
+[MIT](LICENSE) — 本地优先，代码可读可改；用到的模型（`BAAI/bge-*`）遵循各自许可。
+
+---
+
+<p align="center">
+  <sub>由 <a href="https://github.com/Breeze136">Breeze136</a> 维护 · 如果它帮你找到过一段忘在角落的证据，欢迎点个 ⭐</sub><br/>
+  <sub>Distribution: <a href="https://github.com/Breeze136/dsh-kb-rag">GitHub</a>（主） · <a href="https://www.npmjs.com/package/dsh-kb-rag">npm</a> · MIT licensed</sub>
+</p>
+
+[⬆ 回到顶部](#kb-rag--local-literature-rag-that-lands-on-the-exact-passage)

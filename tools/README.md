@@ -8,10 +8,10 @@
 
 ```powershell
 # 单个(相对路径示例,请替换为你自己的目录)
-node .\tools\doi_pdf.mjs --out downloads "10.1038/nature06932"
+node .\tools\doi_pdf.mjs --out downloads "10.5555/12345682"
 
 # 多个
-node .\tools\doi_pdf.mjs --out downloads "10.1038/nature06932" "10.1038/nmat3223"
+node .\tools\doi_pdf.mjs --out downloads "10.5555/12345682" "10.5555/12345683"
 
 # 从文件批量(一行一个 DOI)
 node .\tools\doi_pdf.mjs --file dois.txt
@@ -49,9 +49,9 @@ MDPI 的 `bm-verify` 令牌跟随尝试、Cloudflare/Akamai 挑战页识别(明�
 
 ```powershell
 # --db 默认 <当前目录>/.kb/kb.sqlite,可用 --db 指定
-python .\tools\kb_fix_meta.py 10.1038/nature06932
+python .\tools\kb_fix_meta.py 10.5555/12345682
 # 同名多版本时精确指定路径子串:
-python .\tools\kb_fix_meta.py 10.1038/nmat3415 --like "ferroelectric memristor"
+python .\tools\kb_fix_meta.py 10.5555/12345684 --like "some distinctive title fragment"
 ```
 
 ## 4. 其它
