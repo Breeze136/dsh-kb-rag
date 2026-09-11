@@ -1008,7 +1008,7 @@ def read_first_page(path):
 
     为什么可行：extract_meta 的标识符/年份/标题判据全部落在 `scope = page1` 与 pdf_meta 上
     （文件名年份、© / Vol / ISSN 上下文年份、括号年份、裸年份都取 scope）。因此元数据结果与
-    全量解析一致，而成本从 ~0.3–1 s/篇 降到 ~0.05 s/篇。
+    全量解析一致，而成本从约 0.3–1 s/篇 降到约 90 ms/篇（实测 312 篇 28–30 s）。
 
     非 PDF、首页无文本层、或读取异常时**退回** read_document()，保证行为不退化。"""
     p = Path(path)
@@ -1441,7 +1441,7 @@ def cmd_ingest(req):
 
 def _refresh_meta_file(db, f, files, totals):
     """只刷新元数据（`metadata_only`）：重跑解析与 extract_meta，UPDATE docs 的元数据字段
-    与 indexed_with，**不重切块、不重嵌入**（无需模型，约 0.3 s/篇）。
+    与 indexed_with，**不重切块、不重嵌入**（无需模型，实测约 90 ms/篇；312 篇约 30 s）。
 
     存在的理由：增量入库按 sha256 跳过未变文件，所以引擎改进元数据抽取后老库不会自愈；
     本函数提供一条秒级、可反复执行的刷新通道。内容已变的文件不动（记 changed），

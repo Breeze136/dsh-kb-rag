@@ -225,7 +225,7 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
 ## 6. 与相关文档的关系
 
 - 落地情况：README「Citation Style」表已同步（去掉"End of answer: append a suggested additions note"，改为引文关联建议）；CHANGELOG 记于 [1.6.0]（方案 A 已实施，实测见第 7 节）。
-- 依赖：`docs/MIGRATION.md` 的 schema 版本化（当前 `SCHEMA_VERSION = 3`；若将来走方案 B 需新增 `refs` 表 → 版本号再 +1，并在 `_migrate()` 新增对应迁移块）。
+- 依赖：`docs/MIGRATION.md` 的 schema 版本化（当前 `SCHEMA_VERSION = 4`；若将来走方案 B 需新增 `refs` 表 → 版本号再 +1，并在 `_migrate()` 新增对应迁移块）。
 
 ## 7. 实施记录与已知局限（引擎实测）
 
