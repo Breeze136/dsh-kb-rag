@@ -138,7 +138,7 @@ DSH profile 是一个 **pnpm workspace**（其中包含 `pnpm-lock.yaml`，且 `
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # 最新版本
-dsh plugin --profile web add dsh-kb-rag@1.6.3    # 或固定到指定版本
+dsh plugin --profile web add dsh-kb-rag@1.6.4    # 或固定到指定版本
 ```
 
 重新运行安装脚本效果相同，并会额外校正 Python 依赖：
