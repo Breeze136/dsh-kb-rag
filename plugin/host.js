@@ -348,12 +348,44 @@ return {
       return [{ type: 'text', text: lines.join('\n') }]
     }
 
+    // 元数据刷新（metadata_only）：只更新 docs 的元数据字段，totals 里是 meta_updated 系列，
+    // 没有 added/updated/chunks/vectors——按入库结果渲染会显示成"什么都没做"，必须单独渲染。
+    const renderMetaRefresh = (_args, value) => {
+      const totals = value.totals || {}
+      const files = Array.isArray(value.files) ? value.files : []
+      const lines = []
+      lines.push('**元数据刷新完成** · 已刷新 ' + (totals.meta_updated || 0) + ' 篇'
+        + '（其中 ' + (totals.meta_changed || 0) + ' 篇内容有变化）')
+      const extra = []
+      if (totals.changed) extra.push('跳过（文件内容已变，需正常入库）' + totals.changed + ' 篇')
+      if (totals.not_indexed) extra.push('未入库 ' + totals.not_indexed + ' 篇')
+      if (totals.errors) extra.push('失败 ' + totals.errors + ' 篇')
+      if (extra.length > 0) lines.push(extra.join(' · '))
+      const totalMs = typeof value.ms === 'number' ? value.ms : 0
+      lines.push('总耗时 ' + (totalMs >= 1000 ? (totalMs / 1000).toFixed(1) + 's' : totalMs + 'ms')
+        + ' · 未重切块、未重嵌入')
+      if (files.length > 0) {
+        lines.push('')
+        lines.push('**最近刷新（滚动）**')
+        files.slice(-8).forEach(function (f) {
+          const nm = String(f.path || '').split(/[\\/]/).pop()
+          const bits = [f.status || '']
+          if (f.changed === true) bits.push('有变化')
+          if (f.doi) bits.push('doi ' + String(f.doi))
+          if (typeof f.ms === 'number') bits.push(f.ms + 'ms')
+          lines.push('· ' + nm + ' · ' + bits.filter(Boolean).join(' · '))
+        })
+      }
+      return [{ type: 'text', text: lines.join('\n') }]
+    }
+
     // 入库/Zotero 迁移：紧凑滚动视图——总览一行 + 最近 N 条（文件名 + 耗时），不甩大 JSON。
     const renderIngest = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       if (value.background === true || (value.job_id !== undefined && value.status === 'running' && value.totals === undefined)) {
         return renderIngestAsync(_args, value)
       }
+      if (value.mode === 'metadata_only') return renderMetaRefresh(_args, value)
       const totals = value.totals || {}
       const files = Array.isArray(value.files) ? value.files : []
       const lines = []
