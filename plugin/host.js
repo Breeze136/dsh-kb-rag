@@ -677,11 +677,13 @@ return {
       name: 'kb_ingest',
       description: '把本地文档（PDF/TXT/MD/DOCX）导入 DSH 知识库并建立索引（轻量 RAG 工作流的入库步骤）。支持单个文件或目录（递归扫描并只处理 PDF/TXT/MD/DOCX）；按章节切分并抽取元数据（标题/作者/年份/DOI）；同时用本地 bge-small 模型生成向量（数据持久化在工作区/.kb）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记为 duplicate 跳过（增量）。paths 用工作区内的相对路径或绝对路径。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。重复调用安全。metadata_only=true 只刷新元数据（秒级，不重切块/不重嵌入，适合引擎升级后让老库的标题/作者/DOI 生效）；rebuild=true 原地重灌库内全部已入库文档（不会因传目录而重复入库）；大批量会自动转后台并返回 job_id，用 kb_status 轮询。',
       parameters: {
-        paths: { type: 'array', required: true, items: { type: 'string' }, description: '要入库的文件或目录路径列表。' },
+        // paths 与 rebuild 二选一：rebuild=true 时引擎按库内现有路径重灌，不需要 paths。
+        // 不标 required，缺两项时由引擎给出明确错误（"paths is required（或用 rebuild=true…）"）。
+        paths: { type: 'array', items: { type: 'string' }, description: '要入库的文件或目录路径列表；rebuild=true 时可省略。' },
         kb_root: { type: 'string', description: '知识库目录（默认：工作区下的 .kb）。' },
         force: { type: 'boolean', description: 'true 时强制重新解析并重新编码向量（默认 false）。' },
         metadata_only: { type: 'boolean', description: 'true 时只刷新元数据（重抽标题/作者/年份/期刊/DOI，秒级；不重切块、不重嵌入；内容已变的文件不动）。' },
-        rebuild: { type: 'boolean', description: 'true 时原地重灌库内全部已入库文档（路径取自库内；paths 可传空数组）。' },
+        rebuild: { type: 'boolean', description: 'true 时原地重灌库内全部已入库文档（路径取自库内，可省略 paths）。大批量会自动转后台并返回 job_id。' },
       },
       output: { schema: { type: 'json' }, render: renderIngest },
       timeoutMs: 1800000,
