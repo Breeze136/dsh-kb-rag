@@ -222,6 +222,7 @@ kb_engine.py -- resident `serve` daemon (models load once)
 | [docs/DESIGN.md](docs/DESIGN.md) | 设计说明：存储模型、切分策略、检索流水线、引擎协议 |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出与引用规范：页码锚点、引用关联、快速与深度模式 |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移：`PRAGMA user_version` 门控，v1 到 v2 到 v3 |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | 已知缺口：未修复问题、待验证项、回归验证方法与记录约定 |
 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具映射、异步行为与超时 |
 | [npm-package/README.md](npm-package/README.md) | npm 包文档与故障排查表 |
 | [SECURITY.md](SECURITY.md) | 执行模型与安全边界：会启动、读取、写入、下载什么 |
