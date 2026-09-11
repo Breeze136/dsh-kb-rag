@@ -1,6 +1,6 @@
 {
   "name": "kb-rag",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "Local literature knowledge-base RAG for DSH: hybrid BM25 + vector retrieval with cross-encoder reranking, section- and page-level citations, quick and deep modes, over a SQLite index.",
   "kind": "dsh-dynamic-plugin",
   "idPrefix": "kbrag",

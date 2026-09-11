@@ -138,7 +138,7 @@ A DSH profile is a **pnpm workspace** (it contains `pnpm-lock.yaml`, and `dsh pl
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.4    # or pin a version
+dsh plugin --profile web add dsh-kb-rag@1.6.5    # or pin a version
 ```
 
 Re-running the installer is equivalent and additionally reconciles Python dependencies:
