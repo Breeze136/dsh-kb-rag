@@ -222,6 +222,7 @@ Measured on Windows with CPU inference. Methodology and design rationale: [`docs
 | [docs/DESIGN.md](docs/DESIGN.md) | Design notes: storage model, chunking strategy, retrieval pipeline, engine protocol |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | Output and citation conventions: page anchors, citation linking, fast and deep modes |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration: `PRAGMA user_version` gating, v1 to v2 to v3 |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | Known gaps: unfixed issues, items still to verify, and how to verify a change |
 | [mcp-server/README.md](mcp-server/README.md) | MCP configuration, tool mapping, asynchronous behaviour and timeouts |
 | [npm-package/README.md](npm-package/README.md) | npm package documentation and troubleshooting table |
 | [SECURITY.md](SECURITY.md) | Execution model and security boundaries: what is spawned, read, written, downloaded |

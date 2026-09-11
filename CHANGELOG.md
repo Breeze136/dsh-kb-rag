@@ -19,6 +19,9 @@
 ### 实测
 - 新增 16 项回归验证并全部通过：缓存撞锁时检索仍返回结果、无竞争时缓存照常命中、zotero 中途中断后**首篇已落盘且进度已回写 processed=1**、引文链后章节还原为 Methods/1.2、图注独立成块且其后正文还原、子进程立即退出被识别且不留 job、引擎脚本缺失时直接失败、`kb_clear` 连 `.tmp` 一起清
 
+### 文档
+- 新增 [`docs/BACKLOG.md`](docs/BACKLOG.md)：本版修复清单、**尚未修复**的问题（后台任务无自动失败终态、页码近似、引擎退出行为待验证、`run_job` 白名单待确认、未审计区域）、回归验证方法与记录约定；README 文档索引已挂链
+
 ## [1.6.4] - kb_fetch 描述订正、文档与元数据同步
 
 - **文档与元数据同步到 1.6.3**：`plugin/kbrag.plugin.json` 描述补全新能力（混合检索 + 交叉编码器精排 + 章节/页码级出处 + 快速/深度双模式）；`plugin/host.js`、`plugin/client.js` 头部注释与工具注册日志的版本号 `v1.0.0` → `v1.6.3`；`npm-package/package.json` 的 description 与 keywords 同步（补 `dsh-plugin`、`mcp`）
