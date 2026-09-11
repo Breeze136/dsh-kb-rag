@@ -57,7 +57,7 @@ Three deliberate trade-offs define the project:
 >
 > - **First use is slow.** The embedding model (~95 MB) and the reranker (~1.1 GB) are downloaded on first use, and the first query waits roughly ten seconds for them to load. The resident daemon then keeps them in memory and subsequent queries are sub-second.
 > - **Anchors are ingest-time data.** Page anchors and superscript citation markers are produced when a document is parsed. Libraries indexed before v1.6 keep working, but those fields stay empty until the documents are re-ingested with `force`.
-> - **Bulk ingestion is asynchronous.** The MCP server switches to a background job automatically once the pending file count crosses `KB_ASYNC_THRESHOLD`, so a host-side call timeout cannot interrupt the work.
+> - **Bulk ingestion is asynchronous.** Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the batch as a background job and returns a `job_id` immediately instead of blocking the session — in both deployment shapes, so a host-side call timeout cannot interrupt the work. Poll the job with `kb_status` until it reports `done`.
 
 ## Three deployment shapes
 
@@ -65,8 +65,8 @@ One engine (`kb_engine.py`), one data format, three entry points:
 
 | Shape | Entry point | Tool set |
 |---|---|---|
-| **DSH plugin** (primary) | `plugin/` — conversational use inside a DSH session | 9 tools including `kb_scope` (query scope and strict mode, a DSH session concept) |
-| **MCP server** | `mcp-server/server.py` — stdio, for Claude Desktop, Cherry Studio, Kimi, DeepSeek, Cursor, and similar | 9 tools; `kb_scope` is replaced by `kb_status` (background job polling) |
+| **DSH plugin** (primary) | `plugin/` — conversational use inside a DSH session | 10 tools, adding `kb_scope` (query scope and strict mode, a DSH session concept) and `kb_status` (background job polling) |
+| **MCP server** | `mcp-server/server.py` — stdio, for Claude Desktop, Cherry Studio, Kimi, DeepSeek, Cursor, and similar | 9 tools; `kb_status` exists in both shapes, so only `kb_scope` remains DSH-specific |
 | **npm package** | `dsh-kb-rag` — declares `dsh.bundle`, so `dsh plugin add` installs and activates in one step | Same as the DSH plugin |
 
 ## Quick Start
@@ -120,7 +120,7 @@ In a DSH conversation, ask it to ingest a folder (`kb_ingest`) or to sync Zotero
 <details>
 <summary>Bulk ingestion — keeping host timeouts out of the way</summary>
 
-The MCP server estimates the pending file count and switches to a background job above `KB_ASYNC_THRESHOLD` (default 25). The call returns a `job_id` immediately; poll it with `kb_status` until the status is `done`. Whole-library Zotero migrations use `kb_zotero(async_mode=true)`. The job runs in its own subprocess, so a 60-second client timeout does not interrupt it.
+Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` switches to a background job in both deployment shapes; the count is taken when the call arrives (the DSH plugin has the engine count the files, the MCP server counts them host-side). The call returns a `job_id` immediately; poll it with `kb_status` until the status is `done`. Whole-library Zotero migrations use `kb_zotero(async_mode=true)`. The job runs in its own subprocess, so a 60-second client timeout does not interrupt it.
 </details>
 
 ### 4. Ask
@@ -138,7 +138,7 @@ A DSH profile is a **pnpm workspace** (it contains `pnpm-lock.yaml`, and `dsh pl
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.5    # or pin a version
+dsh plugin --profile web add dsh-kb-rag@1.6.6    # or pin a version
 ```
 
 Re-running the installer is equivalent and additionally reconciles Python dependencies:
@@ -150,25 +150,26 @@ npx dsh-kb-rag-install --profile web
 > [!WARNING]
 > **Do not run `npm install dsh-kb-rag` inside a DSH profile.** It writes an npm-style `node_modules` next to pnpm's symlink store, and the two layouts disagree from then on; subsequent `dsh plugin` operations become unpredictable. `npm install` is only appropriate for a deployment you manage entirely by hand (see [npm-package/README.md](npm-package/README.md), Option 3).
 >
-> After upgrading, restart DSH and open a new session. Existing `.kb` libraries migrate automatically (see [docs/MIGRATION.md](docs/MIGRATION.md)), but **page anchors and superscript citation markers require a re-ingest with `force` on documents indexed earlier** — the migration adds columns, it does not re-parse documents.
+> After upgrading, restart DSH and open a new session. Existing `.kb` libraries migrate automatically (see [docs/MIGRATION.md](docs/MIGRATION.md)), but **page anchors and superscript citation markers require a re-ingest with `force` on documents indexed earlier** — the migration adds columns, it does not re-parse documents. `kb_stats` reports `stale_docs` when part of the library was written by an older parser revision, and the plugin then asks once, at the first retrieval of a session, how to handle it: ignore, refresh metadata only, or re-ingest.
 
 ## Tool reference
 
-### DSH plugin (9 tools)
+### DSH plugin (10 tools)
 
 | Tool | Purpose | Example request |
 |---|---|---|
-| `kb_ingest` | Ingest files or folders: incremental skip, deduplication, section chunking, vectorisation (PDF/TXT/MD/DOCX) | "Ingest the papers folder" |
+| `kb_ingest` | Ingest files or folders: incremental skip, deduplication, section chunking, vectorisation (PDF/TXT/MD/DOCX). `metadata_only=true` refreshes title/authors/year/journal/DOI in place, `rebuild=true` re-parses every indexed document; large batches move to a background job automatically | "Ingest the papers folder" |
+| `kb_status` | Poll a background ingest job by `job_id`: `running` with progress (processed / errors / chunks), `done` with the job's totals and recent files, `error`, or `not_found` | "How is the ingest going?" |
 | `kb_zotero` | Migrate a local Zotero library, including PDF attachments | "Sync Zotero" |
 | `kb_search` | Hybrid retrieval returning passages with exact provenance (title, authors, year, journal, DOI, page, section) | "Search chemical vapour deposition of graphene on copper" |
 | `kb_rag` | Evidence question answering, top 3 by default, numbered citations | "How does graphene grow on copper during CVD?" |
 | `kb_scope` | Query scope (library only / library plus web / web only), strict mode, retrieval depth | "Switch to strict mode" |
 | `kb_dedup` | Remove duplicate documents, keeping the earliest copy | "Deduplicate" |
 | `kb_clear` | Wipe all documents and indexes; requires `confirm=true` | "Clear the knowledge base" |
-| `kb_stats` | Document, chunk and vector counts, plus recent ingests | "What is in the library?" |
+| `kb_stats` | Document, chunk and vector counts, recent ingests, and `stale_docs` (documents written by an older parser revision) | "What is in the library?" |
 | `kb_fetch` | Download a PDF by DOI or arXiv ID (publisher version first, so a campus or institutional subscription applies; open-access fallback) | "Download 10.5555/12345678" |
 
-The MCP server exposes the same nine tools with `kb_scope` replaced by `kb_status` (background job polling). Configuration and client snippets: [mcp-server/README.md](mcp-server/README.md).
+The MCP server exposes the same engine through 9 tools, and it also provides `kb_status` (background job polling); only `kb_scope` stays DSH-specific. Configuration and client snippets: [mcp-server/README.md](mcp-server/README.md).
 
 ### Engine capabilities
 
@@ -179,8 +180,20 @@ The MCP server exposes the same nine tools with `kb_scope` replaced by `kb_statu
 - **Citation linking.** In-text `[n]` markers resolve to reference entries; Nature-style superscripts are detected from font metrics (`graphene1,2` becomes `graphene[1,2]`); cited works are matched against the library by DOI, normalised title, or first author plus year, and matches are marked as in-library in the rendered result.
 - **Fast and deep modes.** `quick` returns hybrid hits directly (no reranking, citation linking, or related work), `deep` runs the full chain.
 - **Incremental indexing and deduplication.** SHA-256 content hashes skip unchanged files (about 40× faster on re-runs) and intercept duplicates across paths.
+- **Metadata refresh and stale-data detection** (schema v4). Every document records the parser revision that wrote it (`docs.indexed_with`), so `kb_stats` can report `stale_docs` — rows an older revision wrote, which incremental ingest would otherwise never revisit. `kb_ingest(metadata_only=true)` re-extracts title, authors, year, journal and DOI without re-chunking or re-embedding (measured at about 90 ms per document), and `kb_ingest(rebuild=true)` re-parses every indexed document in place.
 - **Query cache.** Identical query and filters are not recomputed; any ingest invalidates it.
 - **Resident daemon.** Models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops.
+
+## Query guidance
+
+Queries reach the engine verbatim: it never translates, expands or rewrites them, so retrieval depends on the query matching the language of the indexed text. A typical library is overwhelmingly English (measured: about 98% of the body text), which has practical consequences:
+
+- **Write queries as English term strings.** BM25 matches on tokens, so a CJK query leaves the keyword half of the hybrid ranking idle — CJK bigrams cannot match English body text — and the hit depends on cross-language vector similarity alone. For the same question, an English term string retrieves noticeably better than its translation.
+- **Use the 3–12 word pattern** `material/system + method/process + property/characterisation`, not a full question: `graphene CVD copper single crystal nucleation suppression` rather than "how is nucleation suppressed on copper during chemical vapour deposition of graphene".
+- **Put limits in `filters`, not in the query.** Year, journal, author, section and file kind are metadata filters; keeping them in the query text spends keywords on terms the ranked body text does not contain.
+- **Send a second query in the original language only when documents in that language are actually wanted** — for example when the library also holds Chinese-language reviews.
+
+When a query contains CJK characters and the library is almost entirely English, the engine adds a `lang_note` to the response saying so, and the plugin renders it next to the results.
 
 ## Architecture
 
@@ -193,12 +206,13 @@ plugin host (JS) or MCP server (server.py + engine_client.py)
    v
 kb_engine.py -- resident `serve` daemon (models load once)
    |-- ingest:  sha256 skip -> PyMuPDF extraction -> section chunking -> bge-small encode
-   |             (committed per file; the MCP server forks large batches as an async job
-   |              under .kb-jobs/, returning a job_id polled with kb_status, while the
-   |              DSH plugin runs the same batch synchronously under a 30-minute deadline)
+   |             (committed per file; above KB_ASYNC_THRESHOLD the batch is forked as a job
+   |              under .kb-jobs/ and a job_id is returned for kb_status to poll, while
+   |              metadata_only reads page 1 only and rebuild re-parses the library's
+   |              own recorded paths)
    |-- search:  SQL prefilter -> BM25 + vector -> RRF fusion -> bge-reranker rerank
    |             -> top-N verbatim passages with DOI, page, section and score
-   `-- storage: <kb_root>/kb.sqlite (docs, chunks, vecs, cache; schema v3,
+   `-- storage: <kb_root>/kb.sqlite (docs, chunks, vecs, cache; schema v4,
                 migrations gated by PRAGMA user_version)
 ```
 
@@ -221,7 +235,7 @@ Measured on Windows with CPU inference. Methodology and design rationale: [`docs
 | [QUICKSTART.md](QUICKSTART.md) | Five-minute setup: dependencies, indexing, retrieval, common pitfalls |
 | [docs/DESIGN.md](docs/DESIGN.md) | Design notes: storage model, chunking strategy, retrieval pipeline, engine protocol |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | Output and citation conventions: page anchors, citation linking, fast and deep modes |
-| [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration: `PRAGMA user_version` gating, v1 to v2 to v3 |
+| [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration: `PRAGMA user_version` gating, v1 through v4 |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Known gaps: unfixed issues, items still to verify, and how to verify a change |
 | [mcp-server/README.md](mcp-server/README.md) | MCP configuration, tool mapping, asynchronous behaviour and timeouts |
 | [npm-package/README.md](npm-package/README.md) | npm package documentation and troubleshooting table |
@@ -239,7 +253,7 @@ Measured on Windows with CPU inference. Methodology and design rationale: [`docs
 | `KB_AUTO_PIP` | `0` | npm package | `1` installs missing Python dependencies at startup (fixed argv; by default only the command is printed). The dynamic plugin host reports but does not install |
 | `KB_RAG_ROOT` | DSH: session workspace `.kb`; MCP: `~/.kb-rag` | MCP | Knowledge base directory; per-call override with `kb_root` |
 | `KB_RAG_PYTHON` | current interpreter | MCP | Interpreter used for the engine, to avoid a bare `python` resolving elsewhere |
-| `KB_ASYNC_THRESHOLD` | `25` | MCP | Pending file count above which `kb_ingest` switches to a background job |
+| `KB_ASYNC_THRESHOLD` | `25` | Engine | Pending file count above which `kb_ingest` forks a background job and returns a `job_id` (poll with `kb_status`) |
 | `KB_SQLITE_WAL` | off | Engine | `1` enables SQLite WAL; the default is safer when the `.kb` directory is synchronised |
 | `UNPAYWALL_EMAIL` | built-in placeholder | Engine | Contact address used by `kb_fetch` for Unpaywall queries; set your own |
 
@@ -267,7 +281,7 @@ Runtime data: the DSH plugin writes to `.kb/kb.sqlite` in the session workspace;
 - **Page anchors are PDF-only.** TXT, MD and DOCX files, along with documents indexed before schema v3, have no page numbers and fall back to section-level location until re-ingested with `force`.
 - **Citation linking requires a re-ingest.** Superscript detection and the current reference splitting run at parse time; older libraries need `force` to gain them.
 - **Metadata can be misread.** When PDF metadata is missing, the title and year are inferred from page text; Zotero metadata overrides this.
-- **Cross-language retrieval is weak.** A Chinese query against English full text relies mainly on the vector path; local query translation is on the roadmap.
+- **Cross-language retrieval is weak.** A Chinese query against English full text relies mainly on the vector path; local query translation is on the roadmap. See [Query guidance](#query-guidance) for what to do instead.
 - **Captions are text only.** A caption is searchable as text, but content that appears only inside a figure is not.
 - **Scale.** Keyword matching is an in-memory implementation. Beyond a few hundred thousand chunks, FAISS HNSW or SQLite FTS5 would be the appropriate next step.
 

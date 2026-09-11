@@ -5,7 +5,7 @@ This document lists exactly what it runs and touches, so you can verify it again
 
 ## Execution model
 
-- The npm package (`dsh-kb-rag`) registers 9 model tools in the DSH host process (Node.js, ESM plugin).
+- The npm package (`dsh-kb-rag`) registers 10 model tools in the DSH host process (Node.js, ESM plugin).
 - Tools talk to a resident Python engine (`kb_engine.py`, bundled in the package) over a
   stdin/stdout JSON-lines protocol. No network server is opened.
 - The plugin spawns Python at exactly three sites, all with **fixed argv arrays**

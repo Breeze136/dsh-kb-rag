@@ -265,6 +265,10 @@ def render_sources(resp):
         return render_json(resp)
     lines = []
     lines.append("**知识库来源 Top-%d**" % len(items))
+    # 语言提示（引擎零成本检测）：query 含 CJK 且库内中文占比极低时给出改写建议，
+    # 引擎按原样检索、不翻译，所以这条只提示、不改变结果。
+    if isinstance(resp.get("lang_note"), str) and resp["lang_note"]:
+        lines.append("提示：" + resp["lang_note"])
     # 查询/详细双模式：quick 压缩输出（无引文链/关联文献、短片段），deep 全量
     depth = resp.get("depth")
     quick = depth == "quick"

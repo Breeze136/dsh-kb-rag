@@ -1,5 +1,5 @@
 // dsh-kb-rag — static DSH plugin (Host half)
-// 本地文献知识库 RAG：8 个模型工具 + 常驻 Python 引擎（随包分发 kb_engine.py）。
+// 本地文献知识库 RAG：10 个模型工具 + 常驻 Python 引擎（随包分发 kb_engine.py）。
 // 加载：部署的 cordis 组合中加入本包（cordis-plugin-loader 按 npm 包名解析）。
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { fileURLToPath } from "node:url";
@@ -77,51 +77,106 @@ function apply(ctx) {
     ]);
   }
 
-  function askScopeOnce(agent) {
-    if (scopeAsked || userQuestions === undefined) return;
-    scopeAsked = true;
-    const request = {
-      questions: [{
-        id: "kb-scope",
-        header: "查询范围",
-        question: "知识库查询的默认范围？",
-        options: [
-          { label: "仅封闭知识库（推荐）", description: "只检索本地文献库，结论只来自库内文献" },
-          { label: "知识库+全网", description: "库内检索为主，开放网络（web_search）补充" },
-          { label: "仅全网", description: "只用开放网络检索，不用知识库" },
-        ],
-      }, {
-        id: "kb-depth",
-        header: "检索深度",
-        question: "检索与作答的深度？",
-        options: [
-          { label: "快速检索", description: "混合召回直出，跳过精排与引文扩展，亚秒级响应，适合事实性查询与单点数据检索" },
-          { label: "深度检索（推荐）", description: "重排序 + 引文关联 + 相关文献全链路，跨文献综合论述，适合领域调研与综述性问题" },
-        ],
-      }],
-    };
-    if (agent !== undefined) request.agent = agent;
-    Promise.race([
-      userQuestions.ask(request).then(function (answer) {
-        const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0];
-        if (typeof picked === "string" && picked.indexOf("仅封闭") === 0) scopePref = "kb";
-        else if (typeof picked === "string" && picked.indexOf("知识库+全网") === 0) scopePref = "both";
-        else if (typeof picked === "string" && picked.indexOf("仅全网") === 0) scopePref = "web";
-        const pickedDepth = answer && answer.answers && answer.answers[1] && answer.answers[1].selected && answer.answers[1].selected[0];
-        if (typeof pickedDepth === "string") {
-            if (pickedDepth.indexOf("深度检索") === 0) scopeDepth = "deep"
-            else if (pickedDepth.indexOf("快速检索") === 0) scopeDepth = "quick"
-          };
-        console.log("[kb-rag] query scope:", scopePref, "depth:", scopeDepth);
-      }).catch(function (e) {
-        console.error("[kb-rag] scope question failed:", String(e));
-      }),
-      ctx.timeout(120000),
-    ]);
+  // 入库数据版本：先问引擎要"旧解析器入库"的文档数（stats.stale_docs）；
+  // 取不到（旧引擎/无库/调用失败）就静默跳过这条问题，绝不影响首次工具调用。
+  function staleCountOf(kbRoot, exec) {
+    return runEngine("stats", { kb_root: kbRoot }, exec).then(function (resp) {
+      const n = resp ? Number(resp.stale_docs) : 0;
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }).catch(function (e) {
+      console.error("[kb-rag] stale check skipped:", String(e));
+      return 0;
+    });
   }
 
-  function scopeWrapped(exec, engineCall, strict) {
-    askScopeOnce(exec && exec.agent);
+  // 刷新库内旧数据：后台维护动作（不是工具调用，不渲染给模型），失败只写宿主日志。
+  function refreshStale(kbRoot, exec, metaOnly) {
+    const payload = metaOnly
+      ? { kb_root: kbRoot, rebuild: true, metadata_only: true }
+      : { kb_root: kbRoot, rebuild: true, async_if_large: true };
+    runEngine("ingest", payload, exec).then(function (resp) {
+      const jobId = resp && resp.job_id ? String(resp.job_id) : "";
+      if (jobId) {
+        console.log("[kb-rag] 全量重灌已转后台：job_id=" + jobId + "；用 kb_status(job_id=\"" + jobId + "\") 轮询进度，宿主调用超时不会中断后台任务");
+        return;
+      }
+      const totals = (resp && resp.totals) || {};
+      if (metaOnly) {
+        console.log("[kb-rag] 元数据刷新完成：meta_updated=" + (totals.meta_updated || 0) + " / 失败 " + (totals.errors || 0));
+      } else {
+        console.log("[kb-rag] 重灌完成（引擎未转后台）：新增 " + (totals.added || 0) + " / 更新 " + (totals.updated || 0) + " / 失败 " + (totals.errors || 0));
+      }
+    }).catch(function (e) {
+      console.error("[kb-rag] stale refresh failed:", String(e));
+    });
+  }
+
+  function askScopeOnce(agent, exec, kbRoot) {
+    if (scopeAsked || userQuestions === undefined) return;
+    scopeAsked = true;
+    const root = typeof kbRoot === "string" && kbRoot.length > 0 ? kbRoot : workspaceOf(exec) + "/.kb";
+    staleCountOf(root, exec).then(function (stale) {
+      const request = {
+        questions: [{
+          id: "kb-scope",
+          header: "查询范围",
+          question: "知识库查询的默认范围？",
+          options: [
+            { label: "仅封闭知识库（推荐）", description: "只检索本地文献库，结论只来自库内文献" },
+            { label: "知识库+全网", description: "库内检索为主，开放网络（web_search）补充" },
+            { label: "仅全网", description: "只用开放网络检索，不用知识库" },
+          ],
+        }, {
+          id: "kb-depth",
+          header: "检索深度",
+          question: "检索与作答的深度？",
+          options: [
+            { label: "快速检索", description: "混合召回直出，跳过精排与引文扩展，亚秒级响应，适合事实性查询与单点数据检索" },
+            { label: "深度检索（推荐）", description: "重排序 + 引文关联 + 相关文献全链路，跨文献综合论述，适合领域调研与综述性问题" },
+          ],
+        }],
+      };
+      if (stale > 0) {
+        request.questions.push({
+          id: "kb-stale",
+          header: "入库数据版本",
+          question: "库内有 " + stale + " 篇文档是用旧版解析器入库的（引擎的解析改进不会自动作用于已有数据）。是否刷新？",
+          options: [
+            { label: "暂不处理", description: "保持现状，随时可用 kb_ingest 的 metadata_only/rebuild 手动刷新" },
+            { label: "只刷新元数据（推荐）", description: "秒级完成，仅重抽标题/作者/DOI，不重切块、不重嵌入" },
+            { label: "全量重灌（较慢）", description: "重新解析并重新嵌入全部文档，期间会转后台，可用 kb_status 查进度" },
+          ],
+        });
+      }
+      if (agent !== undefined) request.agent = agent;
+      return Promise.race([
+        userQuestions.ask(request).then(function (answer) {
+          const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0];
+          if (typeof picked === "string" && picked.indexOf("仅封闭") === 0) scopePref = "kb";
+          else if (typeof picked === "string" && picked.indexOf("知识库+全网") === 0) scopePref = "both";
+          else if (typeof picked === "string" && picked.indexOf("仅全网") === 0) scopePref = "web";
+          const pickedDepth = answer && answer.answers && answer.answers[1] && answer.answers[1].selected && answer.answers[1].selected[0];
+          if (typeof pickedDepth === "string") {
+              if (pickedDepth.indexOf("深度检索") === 0) scopeDepth = "deep"
+              else if (pickedDepth.indexOf("快速检索") === 0) scopeDepth = "quick"
+            };
+          const pickedStale = answer && answer.answers && answer.answers[2] && answer.answers[2].selected && answer.answers[2].selected[0];
+          if (typeof pickedStale === "string" && pickedStale.indexOf("只刷新元数据") === 0) refreshStale(root, exec, true);
+          else if (typeof pickedStale === "string" && pickedStale.indexOf("全量重灌") === 0) refreshStale(root, exec, false);
+          else if (typeof pickedStale === "string") console.log("[kb-rag] 旧数据暂不刷新（需要时用 kb_ingest 的 metadata_only / rebuild）");
+          console.log("[kb-rag] query scope:", scopePref, "depth:", scopeDepth);
+        }).catch(function (e) {
+          console.error("[kb-rag] scope question failed:", String(e));
+        }),
+        ctx.timeout(120000),
+      ]);
+    }).catch(function (e) {
+      console.error("[kb-rag] scope question failed:", String(e));
+    });
+  }
+
+  function scopeWrapped(exec, engineCall, strict, kbRoot) {
+    askScopeOnce(exec && exec.agent, exec, kbRoot);
     return engineCall.then(function (resp) {
       resp.scope = scopePref;
       resp.scope_note = SCOPE_NOTE[scopePref];
@@ -356,9 +411,25 @@ function apply(ctx) {
   const kbRootOf = (args, exec) => typeof args.kb_root === "string" && args.kb_root.length > 0 ? args.kb_root : workspaceOf(exec) + "/.kb";
   const renderJson = (_args, value) => [{ type: "text", text: JSON.stringify(value) }];
 
+  // 大批量入库：引擎已转后台，返回的是 job 句柄而不是入库结果——不能按入库结果渲染。
+  const renderIngestAsync = (_args, value) => {
+    if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
+    const jobId = value.job_id ? String(value.job_id) : "";
+    const lines = [];
+    lines.push("**已转入后台处理**" + (jobId.length > 0 ? " · job_id " + jobId : ""));
+    if (typeof value.pending_files === "number") lines.push("待处理文件 " + value.pending_files + " 篇");
+    if (value.note) lines.push(String(value.note));
+    lines.push("");
+    lines.push("用 kb_status(job_id=\"" + jobId + "\") 轮询进度；宿主调用超时不会中断后台任务，结果在完成时返回 totals。");
+    return [{ type: "text", text: lines.join("\n") }];
+  };
+
   // 入库/Zotero 迁移：紧凑滚动视图——总览一行 + 最近 N 条（文件名 + 耗时），不甩大 JSON。
   const renderIngest = (_args, value) => {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
+    if (value.background === true || (value.job_id !== undefined && value.status === "running" && value.totals === undefined)) {
+      return renderIngestAsync(_args, value);
+    }
     const totals = value.totals || {};
     const files = Array.isArray(value.files) ? value.files : [];
     const lines = [];
@@ -400,6 +471,56 @@ function apply(ctx) {
       });
       if (recent.length > 10) lines.push("（共 " + recent.length + " 条，仅显示最近 10 条）");
     }
+    return [{ type: "text", text: lines.join("\n") }];
+  };
+
+  // 后台任务轮询：running 给进度，done 给 totals + 最近文件，error/not_found 说明原因。
+  const renderStatus = (_args, value) => {
+    if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
+    const jobId = value.job_id ? String(value.job_id) : "";
+    const status = value.status ? String(value.status) : "unknown";
+    const head = (title) => title + (jobId.length > 0 ? " · job_id " + jobId : "");
+    const lines = [];
+    if (status === "running") {
+      lines.push(head("**后台任务进行中**"));
+      const p = value.progress && typeof value.progress === "object" ? value.progress : {};
+      lines.push("已处理 " + (p.processed || 0) + " 篇 · 错误 " + (p.errors || 0) + " · 分块 " + (p.chunks || 0));
+      if (typeof value.note === "string" && value.note.length > 0) lines.push(String(value.note));
+      return [{ type: "text", text: lines.join("\n") }];
+    }
+    if (status === "done") {
+      lines.push(head("**后台任务完成**"));
+      const result = value.result && typeof value.result === "object" ? value.result : {};
+      const totals = result.totals && typeof result.totals === "object" ? result.totals : {};
+      const totLabels = [["added", "新增"], ["updated", "更新"], ["skipped", "跳过"], ["errors", "失败"], ["duplicates", "重复"], ["chunks", "分块"], ["vectors", "向量"]];
+      const parts = [];
+      totLabels.forEach(function (kv) {
+        const n = totals[kv[0]] || 0;
+        if (n) parts.push(kv[1] + " " + n);
+      });
+      lines.push(parts.length > 0 ? parts.join(" · ") : "无变化（统计见 kb_stats）");
+      const files = Array.isArray(result.files) ? result.files : [];
+      if (files.length > 0) {
+        lines.push("");
+        lines.push("**最近处理**");
+        files.slice(-5).reverse().forEach(function (f) {
+          lines.push("- " + String(f.path || "").split(/[\\/]/).pop() + (f.status ? " · " + String(f.status) : ""));
+        });
+        const totalN = typeof result.files_total === "number" ? result.files_total : files.length;
+        if (totalN > files.length) lines.push("（共 " + totalN + " 个文件，仅显示最近 " + files.length + " 条）");
+      }
+      return [{ type: "text", text: lines.join("\n") }];
+    }
+    if (status === "error") {
+      lines.push(head("**后台任务失败**"));
+      const result = value.result && typeof value.result === "object" ? value.result : {};
+      const err = value.error || result.error;
+      lines.push(err ? String(err) : "引擎未返回错误详情，请检查宿主日志后再重试。");
+      return [{ type: "text", text: lines.join("\n") }];
+    }
+    lines.push(head("**未找到该任务**"));
+    lines.push("job_id 未知，或任务记录已被清理（任务完成后结果文件保留，kb_clear 会一并清空）。");
+    if (typeof value.note === "string" && value.note.length > 0) lines.push(String(value.note));
     return [{ type: "text", text: lines.join("\n") }];
   };
 
@@ -459,6 +580,10 @@ function apply(ctx) {
     const lines = [];
     lines.push("**知识库来源 Top-" + items.length + "**" + (quick ? "（快速检索）" : (value.depth === "deep" ? "（深度检索）" : "")));
     lines.push("混合检索" + (value.reranker ? " · 精排 " + value.reranker.split(" ")[0] : "") + (value.cached === true ? " · 缓存命中" : "") + (typeof value.ms === "number" ? " · " + value.ms + "ms" : "") + (value.strict === true ? " · 严格模式" : ""));
+    // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
+    if (typeof value.lang_note === "string" && value.lang_note.length > 0) {
+      lines.push("提示：" + value.lang_note);
+    }
     items.forEach(function (r, i) {
       const title = String(r.title || r.file || "");
       const doi = typeof r.doi === "string" && r.doi.length > 0 ? r.doi : null;
@@ -566,24 +691,33 @@ function apply(ctx) {
 
   ctx.tools.register(defineTool({
     name: "kb_ingest",
-    description: "把本地文档（PDF/TXT/MD/DOCX）导入 DSH 知识库并建立索引（轻量 RAG 工作流的入库步骤）。支持单个文件或目录（递归扫描并只处理 PDF/TXT/MD/DOCX）；按章节切分并抽取元数据（标题/作者/年份/DOI）；同时用本地 bge-small 模型生成向量（数据持久化在工作区/.kb）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记为 duplicate 跳过（增量）。paths 用工作区内的相对路径或绝对路径。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。重复调用安全。",
+    description: "把本地文档（PDF/TXT/MD/DOCX）导入 DSH 知识库并建立索引（轻量 RAG 工作流的入库步骤）。支持单个文件或目录（递归扫描并只处理 PDF/TXT/MD/DOCX）；按章节切分并抽取元数据（标题/作者/年份/DOI）；同时用本地 bge-small 模型生成向量（数据持久化在工作区/.kb）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记为 duplicate 跳过（增量）。paths 用工作区内的相对路径或绝对路径。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。重复调用安全。metadata_only=true 只刷新元数据（秒级，不重切块/不重嵌入，适合引擎升级后让老库的标题/作者/DOI 生效）；rebuild=true 原地重灌库内全部已入库文档（不会因传目录而重复入库）；大批量会自动转后台并返回 job_id，用 kb_status 轮询。",
     parameters: {
       paths: { type: "array", required: true, items: { type: "string" }, description: "要入库的文件或目录路径列表。" },
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       force: { type: "boolean", description: "true 时强制重新解析并重新编码向量（默认 false）。" },
+      metadata_only: { type: "boolean", description: "true 时只刷新元数据（重抽标题/作者/年份/期刊/DOI，秒级；不重切块、不重嵌入；内容已变的文件不动）。" },
+      rebuild: { type: "boolean", description: "true 时原地重灌库内全部已入库文档（路径取自库内；paths 可传空数组）。" },
     },
     output: { schema: { type: "json" }, render: renderIngest },
     timeoutMs: 1800000,
     execute(args, exec) {
-      return runEngine("ingest", { paths: args.paths, kb_root: kbRootOf(args, exec), force: args.force === true }, exec);
+      return runEngine("ingest", {
+        paths: args.paths,
+        kb_root: kbRootOf(args, exec),
+        force: args.force === true,
+        metadata_only: args.metadata_only === true,
+        rebuild: args.rebuild === true,
+        async_if_large: true,
+      }, exec);
     },
   }));
 
   ctx.tools.register(defineTool({
     name: "kb_search",
-    description: "在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 可以是术语、数值、化学式或中文短语；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 \">=2020\" 形式）。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。",
+    description: "在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 \"graphene CVD copper single crystal nucleation suppression\"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 \">=2020\" 形式）。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。",
     parameters: {
-      query: { type: "string", required: true, description: "检索关键词或短语（中英文均可）。" },
+      query: { type: "string", required: true, description: "检索词，**英文优先**：3–12 个英文术语，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 \"graphene CVD copper single crystal nucleation suppression\"）；限定条件放 filters；引擎按原样检索、不翻译。需要中文文献时用中文原话另发一条查询。" },
       depth: { type: "string", enum: ["quick", "deep"], description: "quick=快速检索（默认：无精排/引文链/关联文献，响应最快，适合查个信息）；deep=深度检索（精排+引文链+关联文献，适合领域调研与综述性问题）。默认继承 kb_scope 的会话 depth 设置。" },
       top_k: { type: "integer", description: "返回结果数（默认 quick 3 / deep 5，上限 10）。" },
       snippet: { type: "integer", description: "片段长度字符数（默认 quick 300 / deep 400）。" },
@@ -609,7 +743,7 @@ function apply(ctx) {
         filters: args.filters,
         kb_root: kbRootOf(args, exec),
       }, exec);
-      return scopeWrapped(exec, call, strict);
+      return scopeWrapped(exec, call, strict, kbRootOf(args, exec));
     },
   }));
 
@@ -617,7 +751,7 @@ function apply(ctx) {
     name: "kb_rag",
     description: "在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链「《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问」；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。",
     parameters: {
-      query: { type: "string", required: true, description: "自然语言问题（中英文均可）。" },
+      query: { type: "string", required: true, description: "要回答的问题——请先把它转写成**英文检索词**再传入（3–12 词，术语优先，不要整句中文问句）：库内正文以英文为主，引擎按原样检索、不替你翻译。" },
       depth: { type: "string", enum: ["quick", "deep"], description: "deep=深度检索（默认：精排+引文链+关联文献，回答展开背景，适合不熟悉领域）；quick=快速检索（少量证据直接给答案，不展开）。默认继承 kb_scope 的会话 depth 设置。" },
       top_k: { type: "integer", description: "证据条数（默认 quick 2 / deep 3，上限 10）。" },
       rerank: { type: "boolean", description: "是否启用精排（默认 quick 关 / deep 开）。" },
@@ -639,7 +773,7 @@ function apply(ctx) {
         filters: args.filters,
         kb_root: kbRootOf(args, exec),
       }, exec);
-      return scopeWrapped(exec, call, strict);
+      return scopeWrapped(exec, call, strict, kbRootOf(args, exec));
     },
   }));
 
@@ -737,7 +871,20 @@ function apply(ctx) {
     },
   }));
 
-  console.log("[kb-rag] static tools registered: kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats");
+  ctx.tools.register(defineTool({
+    name: "kb_status",
+    description: "查询后台任务进度或结果。大批量入库（kb_ingest）会自动转后台并返回 job_id，用本工具轮询：running 时给出已处理篇数/错误数/分块数，done 时给出 totals 与最近 20 条文件，error/not_found 时说明原因。宿主调用超时不会中断后台任务。",
+    parameters: {
+      job_id: { type: "string", required: true, description: "后台任务 id（kb_ingest 转后台时返回的 job_id，12 位十六进制）。" },
+      kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
+    },
+    output: { schema: { type: "json" }, render: renderStatus },
+    execute(args, exec) {
+      return runEngine("status", { job_id: args.job_id, kb_root: kbRootOf(args, exec) }, exec);
+    },
+  }));
+
+  console.log("[kb-rag] static tools registered (v1.6.6): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats / kb_status");
 }
 
 export { apply, inject, name };

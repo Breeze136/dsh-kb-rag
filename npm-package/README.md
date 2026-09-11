@@ -9,21 +9,22 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **Latest version v1.6.5** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
+> **Latest version v1.6.6** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
 
-## Features (9 model tools)
+## Features (10 model tools)
 
 | Tool | Purpose |
 | --- | --- |
-| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking and vectorisation |
+| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking and vectorisation; `metadata_only=true` refreshes title/authors/year/journal/DOI in place, `rebuild=true` re-parses every indexed document, and a large batch moves to a background job automatically |
+| `kb_status` | Poll a background ingest job by `job_id`: progress (processed / errors / chunks) while `running`, the job's totals and recent files when `done` |
 | `kb_zotero` | Batch-migrate a local Zotero library (items with PDF attachments) into the KB |
 | `kb_search` | Hybrid search Top-N passages with exact provenance (title/authors/year/journal/DOI/section/PDF page/score) |
 | `kb_rag` | Retrieve evidence passages (Top-3 by default) for the model to answer directly, with numbered citations per claim |
 | `kb_scope` | Set/view query scope (kb / both / web), strict mode and retrieval depth |
-| `kb_stats` | Doc/chunk/vector counts and recent ingest list |
+| `kb_stats` | Doc/chunk/vector counts, recent ingest list, and `stale_docs` (documents written by an older parser revision) |
 | `kb_dedup` | Remove duplicate documents (keeps the earliest) |
 | `kb_clear` | Wipe all documents and indexes (requires explicit `confirm: true`) |
 | `kb_fetch` | Download PDF by DOI / arXiv ID (publisher version first, so a campus or institutional subscription applies; open-access fallback) |
@@ -40,9 +41,21 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 - **Citation linking.** In-text `[n]` markers resolve to the document's reference entries; Nature-style superscripts are detected from font metrics. References are stored (weight 0) and excluded from retrieval.
 - **Fast and deep modes.** `quick` returns hybrid hits directly (no reranking, citation linking or related work), `deep` runs the full chain.
 - **Incremental indexing and deduplication.** SHA-256 content hashes skip unchanged files and intercept duplicates across folders.
+- **Metadata refresh and stale-data detection** (schema v4). Each document records the parser revision that wrote it (`docs.indexed_with`), so `kb_stats` reports `stale_docs` — rows an older revision wrote that incremental ingest would otherwise never revisit. `kb_ingest(metadata_only=true)` re-reads page 1 and re-extracts title/authors/year/journal/DOI without re-chunking or re-embedding (about 90 ms per document), and `kb_ingest(rebuild=true)` re-parses every indexed document from the paths recorded in its own database.
 - **Query cache.** Identical query and filters are not recomputed; any ingest invalidates it.
 - **Resident daemon.** Models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops. Indexing commits per file, and a long batch is allowed up to 30 minutes before the tool call gives up.
-- **Background jobs (MCP path).** The bundled engine also exposes `ingest_async` and `status`: the MCP server forks large batches under `.kb-jobs/` and returns a `job_id` that is polled with `kb_status`, so a client-side call timeout cannot interrupt the work.
+- **Background jobs.** Large batches no longer block the session: above `KB_ASYNC_THRESHOLD` (default 25) pending files the batch is forked under `.kb-jobs/` and a `job_id` is returned, polled with `kb_status` until it reports `done`. The DSH plugin has the engine count the pending files; the MCP server counts them host-side. Either way a host-side call timeout cannot interrupt the work.
+
+## Query guidance
+
+Queries go to the engine verbatim: it never translates, expands or rewrites them, so retrieval depends on the query language matching the indexed text. A typical library is about 98% English body text, which means:
+
+- **Write queries as English term strings.** BM25 matches on tokens, so a CJK query leaves the keyword half of hybrid ranking idle (CJK bigrams cannot match English body text) and the hit rests on cross-language vector similarity alone; for the same question an English term string retrieves noticeably better.
+- **Use the 3–12 word pattern** `material/system + method/process + property/characterisation` rather than a sentence, e.g. `graphene CVD copper single crystal nucleation suppression`.
+- **Put limits in `filters`, not in the query** — year, journal, author, section and kind are metadata filters, and keywords spent on them are keywords the ranked body text cannot match.
+- **Send a second query in the original language only when documents in that language are actually wanted.**
+
+The engine answers a CJK query against an almost entirely English library with a `lang_note` field describing this, and the plugin renders that note with the results.
 
 ## Install & Enable
 
@@ -100,7 +113,7 @@ Run **inside the DSH profile/deployment directory** (this is where the plugin lo
 
 ```bash
 cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
-npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.5 to pin
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.6 to pin
 ```
 
 Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
@@ -117,7 +130,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag            # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.5      # or pin
+dsh plugin --profile web add dsh-kb-rag@1.6.6      # or pin
 ```
 
 **Installed manually via npm** (Option 3) — stay with npm in that profile dir:
@@ -146,7 +159,7 @@ Either way: **restart DSH and open a new session**. Existing `.kb` libraries mig
 
 ### Guide for other Harness users
 
-The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 9 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
+The DSH plugin loader resolves package names from the deployment's node_modules, same as official static plugins. It does **not** auto-download uninstalled packages at startup — the install step must run once in the deployment/profile directory first. After loading, model sessions get the 10 tools above automatically; tools are injected at session creation, so use a new conversation after the restart.
 
 ## Requirements
 
@@ -171,7 +184,7 @@ The embedding model `BAAI/bge-small-zh-v1.5` and reranker `BAAI/bge-reranker-bas
 
 ## Usage Examples
 
-1. Ingest: `kb_ingest(paths=["papers/", "notes.md"])`
+1. Ingest: `kb_ingest(paths=["papers/", "notes.md"])` — a batch above `KB_ASYNC_THRESHOLD` returns a `job_id` instead of blocking, so follow it with `kb_status(job_id="...")` until the status is `done`
 2. Zotero: `kb_zotero(dry_run=true)` to preview, then drop dry_run for the real migration
 3. Search: `kb_search(query="graphene domain coalescence during CVD growth on copper", top_k=5, filters={year: ">=2018"})`
 4. QA: `kb_rag(query="How is layer thickness determined from the Raman 2D peak?", strict=true)`

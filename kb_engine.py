@@ -34,8 +34,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 SUPPORTED_EXTS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
+
+# 解析器版本：**只在改动会写进库的解析逻辑时 +1**（分块、元数据/标识符抽取、引文切分）。
+# 每条 docs 记录写入 indexed_with；kb_stats 报告 stale_docs —— 因为增量入库按 sha256
+# 跳过未变文件，引擎的解析改进不会自动作用于老库（实测：一处抽取改动漏了 49 篇的 DOI，
+# 直到一次全量重灌才暴露）。注意判定只看 rev，不看引擎 VERSION：否则每次发版都会把
+# 整个库标成陈旧，提示就变成噪音。
+PARSER_REV = 3
+PARSER_TOKEN = "%s/rev%d" % (VERSION, PARSER_REV)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -43,7 +51,7 @@ CREATE TABLE IF NOT EXISTS docs (
   path TEXT NOT NULL UNIQUE,
   title TEXT, authors TEXT, year INTEGER, journal TEXT, doi TEXT,
   kind TEXT, sha256 TEXT, size INTEGER, mtime REAL,
-  chunk_count INTEGER, indexed_at REAL, zotero_key TEXT
+  chunk_count INTEGER, indexed_at REAL, zotero_key TEXT, indexed_with TEXT
 );
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY,
@@ -71,9 +79,10 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 
 # 库结构（schema）版本：与引擎代码版本 VERSION 独立。
 # v1: docs.zotero_key；v2: chunks.para_start/para_end（段落定位，隐式元数据）；
-# v3: chunks.page_start/page_end（PDF 物理页码，证据锚点 → Zotero ?page=N 跳页）。
+# v3: chunks.page_start/page_end（PDF 物理页码，证据锚点 → Zotero ?page=N 跳页）；
+# v4: docs.indexed_with（入库时的解析器版本，用于检测"老数据是用旧解析器写的"）。
 # PRAGMA user_version 记录库结构版本；破坏性变更需新增迁移块（见 docs/MIGRATION.md §4）。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # 最近一次连接/迁移说明（cmd_stats 等据此给出迁移与健康提示；每次 connect 更新）
 _LAST_CONNECT = {"created": False, "from_version": None, "to_version": None,
@@ -587,6 +596,12 @@ def read_document(path):
             p1 = pages_text[0] if pages_text else ""
             meta["_page1_text"] = p1
             meta["_page1_title"] = _largest_font_title(doc[0]) if len(doc) else None
+            # XMP 元数据：部分出版商的 PDF 正文里根本不印 DOI，只写在 XMP 里
+            # （实测 Science Advances / RSC / Nature 系 16 篇），作为 DOI 的第二来源。
+            try:
+                meta["_xmp"] = doc.get_xml_metadata() or ""
+            except Exception:
+                meta["_xmp"] = ""
             # 段落 → PDF 物理页码（1 基）映射：段落归属其起始页（_paras=[(page, text)]）
             paras = []
             for pno, ptext in enumerate(pages_text, start=1):
@@ -744,11 +759,14 @@ _AUTHOR_BAD = {"作者", "author", "unknown", "authors", "none", "佚名"}
 _WORD_PREFIX_RE = re.compile(r"^microsoft\s+(?:word|powerpoint|excel)\s*[-–—:：]?\s*", re.I)
 _JUNK_TITLE_RE = re.compile(
     r"(^|/)(preprint|manuscript|submission|document\d*|latest corrections|formatted)\b|"
-    r"\.(docx?|pptx?|tex|cls|pdf)$|"
+    r"\.(docx?|pptx?|tex|cls|pdf|indd|idml|qxd?|fm|fmx|ai|psd)$|"
     r"^arxiv\s*:|^template\s+for|^article\s+type\s*:?|^sample\b.*\barticle\b|"
     r"^intechopen|^page\s+\d+\s+of|^[\w\-]+\.(docx?|pptx?|tex)$|"
     r"^[\w]+(_[\w]+)+$|^doi\s*:",
     re.I)
+# PDF 的 /Author 常常是排版/制作人员（实测 "Simpson, Derna" 对应 Nature 系 PDF 的排版员），
+# 形如单个 "姓, 名"；只有当首页或文件名同时给出多作者信号时才判定为生产信息并弃用。
+_PROD_AUTHOR_RE = re.compile(r"^[A-Z][A-Za-z'’\-]+,\s*[A-Z][A-Za-z'’\-]*(?:\s+[A-Z]\.?)?$")
 _HEAD_SKIP_RE = re.compile(
     r"^(?:abstract\b|introduction\b|doi\b|https?://|www\.|"
     r"fig(?:ure)?\.?\s*\d|table\.?\s*\d|scheme\.?\s*\d|"
@@ -810,6 +828,23 @@ def _clean_authors(s):
     if not s or s.lower() in _AUTHOR_BAD:
         return None
     return s or None
+
+
+def _looks_production_author(author, page1, stem):
+    """判断 PDF /Author 是否为排版/制作信息（而非作者）。
+
+    判据（保守，宁可漏判不可错判）：形如单个 "姓, 名"（如 "Simpson, Derna"），
+    且首页出现 "et al" / " & " 或文件名带 "和"/"&" 等多作者信号。
+    实测案例：某 Nature 系 PDF 的 /Author 是排版员，导致库内作者字段错误，
+    进而使"引文库内匹配"的作者+年份规则失效。"""
+    a = (author or "").strip()
+    if not a or not _PROD_AUTHOR_RE.match(a):
+        return False
+    p1 = page1 or ""
+    multi = (re.search(r"\bet\s+al\b", p1, re.I) is not None
+             or " & " in p1
+             or re.search(r"[和&]", stem or "") is not None)
+    return bool(multi)
 
 
 def _clean_year(value):
@@ -899,6 +934,9 @@ def extract_meta(path, text, pdf_meta=None):
     if not title:
         # 文件名回退：剥 '作者 - 年份 - ' 前缀与 (Z-Library)/(作者1,作者2) 尾巴，兼容中文 '作者-标题'
         title = _usable_title(_filename_title(stem)) or stem
+    if authors and _looks_production_author((pdf_meta or {}).get("author"), page1, stem):
+        # PDF /Author 是排版/制作人员（如 "Simpson, Derna"）：弃用，交给下面的文件名回退
+        authors = None
     if not authors:
         # 作者回退：文件名 '作者 - 年份 - 标题' / 中文 '作者-标题' / '(作者1,作者2)' / '(作者)'（保守）
         authors = _filename_author(stem)
@@ -917,6 +955,15 @@ def extract_meta(path, text, pdf_meta=None):
     md = re.search(r"doi:\s*(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", scope, re.I) or _DOI_RE.search(scope)
     if md:
         doi = md.group(1).rstrip(".,;")
+    if not doi:
+        # XMP 兜底：出版商 PDF 常把 DOI 只放在 XMP（dc:identifier / prism:doi / pdfx 等）。
+        # 放在首页文本之后、arXiv 之前——XMP 是文档自身的元数据，不会像"全篇搜索"那样
+        # 命中参考文献里别人的 DOI。
+        xmp = (pdf_meta or {}).get("_xmp") or ""
+        if xmp:
+            mx = _DOI_RE.search(xmp)
+            if mx:
+                doi = mx.group(1).rstrip(".,;")
     if not doi:
         ma = _ARXIV_RE.search(page1 or text[:3000])
         if ma:
@@ -953,6 +1000,43 @@ def extract_meta(path, text, pdf_meta=None):
     if year is None:
         year = _creation_year(pdf_meta)
     return title, authors, year, journal, doi
+
+
+def read_first_page(path):
+    """元数据刷新专用的轻量读取：只取首页文本 + PDF 元数据 + XMP，不做全文解析、
+    不做上标角标转写（那些只影响正文与引文解析）。
+
+    为什么可行：extract_meta 的标识符/年份/标题判据全部落在 `scope = page1` 与 pdf_meta 上
+    （文件名年份、© / Vol / ISSN 上下文年份、括号年份、裸年份都取 scope）。因此元数据结果与
+    全量解析一致，而成本从 ~0.3–1 s/篇 降到 ~0.05 s/篇。
+
+    非 PDF、首页无文本层、或读取异常时**退回** read_document()，保证行为不退化。"""
+    p = Path(path)
+    if p.suffix.lower() != ".pdf":
+        return read_document(path)
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(str(p))
+        try:
+            meta = dict(doc.metadata or {})
+            page1 = doc[0].get_text() if len(doc) else ""
+            if not page1.strip():
+                doc.close()
+                return read_document(path)
+            meta["_page1_text"] = page1
+            meta["_page1_title"] = _largest_font_title(doc[0]) if len(doc) else None
+            try:
+                meta["_xmp"] = doc.get_xml_metadata() or ""
+            except Exception:
+                meta["_xmp"] = ""
+            return page1, meta
+        finally:
+            try:
+                doc.close()
+            except Exception:
+                pass
+    except Exception:
+        return read_document(path)
 
 
 def _creation_year(pdf_meta):
@@ -1060,6 +1144,16 @@ def _migrate(db, created):
                 if "duplicate column" not in str(ex):
                     raise
         db.execute("PRAGMA user_version = 3")
+    # v3 -> v4：docs.indexed_with（解析器版本标记；旧行 NULL = 未知/陈旧，
+    # 由 kb_stats 的 stale_docs 报出，用户可选择 metadata_only 刷新或全量重灌）
+    if cur < 4:
+        try:
+            db.execute("ALTER TABLE docs ADD COLUMN indexed_with TEXT")
+            info["actions"].append("add docs.indexed_with")
+        except sqlite3.OperationalError as ex:
+            if "duplicate column" not in str(ex):
+                raise
+        db.execute("PRAGMA user_version = 4")
     # zotero_key 回填：旧行按 Zotero storage 路径提取附件 key（幂等，只补 NULL）
     n = db.execute(
         "SELECT COUNT(*) AS n FROM docs WHERE zotero_key IS NULL AND path LIKE ?",
@@ -1223,19 +1317,68 @@ def rerank(query, texts):
 # ---------------------------------------------------------------- ingest
 
 
+def _count_candidates(paths, limit=None):
+    """轻量统计待处理文件数（只看扩展名，不读内容）。limit 用于提前退出。"""
+    n = 0
+    for p in paths or []:
+        p = Path(p)
+        try:
+            if p.is_dir():
+                for f in p.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS:
+                        n += 1
+                        if limit and n >= limit:
+                            return n
+            elif p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+                n += 1
+                if limit and n >= limit:
+                    return n
+        except OSError:
+            continue
+    return n
+
+
 def cmd_ingest(req):
     _REL_CENTROID.clear()
     t0 = time.time()
     kb_root = req.get("kb_root") or ".kb"
     force = bool(req.get("force"))
+    metadata_only = bool(req.get("metadata_only"))   # 只刷新元数据：不重切块、不重嵌入
+    rebuild = bool(req.get("rebuild"))               # 按库内现有路径原地重灌全部文档
     paths = req.get("paths") or []
-    if not paths:
-        return {"ok": False, "error": "paths is required (file or directory list)"}
     progress_path = req.get("progress_path")   # 异步任务专用：后台进程逐文件回写进度
+    # 大批量自动转后台（宿主侧无需自己数文件、也无需访问文件系统）：
+    # progress_path 非空说明本进程就是那个后台任务，绝不能再 fork（防递归）。
+    if req.get("async_if_large") and not progress_path:
+        try:
+            threshold = int(os.environ.get("KB_ASYNC_THRESHOLD", "25"))
+        except ValueError:
+            threshold = 25
+        if not rebuild:
+            pending = _count_candidates(paths, limit=threshold + 1)
+            if pending > threshold:
+                sub = dict(req)
+                sub.pop("async_if_large", None)
+                sub["command"] = "ingest"
+                resp = cmd_ingest_async(sub)
+                if isinstance(resp, dict):
+                    resp["background"] = True
+                    resp["pending_files"] = pending
+                return resp
     db = connect(kb_root)
+    if rebuild and not paths:
+        # 原地重灌：从库里取现有路径，而不是让调用方传目录——force 会绕过去重检测
+        # （见 _ingest_file 的 `not force` 分支），传目录会把内容重复的文件重复入库。
+        paths = [r["path"] for r in db.execute("SELECT path FROM docs ORDER BY id").fetchall()]
+        force = True
+    if not paths:
+        db.close()
+        return {"ok": False,
+                "error": "paths is required（或用 rebuild=true 重灌库内全部已入库文档）"}
     files = []
     totals = {"added": 0, "updated": 0, "skipped": 0, "errors": 0, "duplicates": 0,
-              "chunks": 0, "vectors": 0}
+              "chunks": 0, "vectors": 0,
+              "meta_updated": 0, "meta_changed": 0, "changed": 0, "not_indexed": 0}
     processed = 0
 
     def _prog():
@@ -1264,7 +1407,10 @@ def cmd_ingest(req):
             for f in candidates:
                 if not f.is_file() or f.suffix.lower() not in SUPPORTED_EXTS:
                     continue
-                _ingest_file(db, f, force, files, totals)
+                if metadata_only:
+                    _refresh_meta_file(db, f, files, totals)
+                else:
+                    _ingest_file(db, f, force, files, totals)
                 processed += 1
                 # 逐文件 commit：把 SQLite 写锁窗口从"整批"缩到"单文件+嵌入"，
                 # 避免异步入库运行期间同库的一切命令（含只读）在 connect 处撞锁
@@ -1272,8 +1418,8 @@ def cmd_ingest(req):
                 # 部分成功是合理语义：files[] 逐条带 status，异常时未 commit 文件自然回滚。
                 db.commit()
                 _prog()
-        if totals["added"] or totals["updated"]:
-            db.execute("DELETE FROM cache")  # any index change invalidates cache
+        if totals["added"] or totals["updated"] or totals["meta_changed"]:
+            db.execute("DELETE FROM cache")  # 索引或元数据变化都让查询缓存失效
         db.commit()
     finally:
         db.close()
@@ -1285,10 +1431,59 @@ def cmd_ingest(req):
         "files": files[-20:],
         "files_total": len(files),
         "totals": totals,
+        "mode": "metadata_only" if metadata_only else ("rebuild" if rebuild else "ingest"),
+        "indexed_with": PARSER_TOKEN,
         "embedding": _EMBED_NAME if get_embedder() is not None else None,
         "ms": round((time.time() - t0) * 1000),
     }
     return resp
+
+
+def _refresh_meta_file(db, f, files, totals):
+    """只刷新元数据（`metadata_only`）：重跑解析与 extract_meta，UPDATE docs 的元数据字段
+    与 indexed_with，**不重切块、不重嵌入**（无需模型，约 0.3 s/篇）。
+
+    存在的理由：增量入库按 sha256 跳过未变文件，所以引擎改进元数据抽取后老库不会自愈；
+    本函数提供一条秒级、可反复执行的刷新通道。内容已变的文件不动（记 changed），
+    因为元数据必须与已入库的正文一致——那属于真正的入库。"""
+    t0 = time.time()
+    entry = {"path": str(f)}
+    try:
+        data = f.read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        key = str(f.resolve())
+        row = db.execute("SELECT id, sha256, title, doi FROM docs WHERE path = ?",
+                         (key,)).fetchone()
+        if row is None:
+            entry.update({"status": "not_indexed", "ms": round((time.time() - t0) * 1000)})
+            totals["not_indexed"] += 1
+            files.append(entry)
+            return
+        if row["sha256"] != sha:
+            entry.update({"status": "changed",
+                          "note": "文件内容已变，元数据刷新跳过（请用 kb_ingest 重入库）",
+                          "ms": round((time.time() - t0) * 1000)})
+            totals["changed"] += 1
+            files.append(entry)
+            return
+        text, pdf_meta = read_first_page(f)   # 只读首页：元数据判据全在 page1 + pdf_meta 上
+        if not text.strip():
+            raise ValueError("no text extracted")
+        title, authors, year, journal, doi = extract_meta(f, text, pdf_meta)
+        changed = (title != row["title"]) or ((doi or None) != (row["doi"] or None))
+        db.execute("UPDATE docs SET title=?,authors=?,year=?,journal=?,doi=?,indexed_with=? "
+                   "WHERE id=?",
+                   (title, authors, year, journal, doi, PARSER_TOKEN, row["id"]))
+        totals["meta_updated"] += 1
+        if changed:
+            totals["meta_changed"] += 1
+        entry.update({"status": "meta_updated", "changed": changed, "title": title,
+                      "year": year, "doi": doi, "ms": round((time.time() - t0) * 1000)})
+    except Exception as e:  # 单篇失败不能中断整批
+        totals["errors"] += 1
+        entry.update({"status": "error", "error": f"{type(e).__name__}: {e}"[:300],
+                      "ms": round((time.time() - t0) * 1000)})
+    files.append(entry)
 
 
 def _embed_new_chunks(db, doc_id):
@@ -1356,9 +1551,11 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         if row is not None:
             db.execute(
                 "UPDATE docs SET title=?,authors=?,year=?,journal=?,doi=?,kind=?,"
-                "sha256=?,size=?,mtime=?,chunk_count=?,indexed_at=?,zotero_key=? WHERE id=?",
+                "sha256=?,size=?,mtime=?,chunk_count=?,indexed_at=?,zotero_key=?,"
+                "indexed_with=? WHERE id=?",
                 (title, authors, year, journal, doi, f.suffix.lower().lstrip("."),
-                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key, row["id"]))
+                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key,
+                 PARSER_TOKEN, row["id"]))
             doc_id = row["id"]
             db.execute("DELETE FROM vecs WHERE chunk_id IN "
                        "(SELECT id FROM chunks WHERE doc_id = ?)", (doc_id,))
@@ -1367,9 +1564,11 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         else:
             cur = db.execute(
                 "INSERT INTO docs(path,title,authors,year,journal,doi,kind,sha256,"
-                "size,mtime,chunk_count,indexed_at,zotero_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "size,mtime,chunk_count,indexed_at,zotero_key,indexed_with) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (key, title, authors, year, journal, doi, f.suffix.lower().lstrip("."),
-                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key))
+                 sha, st.st_size, st.st_mtime, len(chunks), time.time(), zotero_key,
+                 PARSER_TOKEN))
             doc_id = cur.lastrowid
             status = "added"
         db.executemany(
@@ -1818,6 +2017,38 @@ def related_docs(db, kb_key, seed_doc_ids, related_k=5):
     return scored[:related_k]
 
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_SHARE_CACHE = {}   # {db 路径: 中文占比}，按守护进程生命周期缓存
+
+
+def _library_cjk_share(db):
+    """库内正文的中文占比（抽样估算，按库缓存一次）。
+
+    用途：判断"中文 query 在这库里是否吃亏"——BM25 只对 CJK 二元组建索引，若库内正文
+    几乎全英文，中文查询的关键词那一路等于空转，只能靠向量侧跨语言匹配，命中会明显变差。
+    采样 400 个可检索分块，成本可忽略。"""
+    try:
+        key = str(db.execute("PRAGMA database_list").fetchall()[0][2] or "kb")
+    except Exception:
+        key = "kb"
+    if key in _CJK_SHARE_CACHE:
+        return _CJK_SHARE_CACHE[key]
+    share = 0.0
+    try:
+        rows = db.execute("SELECT text FROM chunks WHERE weight > 0 LIMIT 400").fetchall()
+        tot = cjk = 0
+        for r in rows:
+            t = r["text"] or ""
+            tot += len(t)
+            cjk += len(_CJK_RE.findall(t))
+        if tot:
+            share = cjk / tot
+    except Exception:
+        share = 0.0
+    _CJK_SHARE_CACHE[key] = share
+    return share
+
+
 def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_flag=True,
                   related_flag=True, related_k=5):
     t0 = time.time()
@@ -1974,6 +2205,15 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                 resp["related"] = related_docs(db, kb_key, seed_doc_ids, related_k)
         except Exception as e:
             resp["related_error"] = str(e)[:200]
+    # 语言提示：零成本检测（只判断是否含 CJK + 库内中文占比），**不改写查询**。
+    # 归一化的责任在调用方模型（引擎按原样检索，见文件顶部说明）。
+    if _CJK_RE.search(query or ""):
+        share = _library_cjk_share(db)
+        if share < 0.10:
+            resp["lang_note"] = (
+                "库内正文以英文为主（抽样中文占比约 %.1f%%），本次已按原样检索：BM25 关键词路"
+                "基本空转，命中主要由向量侧跨语言匹配决定。建议改用英文术语重查，"
+                "或用 depth=deep 深查。" % (share * 100))
     if use_cache and cache_key is not None and results:
         try:
             db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
@@ -2098,6 +2338,16 @@ def cmd_stats(req):
         rows = db.execute(
             "SELECT path,title,authors,year,kind,chunk_count,indexed_at "
             "FROM docs ORDER BY indexed_at DESC LIMIT 20").fetchall()
+        # 陈旧数据：入库时用的解析器版本（rev）与当前不一致。取 '/rev' 之后的部分做**精确**
+        # 比较，避免 'rev2' 前缀误匹配 'rev20'；NULL / 无标记的老行都算陈旧。
+        stale_docs = db.execute(
+            "SELECT COUNT(*) AS n FROM docs WHERE "
+            "COALESCE(substr(indexed_with, instr(indexed_with, '/rev') + 4), '') <> ?",
+            (str(PARSER_REV),)).fetchone()["n"]
+        stale_sample = [Path(r["path"]).name for r in db.execute(
+            "SELECT path FROM docs WHERE "
+            "COALESCE(substr(indexed_with, instr(indexed_with, '/rev') + 4), '') <> ? "
+            "ORDER BY id LIMIT 5", (str(PARSER_REV),)).fetchall()]
     finally:
         db.close()
     health = {"orphan_chunks": orphan_chunks, "missing_vecs": missing_vecs,
@@ -2108,6 +2358,12 @@ def cmd_stats(req):
         "ok": True,
         "db": str((Path(req.get("kb_root") or ".kb") / "kb.sqlite").resolve()),
         "schema_version": SCHEMA_VERSION,
+        "parser_rev": PARSER_REV,
+        "indexed_with": PARSER_TOKEN,
+        # >0 表示库里有文档是用旧解析器入库的：增量入库不会自愈，可用
+        # kb_ingest(metadata_only=true) 秒级刷新元数据，或 kb_ingest(rebuild=true) 全量重灌
+        "stale_docs": stale_docs,
+        "stale_sample": stale_sample,
         "migration": migration,
         "health": health,
         "docs": docs_n,

@@ -11,8 +11,10 @@
 | DSH 插件 | MCP server | 说明 |
 |---|---|---|
 | `kb_scope` | — | 查询范围/严格模式/会话级检索深度是 **DSH 会话概念**，MCP 版没有；范围与严格性由调用方（agent）按检索来源自行把握，深度由每次调用的 `depth` 参数显式传入 |
-| — | `kb_status` | 轮询后台任务（配合 `kb_ingest` / `kb_zotero` 的 async 模式）|
-| 其余 8 个 | 同左 | 同一引擎、同一行为 |
+| `kb_status` | `kb_status` | 两侧同名同义：轮询后台任务（`running` 返回进度，`done` 返回 totals 与最近文件），配合 `kb_ingest` 的自动转后台与 `kb_zotero(async_mode=true)` |
+| 其余 8 个 | 同左 | 同一引擎、同一行为（`kb_ingest` / `kb_zotero` / `kb_search` / `kb_rag` / `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch`）|
+
+DSH 插件共 10 个工具（上表 8 个 + `kb_scope` + `kb_status`），MCP 版共 9 个：`kb_status` 两侧都有，只有 `kb_scope` 是 DSH 独有。
 
 ## 安装依赖
 
@@ -68,11 +70,18 @@ python "<本仓库路径>/mcp-server/server.py"
 
 ## 异步与超时
 
-- **`kb_ingest` 自动转后台**：目录递归扫描或显式路径的待处理文件数超过 `KB_ASYNC_THRESHOLD`（默认 25）时，自动 fork 独立子进程执行并**立即返回 `job_id`**（`status=running`）——agent 无需知道 async_mode 的存在，直接传整个文献库文件夹也不会超时；文件少则同步执行、直接返回结果。`async_mode=true` 强制后台，`false` 强制同步。
+- **`kb_ingest` 自动转后台**：待处理文件数（目录递归或显式路径）超过 `KB_ASYNC_THRESHOLD`（默认 25）时，本服务自动改用后台执行并**立即返回 `job_id`**（`status=running`）——计数在本服务侧完成（只按扩展名统计，不读内容、不做引擎往返），agent 无需知道 async_mode 的存在，直接传整个文献库文件夹也不会超时；文件少则同步执行、直接返回结果。`async_mode=true` 强制后台，`false` 强制同步。（DSH 插件侧的同名行为由引擎自己计数，见仓库 `README.md`。）
 - **`kb_zotero(async_mode=true)`**：整库迁移在后台执行（数百篇也不怕超时）；`dry_run` 与 `async_mode` 不要同时用。
 - **`kb_status(job_id=...)`**：`running` 时返回已处理进度；`done` 时返回入库 totals 与最近文件；任务完结后引擎自动清理 `.kb-jobs/` 中间文件（result 保留可重复读）；`kb_clear` 也会一并清空 `.kb-jobs/`。`job_id` 有严格格式校验（12 位十六进制）。
 - **宿主超时不影响后台任务**：任务跑在独立子进程里、独立于 MCP 请求；Kimi Work 等宿主的 60s 超时只掐断"等待"这一次调用，任务照常在后台跑完，之后用 `kb_status` 取结果，数据不会丢。
 - **分批不再是唯一手段**：`kb_zotero` 同步模式仍可用 `limit=N` 分批（小批量、想直接拿结果的场景；`kb_ingest` 无 `limit`，要控制批量就传更小的目录/文件列表）；大批量首选 async。
+
+## 入库模式（`metadata_only` / `rebuild` / 陈旧数据）
+
+- **`metadata_only=true`**：只重新抽取标题/作者/年份/期刊/DOI 并写回 `docs` 的元数据字段，**不重切块、不重嵌入**（无需模型，实测约 90 ms/篇，312 篇约 30 s）。存在的理由：增量入库按 sha256 跳过未变更文件，所以引擎改进元数据抽取后老库不会自愈——这是那条秒级、可反复执行的刷新通道。文件内容已变的条目不动（标 `changed`），因为元数据必须与已入库的正文一致。
+- **`rebuild=true`**：按**库内自己记录的路径**原地重新解析全部已入库文档（`paths` 可省略，引擎直接取库内现有路径）。这是安全的全量重灌方式：传目录会因 `force` 跳过 duplicate 判定而把内容重复的文件重复入库。`paths` 省略时不触发自动转后台判定，会同步跑完整个库。
+- **陈旧数据**：每条文档记录入库时所用的解析器版本（`docs.indexed_with`，schema v4）；`kb_stats` 返回 `stale_docs` / `stale_sample` / `parser_rev` / `indexed_with`。`stale_docs > 0` 表示库内仍有旧解析器写入的文档，增量入库不会自愈，用上面的 `metadata_only` 或 `rebuild` 处理（DSH 插件会在该会话首次检索时询问一次处理方式）。
+- **批量阈值**：本服务按待处理文件数（只按扩展名统计）决定是否转后台，超过 `KB_ASYNC_THRESHOLD`（默认 25）时连同 `metadata_only` 刷新一起转后台并返回 `job_id`，用 `kb_status` 轮询；`rebuild=true` 通常不传 `paths`（路径取自库内），计数为 0，因此同步跑完。
 
 ## 用法
 
@@ -89,6 +98,7 @@ python "<本仓库路径>/mcp-server/server.py"
 - **深度模式由调用方传参**：引擎侧 `kb_search` 默认 `quick`（不精排、不渲染引文关联与关联文献）、`kb_rag` 默认 `deep`（全链路）；未传的 `top_k` / `snippet` / `rerank` / `related` 按 depth 取模式化缺省，显式传参永远优先
 - 并发：引擎是单守护进程，`engine_client` 用 `asyncio.Lock` 把引擎请求串行化（一次仅一个在途），宿主并发触发的工具调用会在锁上排队，不会并发冲击引擎
 - MCP 与 DSH 插件并行维护：共用引擎与文档，本目录单独演进
+- **查询请用英文术语串**：`kb_search` / `kb_rag` 的查询按原样送往引擎，引擎不翻译、不扩写；库内正文以英文为主，中文查询会让 BM25 关键词路空转（中文二元组匹配不到英文正文）、只靠向量侧跨语言匹配，同一问题命中明显更差。写法用 3–12 个词、「材料/体系 + 方法/工艺 + 性质/表征」的组合（如 `graphene CVD copper single crystal nucleation suppression`），年份/期刊/作者放 `filters`；只有确实需要中文文献时才用原话另发一条中文查询。查询含中日韩字符而库内几乎全为英文时，引擎会在响应里附加 `lang_note` 说明这一点
 
 ## 已知限制
 
