@@ -29,15 +29,15 @@ A single `kb_rag` call returns evidence in this form. The tool renders its inter
 **Knowledge base sources Top-2**
 deep · reranked with BAAI/bge-reranker-base · cache hit
 
-1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · J. Appl. Phys. · Results · p.4
-> the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
+1. [Chemical vapour deposition of graphene on copper substrates](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · Carbon · Results · p.4
+> graphene domains nucleate on the copper surface and coalesce into a continuous film ... at a growth rate of ~2 um/min
 citations from this evidence ([in-library] = already held, searchable)
-  · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
-    [in-library] [Long-range ordering in layered oxides](https://doi.org/10.5555/12345684) (Author C · 1982 · J. Phys.: Condens. Matter) (this evidence's Ref 4) · [open in Zotero](zotero://open-pdf/library/items/EXAMPLEKEY1)
+  · [Ref 4] Author C, et al. Carbon 48, 1234 (2010)
+    [in-library] [Nucleation and growth of graphene on transition metals](https://doi.org/10.5555/12345684) (Author C · 2010 · Carbon) (this evidence's Ref 4) · [open in Zotero](zotero://open-pdf/library/items/EXAMPLEKEY1)
   · 3 further citations collapsed (Ref 6-8); use the numbers to fetch them
 
 **Related work**
-- [A Practical Guide to Domain Imaging] — Author G et al. · 2020 (same author, related topic)
+- [A Practical Guide to Raman Spectroscopy of Graphene] — Author G et al. · 2020 (same author, related topic)
 ```
 
 The full walkthrough, including the agent's answer and the follow-up that resolves a page number, is in [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md). The example uses neutral placeholder data: authors, journals, and DOIs are fictional.
@@ -125,7 +125,7 @@ The MCP server estimates the pending file count and switches to a background job
 
 ### 4. Ask
 
-- "Which papers in the library discuss magnetoelectric coupling?" — `kb_search`
+- "Which papers in the library discuss graphene growth on copper?" — `kb_search`
 - "Which page of which paper states this?" — read the `page` field on the evidence, or follow the Zotero page link
 - "Answer only from the library" — switch on strict mode with `kb_scope` (DSH)
 - "Quick look" versus "analyze in depth" — `kb_search` defaults to `quick` (sub-second), `kb_rag` defaults to `deep` (reranking, citation linking, related work)
@@ -161,7 +161,7 @@ npx dsh-kb-rag-install --profile web
 | `kb_ingest` | Ingest files or folders: incremental skip, deduplication, section chunking, vectorisation (PDF/TXT/MD/DOCX) | "Ingest the papers folder" |
 | `kb_zotero` | Migrate a local Zotero library, including PDF attachments | "Sync Zotero" |
 | `kb_search` | Hybrid retrieval returning passages with exact provenance (title, authors, year, journal, DOI, page, section) | "Search chemical vapour deposition of graphene on copper" |
-| `kb_rag` | Evidence question answering, top 3 by default, numbered citations | "What governs the domain evolution in this system?" |
+| `kb_rag` | Evidence question answering, top 3 by default, numbered citations | "How does graphene grow on copper during CVD?" |
 | `kb_scope` | Query scope (library only / library plus web / web only), strict mode, retrieval depth | "Switch to strict mode" |
 | `kb_dedup` | Remove duplicate documents, keeping the earliest copy | "Deduplicate" |
 | `kb_clear` | Wipe all documents and indexes; requires `confirm=true` | "Clear the knowledge base" |

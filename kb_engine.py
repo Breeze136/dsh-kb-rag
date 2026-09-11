@@ -892,7 +892,7 @@ def extract_meta(path, text, pdf_meta=None):
         # 作者回退：文件名 '作者 - 年份 - 标题' / 中文 '作者-标题' / '(作者1,作者2)' / '(作者)'（保守）
         authors = _filename_author(stem)
     if title and len(title.split()) < 3 and len(title) <= 24:
-        # 短/过泛标题偏好更长候选（如 pdf_meta 只剩 "Ferroelectrics"，文件名有完整书名）
+        # 短/过泛标题偏好更长候选（如 pdf_meta 只剩期刊名 "Carbon"，文件名有完整标题）
         ft2 = _usable_title(_filename_title(stem))
         if ft2 and len(ft2.split()) >= 3 and len(ft2) > len(title):
             title = ft2

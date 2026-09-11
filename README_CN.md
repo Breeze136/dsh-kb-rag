@@ -29,15 +29,15 @@ kb-rag 是面向 DSH（DeepSeek Harness）以及任何支持 MCP 的 agent 的�
 **知识库来源 Top-2**
 深度检索（deep） · 精排 BAAI/bge-reranker-base · 缓存命中
 
-1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · J. Appl. Phys. · §Results · p.4
-> the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
+1. [Chemical vapour deposition of graphene on copper substrates](https://doi.org/10.5555/12345678) — Author A; Author B · 2024 · Carbon · §Results · p.4
+> graphene domains nucleate on the copper surface and coalesce into a continuous film ... at a growth rate of ~2 um/min
 ↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）
-  · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
-    [库内] [Long-range ordering in layered oxides](https://doi.org/10.5555/12345684)（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
+  · [Ref 4] Author C, et al. Carbon 48, 1234 (2010)
+    [库内] [Nucleation and growth of graphene on transition metals](https://doi.org/10.5555/12345684)（Author C · 2010 · Carbon）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
   ↳ 另有 3 条库外引文未展开（Ref 6–8），补库时可按编号定位
 
 **关联文献（可作补充建议）**
-- [A Practical Guide to Domain Imaging] — Author G et al. · 2020（同作者 · 主题相似）
+- [A Practical Guide to Raman Spectroscopy of Graphene] — Author G et al. · 2020（同作者 · 主题相似）
 ```
 
 完整流程示例（包括 agent 的回答，以及用于确定页码的追问）见 [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md)。上例使用中性占位数据：作者、期刊与 DOI 均为虚构。
@@ -125,7 +125,7 @@ MCP 服务器会估算待处理文件数，超过 `KB_ASYNC_THRESHOLD`（默认 
 
 ### 4. 提问
 
-- “文库中哪些论文讨论了磁电耦合？” — `kb_search`
+- “文库中哪些论文讨论了铜上石墨烯的生长？” — `kb_search`
 - “这是哪篇论文的哪一页？” — 读取证据上的 `page` 字段，或跟随 Zotero 页码链接
 - “只依据文库作答” — 使用 `kb_scope` 开启严格模式（DSH）
 - “快速查看”与“深入分析” — `kb_search` 默认 `quick`（亚秒级），`kb_rag` 默认 `deep`（重排、引用关联、相关文献）
