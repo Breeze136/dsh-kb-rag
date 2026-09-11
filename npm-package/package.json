@@ -1,7 +1,7 @@
 {
   "name": "dsh-kb-rag",
   "version": "1.6.3",
-  "description": "Local literature knowledge-base RAG tools for DSH: hybrid retrieval + rerank + cited answers over a SQLite index (bundled Python engine).",
+  "description": "Local literature knowledge-base RAG for DSH: hybrid BM25 + vector retrieval, cross-encoder reranking, cited answers with section- and page-level provenance, over a SQLite index.",
   "type": "module",
   "main": "lib/index.js",
   "bin": {
@@ -28,13 +28,15 @@
   ],
   "keywords": [
     "dsh",
+    "dsh-plugin",
     "rag",
     "knowledge-base",
     "literature",
     "zotero",
     "sqlite",
     "embedding",
-    "rerank"
+    "rerank",
+    "mcp"
   ],
   "license": "MIT",
   "publishConfig": {
