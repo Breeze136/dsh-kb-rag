@@ -103,7 +103,7 @@ async def kb_search(query: str, depth: str = "quick", top_k: int | None = None,
                     kb_root: str = "", authors: str = "", title: str = "",
                     journal: str = "", kind: str = "", section: str = "",
                     year: str = "") -> str:
-    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。depth 双模式：quick（默认）=快速检索，查到信息马上给——工具返回后立即作答，一两句话直接给用户要的信息，不展开背景不做延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 "graphene CVD copper single crystal nucleation suppression"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
+    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。depth 双模式：quick（默认）=快速检索，查到信息马上给——工具返回后立即作答，一两句话直接给用户要的信息，不展开背景不做延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 "graphene CVD copper single crystal nucleation suppression"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤；其中 journal 目前只由 Zotero 迁移填充，kb_ingest 入库的文档该字段为 NULL，用它过滤通常零命中。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
     call = {"query": query, "depth": depth, "mode": mode,
@@ -122,7 +122,7 @@ async def kb_rag(query: str, depth: str = "deep", top_k: int | None = None,
                  kb_root: str = "", authors: str = "", title: str = "",
                  journal: str = "", kind: str = "", section: str = "",
                  year: str = "") -> str:
-    """在知识库中检索证据片段供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。depth 双模式：deep（默认）=深度检索，精排+引文链+关联文献全开，回答可跨文献综合论述（适合领域调研）；quick=快速检索，仅基于少量证据直接给答案、不展开。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内"；②「建议补库（循引文发现）」——citations 未命中条目，注明被 Ref n 引用、尚不在库内；③「相关文献」——related 列表（元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列。"""
+    """在知识库中检索证据片段供直接作答：基于 evidence 回答，每个事实标注引用编号 [n]。depth 双模式：deep（默认）=深度检索，精排+引文链+关联文献全开，回答可跨文献综合论述（适合领域调研）；quick=快速检索，仅基于少量证据直接给答案、不展开。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤；其中 journal 目前只由 Zotero 迁移填充，kb_ingest 入库的文档该字段为 NULL，用它过滤通常零命中。引用写成可点击 markdown：[作者, 年份, 期刊](https://doi.org/DOI)；无 DOI 写成 [作者, 年份, 文件名]。资料不足明确说\"根据现有资料无法回答\"；多源冲突分别列出。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内"；②「建议补库（循引文发现）」——citations 未命中条目，注明被 Ref n 引用、尚不在库内；③「相关文献」——related 列表（元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
     call = {"query": query, "depth": depth,

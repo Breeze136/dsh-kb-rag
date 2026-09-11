@@ -99,6 +99,7 @@ python "<本仓库路径>/mcp-server/server.py"
 - 并发：引擎是单守护进程，`engine_client` 用 `asyncio.Lock` 把引擎请求串行化（一次仅一个在途），宿主并发触发的工具调用会在锁上排队，不会并发冲击引擎
 - MCP 与 DSH 插件并行维护：共用引擎与文档，本目录单独演进
 - **查询请用英文术语串**：`kb_search` / `kb_rag` 的查询按原样送往引擎，引擎不翻译、不扩写；库内正文以英文为主，中文查询会让 BM25 关键词路空转（中文二元组匹配不到英文正文）、只靠向量侧跨语言匹配，同一问题命中明显更差。写法用 3–12 个词、「材料/体系 + 方法/工艺 + 性质/表征」的组合（如 `graphene CVD copper single crystal nucleation suppression`），年份/期刊/作者放 `filters`；只有确实需要中文文献时才用原话另发一条中文查询。查询含中日韩字符而库内几乎全为英文时，引擎会在响应里附加 `lang_note` 说明这一点
+- **`filters.journal` 通常用不了**：期刊字段目前只由 Zotero 迁移路径填充（`publicationTitle` / `journalAbbreviation`），用 `kb_ingest` 入库的文档该字段为 `NULL`，按 journal 过滤会零命中；限定来源请改用 authors / year / title / section。这是已知缺口，未来的修法见 `docs/BACKLOG.md` §2.8（与 DOI 反查方案合并）
 
 ## 已知限制
 

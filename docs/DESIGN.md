@@ -50,6 +50,7 @@ cache(key PK, payload, created)      -- 查询缓存，入库变更时整体失�
   - **DOI 级联**：首页文本 DOI → **XMP 兜底**（`dc:identifier` / `prism:doi` 等；部分出版商 PDF 正文根本不印 DOI，实测 312 篇里靠 XMP 补回 16 篇）→ arXiv 编号。一次元数据刷新后库内 DOI 覆盖率约从 46% 升到 66%
   - **作者**：PDF `/Author` 不再无条件信任——形如单个「姓, 名」且首页出现 `et al` 或 `&`、或文件名带多作者信号时，判为排版/制作信息并丢弃，再走文件名回退。作者字段错误会安静地破坏"引文 → 库内匹配"（匹配规则含第一作者 + 年份）
   - **标题**：明显是制作产物的（如 `*.indd`）直接拒绝；级联为 PDF 元数据标题 → 首页最大字号标题 → 首页首个标题 → 文件名
+  - **`journal` 不由本通道填充**：`extract_meta()` 里 `journal` 恒为 `None`，只有 Zotero 迁移（`cmd_zotero` 读 `publicationTitle` / `journalAbbreviation`）会写入。因此 `kb_ingest` 建起来的库该列为 `NULL`，`filters.journal` 必然零命中——工具描述与 README 都已写明这一点；补全方案与 DOI 反查（§2.6）合并评估，见 `docs/BACKLOG.md` §2.8
 - **为什么要有元数据刷新**：增量入库按 sha256 跳过未变文件，解析器的改进不会自动作用于老库（实测一次抽取改动会漏掉数十篇的 DOI，直到一次全量重灌才暴露）。因此每行记录写入它的解析器版本 `docs.indexed_with`，`kb_stats` 据此报 `stale_docs` / `stale_sample`，宿主提示用户选择刷新元数据或全量重灌
 
 ## 5. 检索流水线（search/rag 命令）
@@ -73,6 +74,7 @@ query → filters SQL 预过滤（authors/title/journal/kind/section/year）+ �
 - 查询缓存：key = sha1(query,filters,top_k,snippet,mode,rerank_flag,reranker名,related_flag,related_k)，命中零重算；任何入库变更整体失效（`DELETE FROM cache`）
 - 降级链：向量缺失→纯关键词；精排失败→融合序直接输出；Cross-Encoder 不可用→`bge-large-en-v1.5` 双塔余弦重排
 - 语言提示：查询含 CJK 且库内中文占比 < 10% 时，响应附加 `lang_note`（说明 BM25 关键词路基本空转、命中主要由向量侧跨语言匹配决定）。**引擎不改写、不翻译查询**：归一化由调用方模型负责，工具描述要求查询写成 3–12 词的英文术语串「材料/体系 + 方法/工艺 + 性质/表征」，限定条件（年份/期刊/作者）放进 `filters`，需要中文文献时再用原话另发一条
+- 预过滤字段：authors/title/journal/kind/section/year 直接映射到 `docs` 对应列。注意 **`journal` 只由 Zotero 迁移填充**（见 §4），`kb_ingest` 入库的库里该列为 `NULL`，`filters.journal` 会零命中；限定来源请用 authors/year/title/section
 
 ## 6. 嵌入与精排模型
 

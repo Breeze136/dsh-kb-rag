@@ -52,7 +52,7 @@ def connect(kb_root):
 2. **旧引擎写新库兼容**：旧版 INSERT 用显式列清单（不含新列）→ 新列落默认 NULL，不报错。
 3. **无版本门控的幂等**：迁移语句每次连接都执行，不依赖"当前 schema 版本"判断，因此重复运行/往返升级都无害。
 
-### 当前 schema（1.6.6，`user_version = 4`）
+### 当前 schema（1.6.7，`user_version = 4`）
 
 ```sql
 docs(id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,

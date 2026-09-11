@@ -772,7 +772,7 @@ _JUNK_TITLE_RE = re.compile(
     r"^intechopen|^page\s+\d+\s+of|^[\w\-]+\.(docx?|pptx?|tex)$|"
     r"^[\w]+(_[\w]+)+$|^doi\s*:",
     re.I)
-# PDF 的 /Author 常常是排版/制作人员（实测 "Simpson, Derna" 对应 Nature 系 PDF 的排版员），
+# PDF 的 /Author 常常是排版/制作人员（实测某 Nature 系 PDF 的 /Author 是排版员 "Smith, John"），
 # 形如单个 "姓, 名"；只有当首页或文件名同时给出多作者信号时才判定为生产信息并弃用。
 _PROD_AUTHOR_RE = re.compile(r"^[A-Z][A-Za-z'’\-]+,\s*[A-Z][A-Za-z'’\-]*(?:\s+[A-Z]\.?)?$")
 _HEAD_SKIP_RE = re.compile(
@@ -841,7 +841,7 @@ def _clean_authors(s):
 def _looks_production_author(author, page1, stem):
     """判断 PDF /Author 是否为排版/制作信息（而非作者）。
 
-    判据（保守，宁可漏判不可错判）：形如单个 "姓, 名"（如 "Simpson, Derna"），
+    判据（保守，宁可漏判不可错判）：形如单个 "姓, 名"（如 "Smith, John"，占位示例），
     且首页出现 "et al" / " & " 或文件名带 "和"/"&" 等多作者信号。
     实测案例：某 Nature 系 PDF 的 /Author 是排版员，导致库内作者字段错误，
     进而使"引文库内匹配"的作者+年份规则失效。"""
@@ -943,7 +943,7 @@ def extract_meta(path, text, pdf_meta=None):
         # 文件名回退：剥 '作者 - 年份 - ' 前缀与 (Z-Library)/(作者1,作者2) 尾巴，兼容中文 '作者-标题'
         title = _usable_title(_filename_title(stem)) or stem
     if authors and _looks_production_author((pdf_meta or {}).get("author"), page1, stem):
-        # PDF /Author 是排版/制作人员（如 "Simpson, Derna"）：弃用，交给下面的文件名回退
+        # PDF /Author 是排版/制作人员（形如 "Smith, John" 的单人姓名）：弃用，交给下面的文件名回退
         authors = None
     if not authors:
         # 作者回退：文件名 '作者 - 年份 - 标题' / 中文 '作者-标题' / '(作者1,作者2)' / '(作者)'（保守）
