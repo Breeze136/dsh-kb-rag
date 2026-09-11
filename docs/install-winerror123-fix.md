@@ -30,7 +30,7 @@ $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 ## 二、复现
 
-环境：Windows、Python 3.10.9 (Miniconda3)、用户名 `岳通`（任何非 ASCII 用户名均可）
+环境：Windows、Python 3.10.9 (Miniconda3)、用户名含非 ASCII 字符（任何非 ASCII 用户名均可复现）
 
 ```powershell
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
@@ -69,7 +69,7 @@ $req = '{"kb_root":"' + ($smokeDir -replace '\\', '/') + '"}'
 $out = $req | & $Py $Engine stats 2>&1 | Out-String     # ← 整个脚本唯一的管道
 ```
 
-1. `GetTempPath()` 返回 `C:\Users\岳通\AppData\Local\Temp\`，路径含中文；
+1. `GetTempPath()` 返回 `C:\Users\<用户名>\AppData\Local\Temp\`，路径含中文；
 2. 拼成 JSON 后**经 stdin 管道**送给 `python kb_engine.py stats`；
 3. 管道写给原生进程 stdin 的内容按 **ASCII** 编码，**所有非 ASCII 字符静默变成 `?`**；
 4. 引擎按 `sys.stdin.buffer.read().decode("utf-8")` 严格解析，拿到的就是字面 `??`；
@@ -177,7 +177,7 @@ PowerShell 内部的 `Test-Path`，不经过管道，不受影响；`scripts/ins
 ## 六、影响面
 
 **所有用户名含中文（或其他非 ASCII 字符）的 Windows 用户**都会在安装时撞上这一步。
-中文 Windows 用户名在国内极其普遍（`C:\Users\张三`、`C:\Users\岳通`…），
+中文 Windows 用户名在国内极其普遍（如 `C:\Users\<用户名>`），
 所以实际受影响人群不小。用户侧的临时绕行办法是：
 
 ```powershell

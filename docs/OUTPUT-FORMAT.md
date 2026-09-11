@@ -80,7 +80,7 @@
 - **打开文献细看时**：证据卡片携带 `§<section> · p.<页码>`（可折叠/悬浮），或直接
   Zotero 跳页（`?page=N`，Zotero 7 支持）。
 - **追问时**：用户问"这句话在文献哪里？"→ agent 读证据 JSON 的 `page` 字段回答，
-  例如："出自 [3]（Author A et al. 2024, J. Appl. Phys.）的 §Results · p.4"。
+  例如："出自 [3]（Author A et al. 2024, Carbon）的 §Results · p.4"。
 - **数据支持**：`chunks` 表 `page_start/page_end`（schema v3），来自 read_document
   的 `meta['_paras']` 段落→页码映射；检索结果/evidence 带 `page` 字段。
   txt/md/docx 与旧数据无页码（NULL）→ 降级为仅章节。
@@ -89,7 +89,7 @@
 
 > 下面用一组**中性示例数据**演示输出形态（作者/期刊/DOI 均为占位，非真实文献）。
 >
-> 问：这类层状氧化物的畴结构在外场下如何演化？这个结论能在原文哪里找到？
+> 问：化学气相沉积中石墨烯在铜基底上如何生长？这个结论能在原文哪里找到？
 >
 > **工具返回（MCP 渲染，agent 可见）：**
 >
@@ -97,36 +97,36 @@
 > **知识库来源 Top-2**
 > 混合检索 · 精排 BAAI/bge-reranker-base · 386ms
 >
-> 1. [Field-driven domain evolution in layered oxide thin films](https://doi.org/10.0000/example.2024.001) — Author A; Author B · 2024 · J. Appl. Phys. · §Results · p.4
-> > the domains reorient in the plane defined by the easy axis and the applied field ... over a length scale of ~65 nm
+> 1. [Chemical vapour deposition of graphene on copper substrates](https://doi.org/10.0000/example.2024.001) — Author A; Author B · 2024 · Carbon · §Results · p.4
+> > graphene domains nucleate on the copper surface and coalesce into a continuous film ... at a growth rate of ~2 um/min
 > ↳ 引文补充（本证据的参考文献；[库内]=已在库内，可检索引用）
->   · [Ref 4] Author C, et al. J. Phys.: Condens. Matter 15, 4835 (1982)
->     [库内] [Long-range ordering in layered oxides](https://doi.org/10.0000/example.1982.004)（Author C · 1982 · J. Phys.: Condens. Matter）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
->   · [Ref 9] Author D, et al. — 相关唯象模型
+>   · [Ref 4] Author C, et al. Carbon 48, 1234 (2010)
+>     [库内] [Nucleation and growth of graphene on transition metals](https://doi.org/10.0000/example.2010.004)（Author C · 2010 · Carbon）（即本证据的 Ref 4，可检索引用）· [Zotero 打开](zotero://open-pdf/library/items/EXAMPLEKEY1)
+>   · [Ref 9] Author D, et al. — 生长动力学模型
 >   ↳ 另有 3 条库外引文未展开（Ref 6–8），补库时可按编号定位
 > [DOI 10.0000/example.2024.001](https://doi.org/10.0000/example.2024.001) · score 0.98
 >
-> 2. [Symmetry-allowed canting in oxide thin films](https://doi.org/10.0000/example.2005.002) — Author E; Author F · 2005 · Phys. Rev. B · §Body · p.2
-> > If the moments are oriented perpendicular to the {111} direction, the symmetry also permits a canting…
+> 2. [Raman spectroscopy of graphene layers on copper](https://doi.org/10.0000/example.2005.002) — Author E; Author F · 2005 · Phys. Rev. B · §Body · p.2
+> > the 2D band shifts with the number of layers, which makes Raman spectroscopy a reliable thickness probe…
 > [DOI 10.0000/example.2005.002](https://doi.org/10.0000/example.2005.002) · score 0.87
 >
 > **关联文献（可作补充建议）**
-> - [A Practical Guide to Domain Imaging](https://doi.org/10.0000/example.2020.003) — Author G et al. · 2020（同作者·主题相似 · score 4.4）
+> - [A Practical Guide to Raman Spectroscopy of Graphene](https://doi.org/10.0000/example.2020.003) — Author G et al. · 2020（同作者·主题相似 · score 4.4）
 > ```
 >
 > **Agent 回答：**
 >
-> 该体系的序参量是"长程有序 + 外场可调畴结构"的复合形态：
-> - 本征长程有序给出基本对称性约束（低温下稳定）；取向偏离主轴时允许次级有序参量[2]；
-> - 外场驱动畴重取向：畴在易轴与外场张成的平面内旋转，特征尺度 ≈65 nm，
->   由唯象自由能描述[1]。
+> 该体系的核心是铜表面石墨烯的成核与长大过程：
+> - 甲烷在高温下裂解，碳原子在铜表面成核并形成石墨烯畴[2]；
+> - 随生长时间推移，畴逐渐连成连续薄膜，生长速率约 2 μm/min，
+>   可由表面反应动力学描述[1]。
 >
 > **引文补充建议（出自本次证据的参考文献）**
-> - [Author C et al., 1982, J. Phys.: Condens. Matter](https://doi.org/10.0000/example.1982.004)（出自证据 1 的引文 Ref 4：该有序结构的早期实验发现）
-> - [Author D 唯象模型](https://doi.org/10.0000/example.2024.001)（出自证据 1 的引文 Ref 9）
+> - [Author C et al., 2010, Carbon](https://doi.org/10.0000/example.2010.004)（出自证据 1 的引文 Ref 4：石墨烯在过渡金属表面生长的早期研究）
+> - [Author D 生长动力学模型](https://doi.org/10.0000/example.2024.001)（出自证据 1 的引文 Ref 9）
 >
 > **追问示例** —— "这个结论原文在哪？" → agent 读 `page` 字段：
-> > 出自 [1]（Author A et al. 2024, J. Appl. Phys.）**§Results · 第 4 页**，点击直达：
+> > 出自 [1]（Author A et al. 2024, Carbon）**§Results · 第 4 页**，点击直达：
 > > **[在 Zotero 打开到 p.4](zotero://open-pdf/library/items/EXAMPLEKEY1?page=4)**
 > > [2] 出自 Author E & Author F 2005, Phys. Rev. B **§Body · 第 2 页**：[跳转 p.2](zotero://open-pdf/library/items/EXAMPLEKEY2?page=2)
 > 说明：`§Results · p.4` 中 p = **PDF 物理页码**（1 基），对两栏/扫描排版同样可靠（实测两栏
