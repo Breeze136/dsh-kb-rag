@@ -1347,24 +1347,6 @@ def cmd_ingest(req):
     rebuild = bool(req.get("rebuild"))               # 按库内现有路径原地重灌全部文档
     paths = req.get("paths") or []
     progress_path = req.get("progress_path")   # 异步任务专用：后台进程逐文件回写进度
-    # 大批量自动转后台（宿主侧无需自己数文件、也无需访问文件系统）：
-    # progress_path 非空说明本进程就是那个后台任务，绝不能再 fork（防递归）。
-    if req.get("async_if_large") and not progress_path:
-        try:
-            threshold = int(os.environ.get("KB_ASYNC_THRESHOLD", "25"))
-        except ValueError:
-            threshold = 25
-        if not rebuild:
-            pending = _count_candidates(paths, limit=threshold + 1)
-            if pending > threshold:
-                sub = dict(req)
-                sub.pop("async_if_large", None)
-                sub["command"] = "ingest"
-                resp = cmd_ingest_async(sub)
-                if isinstance(resp, dict):
-                    resp["background"] = True
-                    resp["pending_files"] = pending
-                return resp
     db = connect(kb_root)
     if rebuild and not paths:
         # 原地重灌：从库里取现有路径，而不是让调用方传目录——force 会绕过去重检测
@@ -1375,6 +1357,28 @@ def cmd_ingest(req):
         db.close()
         return {"ok": False,
                 "error": "paths is required（或用 rebuild=true 重灌库内全部已入库文档）"}
+    # 大批量自动转后台。计数放在引擎里完成，宿主无需访问文件系统：
+    # - progress_path 非空 = 本进程就是那个后台任务，绝不再 fork（防递归）；
+    # - metadata_only 不转后台：它是秒级操作（约 90 ms/篇，312 篇约 30 s），同步返回能让调用方
+    #   直接拿到 meta_updated 统计；
+    # - rebuild 用**库内篇数**作为待处理量（不能按目录数文件：rebuild 不传 paths）。全量重灌是
+    #   分钟级操作，必须转后台，否则会长时间占住守护进程的请求队列（后续工具调用全部排队）。
+    if req.get("async_if_large") and not progress_path and not metadata_only:
+        try:
+            threshold = int(os.environ.get("KB_ASYNC_THRESHOLD", "25"))
+        except ValueError:
+            threshold = 25
+        pending = len(paths) if rebuild else _count_candidates(paths, limit=threshold + 1)
+        if pending > threshold:
+            db.close()
+            sub = dict(req)
+            sub.pop("async_if_large", None)
+            sub["command"] = "ingest"
+            resp = cmd_ingest_async(sub)
+            if isinstance(resp, dict):
+                resp["background"] = True
+                resp["pending_files"] = pending
+            return resp
     files = []
     totals = {"added": 0, "updated": 0, "skipped": 0, "errors": 0, "duplicates": 0,
               "chunks": 0, "vectors": 0,
