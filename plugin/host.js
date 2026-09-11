@@ -390,6 +390,30 @@ return {
         return renderIngestAsync(_args, value)
       }
       if (value.mode === 'metadata_only') return renderMetaRefresh(_args, value)
+      // Zotero 预演（dry_run）：引擎返回 candidates + 全部候选清单，totals 全 0——
+      // 按入库结果渲染会显示成"入库完成 新增 0…"，看起来像什么都没干。
+      if (value.dry_run === true) {
+        const cands = Array.isArray(value.files) ? value.files : []
+        const n = typeof value.candidates === 'number' ? value.candidates : cands.length
+        const dry = []
+        dry.push('**Zotero 预演**（dry_run，未写入库）· 候选 ' + n + ' 篇')
+        if (value.zotero_db) dry.push('zotero.sqlite：' + String(value.zotero_db))
+        const missing = cands.filter(function (f) { return f.status === 'missing' }).length
+        if (missing > 0) dry.push('附件缺失（正常跳过）' + missing + ' 篇')
+        if (cands.length > 0) {
+          dry.push('')
+          dry.push('**候选（前 8 条）**')
+          cands.slice(0, 8).forEach(function (f) {
+            const nm = String(f.path || '').split(/[\\/]/).pop()
+            const bits = [f.year ? String(f.year) : null, f.status || null].filter(Boolean).join(' · ')
+            dry.push('· ' + nm + (bits.length > 0 ? ' · ' + bits : ''))
+          })
+          if (n > cands.length) dry.push('…另 ' + (n - cands.length) + ' 篇')
+        }
+        dry.push('')
+        dry.push('去掉 dry_run 即执行真实迁移；大批量会自动转后台，用 kb_status 轮询。')
+        return [{ type: 'text', text: dry.join('\n') }]
+      }
       const totals = value.totals || {}
       const files = Array.isArray(value.files) ? value.files : []
       const lines = []
@@ -539,7 +563,9 @@ return {
       const quick = value.depth === 'quick'
       const lines = []
       lines.push('**知识库来源 Top-' + items.length + '**' + (quick ? '（快速检索）' : (value.depth === 'deep' ? '（深度检索）' : '')))
-      lines.push('混合检索' + (value.reranker ? ' · 精排 ' + value.reranker.split(' ')[0] : '') + (value.cached === true ? ' · 缓存命中' : '') + (typeof value.ms === 'number' ? ' · ' + value.ms + 'ms' : '') + (value.strict === true ? ' · 严格模式' : ''))
+      // 实际使用的检索路径（引擎会因 mode 参数或向量不可用而降级）：写死"混合检索"会误导
+      const MODE_LABEL = { hybrid: '混合检索', keyword: '关键词检索', vector: '向量检索' }
+      lines.push((MODE_LABEL[value.mode_used] || '混合检索') + (value.reranker ? ' · 精排 ' + value.reranker.split(' ')[0] : '') + (value.cached === true ? ' · 缓存命中' : '') + (typeof value.ms === 'number' ? ' · ' + value.ms + 'ms' : '') + (value.strict === true ? ' · 严格模式' : ''))
       // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
       if (typeof value.lang_note === 'string' && value.lang_note.length > 0) {
         lines.push('提示：' + value.lang_note)
