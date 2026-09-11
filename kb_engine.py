@@ -330,7 +330,9 @@ def _apply_ref_spans(paragraphs, pages, spans):
             out_p.append(joined[cur:e].strip())
             if pages is not None:
                 out_g.append(pages[i])
-    return out_p, ref_paras, out_g
+    # pages 为 None 时保持 None 语义（原先返回空列表 []，会让下游把"无页信息"
+    # 误当成"有页列表但为空"；当前调用方都有 len() 守卫，属预防性修正）
+    return out_p, ref_paras, (None if pages is None else out_g)
 
 
 def _refs_block_like(text, min_entries=4, min_frac=0.5):
@@ -428,6 +430,7 @@ def chunk_document(full_text, paras=None):
 
     sectioned = []  # (section, weight, [(para_no, text)])
     section, weight = "Front matter", 1.0
+    resume_section, resume_weight = "Front matter", 1.0   # 引文链打断前的章节，链结束还原
     buf = []
     structured = False
     para_no = 0
@@ -445,13 +448,17 @@ def chunk_document(full_text, paras=None):
             if section != "References":
                 structured = True
                 flush()
+                resume_section, resume_weight = section, weight   # 记住被打断的章节
                 section, weight = "References", 0.0
             buf.append((para_no, p))
             continue
         if section == "References":
-            # 引文链结束，回到正文
+            # 引文链结束：**还原**被打断的章节，而不是一律重置为 Front matter。
+            # Nature 式论文的正文 refs 与 Methods refs 是两段离散区间，链后有正文；
+            # 原实现会把这段正文标成 §Front matter 且权重掉到 1.0，导致
+            # section 过滤（如 Methods）漏召回、排序权重偏低、结果里 §标签错误。
             flush()
-            section, weight = "Front matter", 1.0
+            section, weight = resume_section, resume_weight
         segs = [(para_no, s) for s in split_inline_headings(p) if s]
         for j, (pno, seg) in enumerate(segs):
             hit = match_section_prefix(seg, allow_long=(j > 0))
@@ -465,10 +472,14 @@ def chunk_document(full_text, paras=None):
             if CAPTION_RE.match(seg):
                 structured = True
                 flush()
+                # 图注独立成块，但**不要**把后续正文重置为 Front matter：
+                # Results 中插图的图注之后的段落原会被标成 §Front matter/1.0
+                # （与引文链同类缺陷），这里同样还原被打断的章节。
+                caption_resume = (section, weight)
                 section, weight = "Figure/Table", 1.0
                 buf.append((pno, seg))
                 flush()
-                section, weight = "Front matter", 1.0
+                section, weight = caption_resume
                 continue
             buf.append((pno, seg))
     flush()
@@ -1964,8 +1975,15 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
         except Exception as e:
             resp["related_error"] = str(e)[:200]
     if use_cache and cache_key is not None and results:
-        db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
-                   (cache_key, json.dumps(resp, ensure_ascii=True), time.time()))
+        try:
+            db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
+                       (cache_key, json.dumps(resp, ensure_ascii=True), time.time()))
+        except sqlite3.OperationalError as ex:
+            # 缓存只是加速：异步入库的子进程正持有写锁时会撞锁，而结果已经算完——
+            # 不能因为写缓存失败让整次检索作废（与上面 related_docs 的容错一致）。
+            # 锁定/busy 以外的 OperationalError 仍然上抛，不掩盖真实故障。
+            if "locked" not in str(ex).lower() and "busy" not in str(ex).lower():
+                raise
     return resp
 
 
@@ -2206,17 +2224,43 @@ def cmd_zotero(req):
     files = []
     totals = {"added": 0, "updated": 0, "skipped": 0, "errors": 0, "missing": 0,
               "duplicates": 0, "chunks": 0, "vectors": 0}
+    processed = 0
+    progress_path = req.get("progress_path")   # 异步任务专用：与 cmd_ingest 同语义
+
+    def _prog():
+        if progress_path:
+            try:
+                # 原子写：临时文件 + rename，避免轮询方读到半截 JSON
+                tmp = progress_path + ".tmp"
+                Path(tmp).write_text(json.dumps(
+                    {"status": "running", "processed": processed,
+                     "errors": totals["errors"], "chunks": totals["chunks"]},
+                    ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, progress_path)
+            except Exception:
+                pass
+
     try:
         for full, meta, ptype in entries:
             if not os.path.isfile(full):
                 totals["missing"] += 1
                 files.append({"path": full, "status": "missing", "type": ptype})
+                processed += 1
+                _prog()
                 continue
             if dry_run:
                 files.append({"path": full, "status": "candidate", "type": ptype,
                               "title": meta.get("title"), "year": meta.get("year")})
+                processed += 1
+                _prog()
                 continue
             _ingest_file(db, Path(full), force, files, totals, meta)
+            processed += 1
+            # 与 cmd_ingest 对齐的逐文件 commit：整批单事务有两个后果——
+            # ① 任务被杀（宿主强杀/断电）时把已入库文件全部回滚；
+            # ② 写锁窗口覆盖整批，异步入库期间同库所有写命令都要等满 busy timeout。
+            db.commit()
+            _prog()
         if totals["added"] or totals["updated"]:
             db.execute("DELETE FROM cache")
         db.commit()
@@ -2295,7 +2339,7 @@ def cmd_clear(req):
         try:
             jdir = _jobs_dir(req.get("kb_root") or ".kb")
             if jdir.exists():
-                for f in jdir.glob("*.json"):
+                for f in jdir.glob("*.json*"):   # 含原子写的 *.json.tmp 残留
                     f.unlink(missing_ok=True)
         except Exception:
             pass
@@ -2589,12 +2633,19 @@ def cmd_ingest_async(req):
         jf = jdir / (job_id + ".job.json")
         jf.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
         script = os.path.abspath(sys.argv[0]) if (sys.argv and sys.argv[0]) else os.path.abspath(__file__)
+        if not os.path.isfile(script):
+            # 脚本路径不存在时直接失败并清掉 job 文件：否则 kb_status 会长期读到 running
+            jf.unlink(missing_ok=True)
+            return {"ok": False, "error": "后台任务启动失败：找不到引擎脚本 %s" % script}
         proc = subprocess.Popen([sys.executable, script, "run_job", str(jf)],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # 启动校验：脚本路径/解释器错误会让子进程在数毫秒内退出；
-        # 短窗口内 poll() 非 None 说明启动即失败，报错并清理 job 文件（result 未写，任务不留残骸）。
+        # 启动校验：等一小段窗口再读退出码。原实现是 Popen 后**立刻** poll()，
+        # 那基本抓不到失败——python.exe 即使只是"打开不存在的脚本"也要数十毫秒才退出，
+        # 于是最可能的启动失败（路径/解释器错误）仍会留下永不结束的 running 任务。
         try:
-            rc = proc.poll()
+            rc = proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            rc = None
         except Exception:
             rc = None
         if rc is not None:

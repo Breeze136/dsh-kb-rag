@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.6.5] - 并发写锁容错 + zotero 逐文件提交 + 引文链后章节还原
+
+### 并发与后台任务（补上 1.6.2 未覆盖的两处）
+- **检索缓存写不再让整次检索失败**：`_search_core` 结尾的 `INSERT OR REPLACE INTO cache` 此前没有锁容错——异步入库子进程持有写锁时，已经算完的检索会以 `database is locked` 整次报错（DSH/MCP 侧表现为工具调用失败）。现按"缓存只是加速"处理：只吞 locked/busy，其他 `OperationalError` 照旧上抛
+- **`kb_zotero` 改为逐文件 commit + 进度回写**：原实现整批单事务、且从不写 progress——异步整库迁移既看不到进度，任务被杀还会把已入库文件**全部回滚**（与 `cmd_ingest` 语义不一致），写锁窗口也覆盖整批。现与 `cmd_ingest` 对齐：每篇 `_ingest_file` 后 `db.commit()` + `_prog()`
+- **异步启动校验真正生效**：原实现 `Popen` 后**立刻** `poll()`，而 python 即使只是打开不存在的脚本也要数十毫秒才退出，最可能的启动失败（脚本路径/解释器错误）抓不到、留下长期 running 的任务。现改为 `wait(timeout=0.5)`，并在 Popen 前校验引擎脚本存在，失败即清掉 job 文件
+- 订正 1.6.2 的两处过宽表述（见该节内注）
+
+### 章节标注
+- **引文链结束后还原被打断的章节**：原实现一律重置为 `Front matter`（权重 1.0）。Nature 式论文的正文 refs 与 Methods refs 是**两段离散链**，链后正文因此被标错章节——`filters.section` 精确过滤（如 Methods）会漏召回、hybrid 排序权重偏低、结果里的 §标签也是错的。现进入 References 时暂存 `(section, weight)`，链结束还原（实测：链后段落由 `Front matter/1.0` 变为 `Methods/1.2`）
+- **图注块之后的正文同样还原章节**（同类缺陷）：`Fig./Table` 图注原实现处理完后把章节重置为 `Front matter`，Results 中插图之后的所有段落都丢章节与权重；现图注仍独立成 `Figure/Table` 块，但其后的正文回到图注前的章节
+
+### 卫生
+- `kb_clear` 清理 `.kb-jobs/` 时连原子写的 `*.json.tmp` 一起清（原先 glob `*.json` 不匹配，进程在 rename 前被杀就会留下清不掉的残留）
+- `_apply_ref_spans` 在无页信息时返回 `None` 而非 `[]`，保持"无页 = None"语义（当前调用方都有 `len()` 守卫，属预防性修正）
+
+### 实测
+- 新增 16 项回归验证并全部通过：缓存撞锁时检索仍返回结果、无竞争时缓存照常命中、zotero 中途中断后**首篇已落盘且进度已回写 processed=1**、引文链后章节还原为 Methods/1.2、图注独立成块且其后正文还原、子进程立即退出被识别且不留 job、引擎脚本缺失时直接失败、`kb_clear` 连 `.tmp` 一起清
+
 ## [1.6.4] - kb_fetch 描述订正、文档与元数据同步
 
 - **文档与元数据同步到 1.6.3**：`plugin/kbrag.plugin.json` 描述补全新能力（混合检索 + 交叉编码器精排 + 章节/页码级出处 + 快速/深度双模式）；`plugin/host.js`、`plugin/client.js` 头部注释与工具注册日志的版本号 `v1.0.0` → `v1.6.3`；`npm-package/package.json` 的 description 与 keywords 同步（补 `dsh-plugin`、`mcp`）
@@ -59,9 +78,11 @@
 - **MCP 大批量入库自动转后台（Kimi Work 60s 超时解药落地）**：`kb_ingest` 先轻量估算待处理文件数（目录递归/文件列表），超过 `KB_ASYNC_THRESHOLD`（默认 25）自动改用 async_mode，立即返回 `job_id` + `kb_status` 轮询指引——agent 无需知道 async_mode 存在，传整个文献库文件夹也不会超时；显式 `async_mode=true/false` 可强制
 - **`kb_zotero` 支持 async_mode=true**：async 任务分发泛化（job 带 command 字段，`run_async_job` 按命令分发 ingest/zotero），整库迁移可后台执行 + kb_status 轮询
 - **异步入库期间并发读不再锁死（高）**：`cmd_ingest` 由整批单事务改为**逐文件 commit**（写锁窗口从"整批"缩到"单文件+嵌入"）；`_migrate` 孤儿向量清理改 500ms 短超时探测、撞锁即跳过（读命令的 connect 不再干等 5s 或抛 database is locked）
+  - *1.6.5 订正*：该断言当时过宽——只覆盖 `cmd_ingest` 的连接路径；检索末尾**写缓存**仍无锁容错、`cmd_zotero` 仍是整批单事务（两处均已在本版修复）
 - **迁移健壮性**：`_migrate` 的 ALTER 只吞 "duplicate column"，锁冲突等其他 OperationalError 上抛（避免"版本号置新但列缺失"的静默不一致）
 - **后台任务卫生**：`cmd_status` 校验 job_id 为 12 位十六进制（阻断目录穿越）；done 后自动清理 job/progress 残留（result 保留可重复读）；超 1h 无进展提示可能卡死；`kb_clear` 一并清空 `.kb-jobs`
 - **启动即失败可感知**：`cmd_ingest_async` spawn 后短窗口 poll，子进程启动即退出时立即报错并清理，不再留"永久 running"的幽灵任务
+  - *1.6.5 订正*：Popen 后立刻 `poll()` 基本抓不到失败（python 打开不存在的脚本也要数十毫秒才退出），实际只剩 1h stale 提示兜底；已改为 `wait(timeout=0.5)` + 启动前脚本存在性校验
 - **原子写**：progress/result 改为临时文件 + rename，轮询不会读到半截 JSON
 - **渲染修正**：DSH 宿主（`plugin/host.js` 与 `npm lib`）改用 `files_total` 显示真实文件数（引擎只回最近 20 条后不再误报"共 20 个文件"）；`kb_zotero` dry_run 返回完整候选清单（预览语义，不截断）；MCP `render_status` 展示 error 详情、`result.ok=false` 如实呈现失败而非假"完成"
 - 引擎同步进 npm-package 副本

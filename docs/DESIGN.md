@@ -72,7 +72,7 @@ query → filters SQL 预过滤（authors/title/journal/kind/section/year）+ �
 - 元数据：itemData（title/date/publicationTitle/DOI）+ itemCreators（author 角色）→ 覆盖 PDF 抽取值；同时落 `zotero_key`，检索结果渲染 `zotero://open-pdf/library/items/{key}` 可直开 Zotero 阅读器
 - 缺失文件标记 missing 跳过；dry_run 只列候选
 
-## 7. 安装与分发（v1.6.4 一键安装）
+## 7. 安装与分发（v1.6.5 一键安装）
 
 四个安装入口，同一条安装链（Python 依赖 → 引擎冒烟测试 → Node/pnpm → dsh 插件安装激活 → 模型预下载）：
 

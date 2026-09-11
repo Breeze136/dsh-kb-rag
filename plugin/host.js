@@ -1,4 +1,4 @@
-// kb-rag DSH dynamic plugin — Host half (v1.6.4)
+// kb-rag DSH dynamic plugin — Host half (v1.6.5)
 // 用法：把本文件内容作为 cordis_define 的 code.host（纯函数体，直接粘贴）。
 // 依赖：工作区根目录存在 kb_engine.py；Python 环境装有 PyMuPDF/faiss-cpu/sentence-transformers。
 return {
@@ -666,6 +666,6 @@ return {
     ctx.effect(() => harness.registerTool(ctx, kbFetch))
     ctx.effect(() => harness.registerTool(ctx, kbScope))
     ctx.effect(() => harness.registerTool(ctx, kbStats))
-    console.log('[kb-rag] tools registered (v1.6.4): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats')
+    console.log('[kb-rag] tools registered (v1.6.5): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats')
   },
 }
