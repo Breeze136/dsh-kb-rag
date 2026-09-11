@@ -29,6 +29,15 @@
 - 全库 312 篇：`force` 全量重灌 **322 s**（`updated=312 / errors=0 / duplicates=0`）；`metadata_only` 刷新 **28–30 s**；DOI **46% → 66%**；页码锚点恢复 **99.7%**；`stale_docs` 归零
 - 新增功能的回归验证见 `docs/BACKLOG.md` §3
 
+### 真实文档测试与审计修正（发布前抓出并修掉）
+- **同一论文的多份 PDF 会各占一个结果位**：两份 PDF 内容不同 → sha256 去重不合并，deep `top_k=3` 里同一篇综述出现两次（用户实际只拿到 2 篇）。检索层现按**归一化 DOI**（大小写不敏感）折叠，保留最高分那条并**从后续候选补齐 Top-K**，返回 `dup_collapsed`，界面提示"已折叠 N 份同论文副本"
+- **查询缓存 key 现包含引擎/解析器版本**：否则升级后旧缓存继续吐旧行为（实测：改了结果折叠规则后，缓存仍在返回没有新字段的旧响应）
+- **元数据刷新不再抹掉 Zotero 写入的字段**：`metadata_only` 曾用首页抽取结果无条件覆盖 `docs` 行，而 Zotero 迁移写入的 `doi`/`journal` 不在 PDF 首页里（实测 DOI 211→209）。现改为**绝不用空值覆盖非空值**，同时保留"好值替换脏值"（如 `.indd` 标题）
+- **作者 junk 过滤扩充**（`PARSER_REV` → 4）：真实库命中 `user`、`Administrator`、`aipuser` 等出版商/系统账号，现按名单 + `*user` 账号模式 + 软件名拒绝，回退文件名解析
+- **`kb_ingest(rebuild=true)` 可省略 `paths`**：此前 schema 把 `paths` 标为必填，而 rebuild 的路径由引擎从库内取，调用方必然撞 `missing required property paths`；`kb_scope` 同理改为可只查看（此前 `scope` 必填，"查看"调不通）
+- **渲染修正**：失败条目显示原因（`✗ 1.pdf · ValueError: no text extracted`，此前只有文件名）；`metadata_only` 结果单独渲染（此前显示成"入库完成 新增 0…"）；`kb_zotero(dry_run)` 渲染为"Zotero 预演 · 候选 N 篇"（此前同样显示成"入库完成 0/0/0"）；检索头部按实际 `mode_used` 显示（此前 `mode=keyword/vector` 都写"混合检索"）；后台转交提示不再重复两遍；异步 `pending_files` 报真实篇数（此前是"阈值+1"的提前退出值，如 100 篇显示 26）
+
+
 ## [1.6.5] - 并发写锁容错 + zotero 逐文件提交 + 引文链后章节还原
 
 ### 并发与后台任务（补上 1.6.2 未覆盖的两处）
