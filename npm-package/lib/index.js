@@ -419,8 +419,12 @@ function apply(ctx) {
     lines.push("**已转入后台处理**" + (jobId.length > 0 ? " · job_id " + jobId : ""));
     if (typeof value.pending_files === "number") lines.push("待处理文件 " + value.pending_files + " 篇");
     if (value.note) lines.push(String(value.note));
-    lines.push("");
-    lines.push("用 kb_status(job_id=\"" + jobId + "\") 轮询进度；宿主调用超时不会中断后台任务，结果在完成时返回 totals。");
+    // 引擎的 note 通常已经带了 kb_status 指引，此时不要再重复一遍
+    const noteHasHint = typeof value.note === "string" && value.note.indexOf("kb_status") >= 0;
+    if (!noteHasHint) {
+      lines.push("");
+      lines.push("用 kb_status(job_id=\"" + jobId + "\") 轮询进度；宿主调用超时不会中断后台任务，结果在完成时返回 totals。");
+    }
     return [{ type: "text", text: lines.join("\n") }];
   };
 
@@ -877,13 +881,14 @@ function apply(ctx) {
     name: "kb_scope",
     description: "设置/查看知识库查询范围、回答深度与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。depth 可选：quick=快速检索（亚秒级响应，直出结果）；deep=深度检索（重排序+引文关联全链路，跨文献综合论述）。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false）。用户说\"封闭库/全网/都要/严格只按库内/快速检索/深度检索\"等要求时，调本工具设定后再检索。",
     parameters: {
-      scope: { type: "string", required: true, enum: ["kb", "both", "web"], description: "kb=仅封闭库；both=知识库+全网；web=仅全网。" },
+      scope: { type: "string", enum: ["kb", "both", "web"], description: "kb=仅封闭库；both=知识库+全网；web=仅全网。不传则只查看当前设置。" },
       depth: { type: "string", enum: ["quick", "deep"], description: "可选：同时设置检索深度。quick=快速检索；deep=深度检索。" },
       strict: { type: "boolean", description: "可选：同时设置严格模式。true=仅基于库内证据作答；false=关闭（默认）。" },
     },
     output: { schema: { type: "json" }, render: renderJson },
     execute(args, _exec) {
-      scopePref = args.scope;
+      // scope 是可选的：不传时本工具只返回当前会话设置（描述里承诺了"设置/查看"）
+      if (args.scope !== undefined) scopePref = args.scope;
       if (args.depth !== undefined) scopeDepth = args.depth === "deep" ? "deep" : "quick";
       if (args.strict !== undefined) scopeStrict = args.strict === true;
       console.log("[kb-rag] query scope:", scopePref, "depth:", scopeDepth, "strict:", scopeStrict);

@@ -1370,6 +1370,10 @@ def cmd_ingest(req):
             threshold = 25
         pending = len(paths) if rebuild else _count_candidates(paths, limit=threshold + 1)
         if pending > threshold:
+            # 限流计数在"阈值+1"处提前退出（只为判断是否超标）。这个数字会出现在提示里，
+            # 显示成 26 而实际 100 篇会误导用户，所以超标后再完整数一次（目录扫描很便宜）。
+            if not rebuild and pending == threshold + 1:
+                pending = _count_candidates(paths)
             db.close()
             sub = dict(req)
             sub.pop("async_if_large", None)
