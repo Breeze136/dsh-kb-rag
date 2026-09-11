@@ -87,7 +87,6 @@
 - **倾向**：短期做 ④（先把文档说准），中期与 §2.6 的 Crossref 方案合并做 ③。
 
 ### 2.9 大规模写入的性能与内存（低，运维提示）
-
 同一次全量 `rebuild` 的两次实测差异很大，原因是机器状态而非代码：
 
 | 场景 | 观察 |
@@ -99,6 +98,28 @@
 - SQLite 默认 `journal_mode=delete`（刻意选择：同步 `.kb` 目录更安全），写者独占；需要更平滑的并发可设 **`KB_SQLITE_WAL=1`**（代码里已有该开关）。
 - 实测**并发检索在重灌期间全部成功**（643–783 ms，无 `database is locked`），说明 1.6.2/1.6.5 的锁容错修复在该场景下有效。
 - 结论：全量重灌建议在守护进程空闲时用单进程 CLI（322 s），或先设 `KB_SQLITE_WAL=1`；不构成缺陷，记以备查。
+
+### 2.10 去重只按内容，不按论文（低）
+
+实测（真实文档）：Zotero 迁移时**同一论文的两个 PDF 版本**（sha256 不同，1.83 MB 与 1.56 MB）都被入库——内容级去重按设计不会合并它们，`kb_dedup` 同样只按 sha256 判重。可选改进：在内容判重之外加一层"论文级"判重（DOI 相同，或"归一化标题 + 首作者 + 年份"相同），命中时**保留一份并标注另一份为同一论文的其它版本**，而不是直接删除（用户可能想留不同版次）。
+
+> 另注：`force=true` 会**绕过内容去重**（`if dup is not None and not force`）。实测用 `kb_zotero(force=true)` 恢复元数据时，一篇内容重复的文献被当成新文献插入（多出 1 篇），随后用 `kb_dedup` 清掉（`removed: 1`）。这是设计行为，但调用方需知道。
+
+### 2.11 已验证的 1.6.6 行为（真实文档实测，供回归参考）
+
+以下均在**真实文档**上跑过，属"已验证、无需改动"：
+
+| 场景 | 实测结果 |
+|---|---|
+| 陈旧检测闭环 | 用旧引擎（rev3）force 重灌 4 篇 → `stale_docs=4`（`stale_sample` 精确列出这 4 篇）→ `metadata_only` 刷新 → `stale_docs=0` |
+| Zotero 迁移（`limit=5`） | 新增 4 / 内容重复跳过 1；`journal`（Science / Nano Letters / ACS Nano）、`doi`、`zotero_key` 全部写入——**这是 `journal` 唯一的来源**（见 §2.8） |
+| 扫描件/无文本层 PDF | 逐文件失败 `✗ 1.pdf · ValueError: no text extracted`，不影响整批 |
+| 全量 rebuild 转后台 | 312 篇 `updated`，分块/向量与重灌前**完全一致**（23447 / 20176）→ 解析与嵌入确定性 |
+| 重灌期间并发检索 | 9 次调用全部成功，无 `database is locked` |
+| 失败原因渲染 | 已修：失败条目现在显示 `· ValueError: no text extracted`（此前只显示 `✗ 文件名`） |
+| 作者 junk 过滤 | 真实库命中 `user` / `Administrator` / `aipuser`；名单已扩充（`user`、账号类 `*user`、`administrator`、`owner`、`guest`、软件名等），`PARSER_REV` → 4 |
+| `metadata_only` 覆盖问题 | 已修：曾用首页抽取结果把 Zotero 写入的 `doi`/`journal` 抹掉（DOI 211→209）；现改为**绝不用空值覆盖非空值**，仍允许好值替换脏值（如 `.indd` 标题） |
+
 
 
 

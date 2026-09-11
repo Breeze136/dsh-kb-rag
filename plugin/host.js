@@ -432,7 +432,11 @@ return {
           const name = String(f.path || '').split(/[\\/]/).pop()
           const icon = f.status === 'added' ? '✓' : (f.status === 'skipped' ? '·' : (f.status === 'duplicate' ? '≈' : (f.status === 'error' || f.status === 'missing' ? '✗' : '·')))
           const ms = typeof f.ms === 'number' ? f.ms : 0
-          lines.push(icon + ' ' + name + ' · ' + ms + 'ms')
+          // 失败/缺失要给出原因：只显示"✗ 文件"会让用户完全不知道下一步该做什么
+          const why = (f.status === 'error' || f.status === 'missing')
+            ? (f.error ? ' · ' + String(f.error).slice(0, 160) : '')
+            : (f.note && f.status === 'changed' ? ' · ' + String(f.note).slice(0, 120) : '')
+          lines.push(icon + ' ' + name + ' · ' + ms + 'ms' + why)
         })
         const totalN = typeof value.files_total === 'number' ? value.files_total : files.length
         if (files.length > tail.length) lines.push('（共 ' + totalN + ' 个文件，仅显示最近 ' + tail.length + ' 条；完整统计见 kb_stats）')

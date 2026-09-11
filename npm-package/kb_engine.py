@@ -42,7 +42,7 @@ SUPPORTED_EXTS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
 # 跳过未变文件，引擎的解析改进不会自动作用于老库（实测：一处抽取改动漏了 49 篇的 DOI，
 # 直到一次全量重灌才暴露）。注意判定只看 rev，不看引擎 VERSION：否则每次发版都会把
 # 整个库标成陈旧，提示就变成噪音。
-PARSER_REV = 3
+PARSER_REV = 4
 PARSER_TOKEN = "%s/rev%d" % (VERSION, PARSER_REV)
 
 SCHEMA = """
@@ -755,7 +755,15 @@ def _docx_fallback(path):
 
 _TITLE_BAD = {"untitled", "无标题", "标题", "作者", "author", "unknown", "论文",
               "document", "无题", "title", "untitled document"}
-_AUTHOR_BAD = {"作者", "author", "unknown", "authors", "none", "佚名"}
+# PDF /Author 里常见的非人名值（实测真实库里有 "user"、"Administrator"、"aipuser"）：
+# 出版商账号、系统账号、软件名。命中即弃用 → 回退到文件名解析。
+_AUTHOR_BAD = {"作者", "author", "unknown", "authors", "none", "佚名",
+               "user", "administrator", "admin", "owner", "guest", "anonymous",
+               "windows", "microsoft", "adobe", "acrobat", "pdf", "pc", "home"}
+_AUTHOR_JUNK_RE = re.compile(
+    r"^[a-z]{0,12}user$"                      # user / aipuser / scipubuser 这类账号
+    r"|^(?:the\s+)?(?:administrator|admin|owner|guest|anonymous)$"
+    r"|^(?:windows|microsoft|adobe|acrobat|foxit)\b", re.I)
 _WORD_PREFIX_RE = re.compile(r"^microsoft\s+(?:word|powerpoint|excel)\s*[-–—:：]?\s*", re.I)
 _JUNK_TITLE_RE = re.compile(
     r"(^|/)(preprint|manuscript|submission|document\d*|latest corrections|formatted)\b|"
@@ -825,7 +833,7 @@ def _clean_authors(s):
     if not s:
         return None
     s = re.sub(r"\s+", " ", s).strip().strip(".,;:")
-    if not s or s.lower() in _AUTHOR_BAD:
+    if not s or s.lower() in _AUTHOR_BAD or _AUTHOR_JUNK_RE.match(s):
         return None
     return s or None
 
@@ -1478,7 +1486,22 @@ def _refresh_meta_file(db, f, files, totals):
         if not text.strip():
             raise ValueError("no text extracted")
         title, authors, year, journal, doi = extract_meta(f, text, pdf_meta)
-        changed = (title != row["title"]) or ((doi or None) != (row["doi"] or None))
+        # 绝不用**空值**覆盖已有的非空值：Zotero 迁移写入的 doi/journal/zotero_key 本来就不在
+        # PDF 首页里，无条件覆盖会把它们抹掉（实测丢过 2 篇 DOI）。用非空的新值替换旧值仍然允许，
+        # 那正是刷新通道的用途（修正 ".indd" 这类脏标题）。
+        prev = db.execute("SELECT title,authors,year,journal,doi FROM docs WHERE id=?",
+                          (row["id"],)).fetchone()
+
+        def keep(new, old):
+            return old if (new is None or (isinstance(new, str) and not new.strip())) else new
+
+        title = keep(title, prev["title"])
+        authors = keep(authors, prev["authors"])
+        year = keep(year, prev["year"])
+        journal = keep(journal, prev["journal"])
+        doi = keep(doi, prev["doi"])
+        prev_doi = prev["doi"] or None
+        changed = (title != prev["title"]) or ((doi or None) != prev_doi)
         db.execute("UPDATE docs SET title=?,authors=?,year=?,journal=?,doi=?,indexed_with=? "
                    "WHERE id=?",
                    (title, authors, year, journal, doi, PARSER_TOKEN, row["id"]))
