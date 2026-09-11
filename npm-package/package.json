@@ -1,6 +1,6 @@
 {
   "name": "dsh-kb-rag",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "Local literature knowledge-base RAG for DSH: hybrid BM25 + vector retrieval, cross-encoder reranking, cited answers with section- and page-level provenance, over a SQLite index.",
   "type": "module",
   "main": "lib/index.js",

@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.6.4]（未发布）- kb_fetch 描述订正、文档与元数据同步 1.6.3
+## [1.6.4] - kb_fetch 描述订正、文档与元数据同步
 
 - **文档与元数据同步到 1.6.3**：`plugin/kbrag.plugin.json` 描述补全新能力（混合检索 + 交叉编码器精排 + 章节/页码级出处 + 快速/深度双模式）；`plugin/host.js`、`plugin/client.js` 头部注释与工具注册日志的版本号 `v1.0.0` → `v1.6.3`；`npm-package/package.json` 的 description 与 keywords 同步（补 `dsh-plugin`、`mcp`）
 - **异步作业归属订正**：异步入库（`ingest_async` / `status` / `.kb-jobs/`）**只走 MCP 侧**（`KB_ASYNC_THRESHOLD` 自动转后台 + `kb_status` 轮询）；DSH 插件是同步长任务（`plugin/host.js` 时限 30 分钟，无 job/status 处理）。此前 README 架构图、npm 页与 QUICKSTART 把异步说成通用行为，已按实现订正

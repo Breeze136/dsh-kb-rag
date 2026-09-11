@@ -1,6 +1,6 @@
 # kb-rag 数据库迁移文档（Schema Migration）
 
-> 版本：适用于插件 1.0.5 → 1.6.3+ 的升级场景，以及未来所有跨版本升级。
+> 版本：适用于插件 1.0.5 → 1.6.4+ 的升级场景，以及未来所有跨版本升级。
 > 状态：**版本化迁移已在引擎实现并通过实测**（新库首建 / 旧库 v0→v3 自动迁移 / zotero_key 回填 / 检索回归），代码见 `kb_engine.py` 的 `_migrate()`；本文档同步记录设计约束与扩展方法。
 
 ---
@@ -52,7 +52,7 @@ def connect(kb_root):
 2. **旧引擎写新库兼容**：旧版 INSERT 用显式列清单（不含新列）→ 新列落默认 NULL，不报错。
 3. **无版本门控的幂等**：迁移语句每次连接都执行，不依赖"当前 schema 版本"判断，因此重复运行/往返升级都无害。
 
-### 当前 schema（1.6.3，`user_version = 3`）
+### 当前 schema（1.6.4，`user_version = 3`）
 
 ```sql
 docs(id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,

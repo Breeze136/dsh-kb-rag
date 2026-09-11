@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **Latest version v1.6.3** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
+> **Latest version v1.6.4** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -100,7 +100,7 @@ Run **inside the DSH profile/deployment directory** (this is where the plugin lo
 
 ```bash
 cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
-npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.3 to pin
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.4 to pin
 ```
 
 Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
@@ -117,7 +117,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag            # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.3      # or pin
+dsh plugin --profile web add dsh-kb-rag@1.6.4      # or pin
 ```
 
 **Installed manually via npm** (Option 3) — stay with npm in that profile dir:
