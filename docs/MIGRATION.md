@@ -82,7 +82,7 @@ cache(key TEXT PRIMARY KEY, payload TEXT NOT NULL, created REAL NOT NULL);
 
 ### 3.3 版本号语义
 
-- `kb_engine.py` 的 `VERSION = "3.0.0"` 是**代码版本**（协议/功能层），**不是 schema 版本**。
+- `kb_engine.py` 的 `VERSION = "3.1.0"` 是**代码版本**（协议/功能层），**不是 schema 版本**。
 - schema 版本建议用 SQLite 内置 `PRAGMA user_version` 单独维护（见下节）。
 
 ## 4. 破坏性变更的版本化迁移（骨架已实现）
