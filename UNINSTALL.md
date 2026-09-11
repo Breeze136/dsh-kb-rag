@@ -19,7 +19,7 @@ kb-rag 的读写边界：
 dsh plugin --profile web remove dsh-kb-rag
 ```
 
-若该命令不可用，手动编辑 `C:\Users\<你>\.dsh\profiles\web\package.json`：
+若该命令不可用，手动编辑 `C:\Users\<用户名>\.dsh\profiles\web\package.json`：
 删除 `dependencies` 里的 `"dsh-kb-rag"`、`dsh.profile.bundles` 数组里的 `"dsh-kb-rag"`，然后重启 DSH。
 
 **MCP（Kimi Code / DeepSeek / Zcode / Claude Desktop 等）：**
@@ -27,7 +27,7 @@ dsh plugin --profile web remove dsh-kb-rag
 
 ## 第 2 层：删知识库索引（可选，是衍生数据）
 
-删除对应的 `kb.sqlite` 或整个索引目录。这些是"从 PDF 抽出的分块 + 向量"，删了只是丢索引；原 PDF 还在原地，随时可 `kb_ingest` 重建。
+删除对应的 `kb.sqlite` 或整个索引目录。这些是"从 PDF 抽出的分块 + 向量"，删了只是丢索引；原 PDF 还在原地，随时可 `kb_ingest` 重建。索引目录同级可能还有 `.kb-jobs/`（后台入库作业的进度与结果文件），属于同一层衍生数据，可一并删除。
 
 默认位置：
 

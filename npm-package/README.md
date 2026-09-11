@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **最新版本 v1.6.3** — 安装：`dsh plugin --profile web add dsh-kb-rag@latest`（DSH profile 由 pnpm 管理，请勿在其中用 `npm install`；手动部署见 [Option 3](#option-3--manual-npm-install-bring-your-own-activation)）
+> **Latest version v1.6.3** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -18,18 +18,30 @@ and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answer
 
 | Tool | Purpose |
 | --- | --- |
-| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking + vectorization |
+| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking and vectorisation; large batches run as a background job and report progress |
 | `kb_zotero` | Batch-migrate a local Zotero library (items with PDF attachments) into the KB |
-| `kb_search` | Hybrid search Top-N snippets + exact sources (title/authors/year/journal/DOI/section/score) |
-| `kb_rag` | Retrieve evidence snippets (Top-3 by default) for the model to answer directly, with citation numbers per claim |
-| `kb_scope` | Set/view query scope (kb / both / web) and strict mode |
+| `kb_search` | Hybrid search Top-N passages with exact provenance (title/authors/year/journal/DOI/section/PDF page/score) |
+| `kb_rag` | Retrieve evidence passages (Top-3 by default) for the model to answer directly, with numbered citations per claim |
+| `kb_scope` | Set/view query scope (kb / both / web), strict mode and retrieval depth |
 | `kb_stats` | Doc/chunk/vector counts and recent ingest list |
 | `kb_dedup` | Remove duplicate documents (keeps the earliest) |
 | `kb_clear` | Wipe all documents and indexes (requires explicit `confirm: true`) |
-| `kb_fetch` | Download PDF by DOI / arXiv ID (publisher-first, OA fallback; network + proxy hints) |
+| `kb_fetch` | Download PDF by DOI / arXiv ID (publisher version first, so a campus or institutional subscription applies; open-access fallback) |
 
 Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (clickable); without DOI → `[authors, year, filename]`.
 `kb_search`/`kb_rag` also return a **related-literature list** (same authors / same journal / nearby year / thematically similar) that the answer's "suggested additions" cites. Every answer ends with that note; in strict mode the answer stays within KB evidence only.
+
+### Engine capabilities
+
+- **Section-aware chunking.** Abstract weighted ×1.5, methods ×1.2, inline heading detection, abstract promotion, caption blocks; paragraph merging for non-article documents.
+- **Hybrid retrieval.** BM25 keyword matching with CJK bigram support, bge-small vector cosine, RRF fusion, section weights.
+- **Reranking.** bge-reranker-base cross-encoder, top 20 to top 3, with automatic fallback to a bge-large-en bi-encoder when the cross-encoder is unavailable.
+- **Provenance.** Every passage carries section, paragraph range and physical PDF page (schema v3), which maps onto Zotero's `?page=N` deep link, plus authors, year, journal and DOI.
+- **Citation linking.** In-text `[n]` markers resolve to the document's reference entries; Nature-style superscripts are detected from font metrics. References are stored (weight 0) and excluded from retrieval.
+- **Fast and deep modes.** `quick` returns hybrid hits directly (no reranking, citation linking or related work), `deep` runs the full chain.
+- **Incremental indexing and deduplication.** SHA-256 content hashes skip unchanged files and intercept duplicates across folders.
+- **Query cache.** Identical query and filters are not recomputed; any ingest invalidates it.
+- **Resident daemon.** Models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops. Large ingests fork a background job (`job_id`, atomic progress) instead of blocking the session.
 
 ## Install & Enable
 
@@ -51,14 +63,15 @@ Runs the bundled installer (`scripts/install.ps1` / `scripts/install.sh`) straig
 Python deps → engine smoke test → Node/pnpm check → `dsh plugin add` activation → optional model pre-download.
 
 ```bash
-# 推荐（1.6.3+）：裸命令即可 —— 由微包 dsh-kb-rag-install 提供（零逻辑转发本包安装器）
+# Recommended (1.6.3+): the bare command works — served by the micro-package dsh-kb-rag-install,
+# which forwards to this package's installer and contains no logic of its own.
 npx dsh-kb-rag-install
 
-# 等价旧写法（不依赖微包；≤1.6.2 的老写法，仍然可用）
+# Equivalent older form (no micro-package needed; still supported)
 npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"
 ```
 
-> **历史坑（≤ 1.6.2）**：当时注册表里**没有**名为 `dsh-kb-rag-install` 的包，裸 `npx dsh-kb-rag-install` 会 E404（npx 按包名查找）。1.6.3 起新增同名微包解决该问题；`--package dsh-kb-rag` 旧写法依旧等价可用。
+> **Historical pitfall (≤ 1.6.2):** the registry had no package named `dsh-kb-rag-install`, so a bare `npx dsh-kb-rag-install` returned E404 (npx resolves that name as a package). The same-named micro-package added in 1.6.3 fixes it; the `--package dsh-kb-rag` form stays equivalent and supported.
 >
 > Bash-style flags (`--profile`, `--models`, `--dry-run`, `--mirror`) work on every OS — the entry translates them for Windows PowerShell. Add `--dry-run` to rehearse without changing anything.
 
@@ -121,12 +134,12 @@ Either way: **restart DSH and open a new session**. Existing `.kb` libraries mig
 
 | Symptom | Cause / Fix |
 |---|---|
-| `npx dsh-kb-rag-install` → "npm error code E404 / package not found" | 旧版（≤ 1.6.2）的坑：注册表无同名包。1.6.3+ 已由微包 `dsh-kb-rag-install` 修复；若 npm 缓存了旧元数据先 `npm cache clean --force`。临时替代：`npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"`。 |
+| `npx dsh-kb-rag-install` → "npm error code E404 / package not found" | Pitfall of releases up to 1.6.2: the registry had no package of that name. Fixed by the `dsh-kb-rag-install` micro-package in 1.6.3+; if npm cached the old metadata, run `npm cache clean --force` first. Temporary workaround: `npx --yes --package dsh-kb-rag -c "dsh-kb-rag-install --profile web"`. |
 | `dsh plugin ... add` → pnpm errors | pnpm missing from PATH: `npm install -g pnpm`, then retry. |
 | install.ps1 → garbled Chinese / syntax error on Windows PowerShell 5.1 | The script ships with UTF-8 BOM (fixed in 1.3.1+). If you copied it manually, re-save as UTF-8 **with BOM**. |
 | install.ps1 → `OSError: [WinError 123] ... C:\Users\??\...` (fails at engine smoke test) | Non-ASCII Windows username: PowerShell 5.1's default `$OutputEncoding` is ASCII, mangling Chinese chars in the piped JSON to `?` (≤ 1.6.2). Fixed by forcing UTF-8 pipe encoding (1.6.3+); workaround: `$env:TEMP='C:\kbragtmp'; $env:TMP='C:\kbragtmp'`, then re-run. |
 | Installed but tools don't appear | Tools are injected at **session creation** — restart DSH and open a **new** conversation. |
-| "模型首次检索自动下载" is slow / fails | Direct download failing now auto-retries via the `hf-mirror.com` mirror (installer `--models` and first-search). To pin it manually: `HF_ENDPOINT=https://hf-mirror.com`; models are `bge-small-zh-v1.5` (~95MB) + `bge-reranker-base` (~1.1GB). |
+| Model download on the first search is slow / fails | If the direct download fails it now retries automatically through the `hf-mirror.com` mirror (installer `--models` and first search). To pin it manually: `HF_ENDPOINT=https://hf-mirror.com`; the models are `bge-small-zh-v1.5` (~95 MB) + `bge-reranker-base` (~1.1 GB). |
 | Upgrading from an older version | **Depends on how you installed it** — see [Upgrading](#upgrading) above: `dsh plugin --profile <name> add dsh-kb-rag` for pnpm-managed profiles, `npm install dsh-kb-rag@latest` only if you installed manually with npm. Restart DSH and open a new session; `.kb` libraries migrate automatically (see `docs/MIGRATION.md`), page anchors / citation markers need `force` re-ingest on old data. |
 | Tool call says Python deps missing | Default: only logs the `pip install` command. Set `KB_AUTO_PIP=1` in the host env to auto-install (fixed argv), or run the installer (Option 1b/2). |
 
@@ -159,8 +172,8 @@ The embedding model `BAAI/bge-small-zh-v1.5` and reranker `BAAI/bge-reranker-bas
 
 1. Ingest: `kb_ingest(paths=["papers/", "notes.md"])`
 2. Zotero: `kb_zotero(dry_run=true)` to preview, then drop dry_run for the real migration
-3. Search: `kb_search(query="attention is all you need", top_k=5, filters={year: ">=2018"})`
-4. QA: `kb_rag(query="What positional encodings does the Transformer use?", strict=true)`
+3. Search: `kb_search(query="graphene domain coalescence during CVD growth on copper", top_k=5, filters={year: ">=2018"})`
+4. QA: `kb_rag(query="How is layer thickness determined from the Raman 2D peak?", strict=true)`
 5. Scope: `kb_scope(scope="both")`; see what's in the library: `kb_stats()`
 
 Data persists in the session workspace `/.kb` by default; every tool accepts `kb_root` to override.

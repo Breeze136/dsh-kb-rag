@@ -1,6 +1,10 @@
 # Changelog
 
-## [1.6.4]（未发布）- kb_fetch 描述订正与下载器配置
+## [1.6.4]（未发布）- kb_fetch 描述订正、文档与元数据同步 1.6.3
+
+- **文档与元数据同步到 1.6.3**：`plugin/kbrag.plugin.json` 描述补全新能力（混合检索 + 交叉编码器精排 + 章节/页码级出处 + 快速/深度双模式 + 异步入库），`engine.commands` 补 `ingest_async`/`status`；`plugin/host.js`、`plugin/client.js` 头部注释与工具注册日志的版本号 `v1.0.0` → `v1.6.3`；`npm-package/package.json` 的 description 与 keywords 同步（补 `dsh-plugin`、`mcp`）
+- **npm 页（`npm-package/README.md`）补齐 1.6.x 能力**：新增「Engine capabilities」小节（章节感知分块、混合检索、精排、出处、引文关联、快速/深度、增量去重、查询缓存、常驻守护进程 + 异步入库）；工具表补异步作业、出处（含 PDF 页码）与检索深度说明；示例改为石墨烯主题；文档统一英文（中文见 `README_CN.md`）
+- **过时文档订正**：`SECURITY.md` 与 `npm-package/SECURITY.md` 工具数 8 → 9；`docs/MIGRATION.md` 当前 schema 由 1.5.0 更新为 1.6.3 / `user_version = 3`（补 `chunks.para_start/para_end`、`page_start/page_end` 两列与 v1/v2/v3 三个迁移块），变更记录拆出 1.6.1 的 v3 行；`QUICKSTART.md` 补检索深度、异步入库与引文补充说明；`UNINSTALL.md` 补 `.kb-jobs/` 说明并统一路径占位符；`docs/OUTPUT-FORMAT.md` 第 6 节的"待落地"表述改为已实施状态；`mcp-server/README.md`、`docs/DESIGN.md` 同步到 1.6.3（schema v3 / 检索链路 / 9 工具 / 异步作业 / depth 双模式 / `UNPAYWALL_EMAIL`）
 
 - **`kb_fetch` 行为描述订正**：实现一直是"出版商正式版优先"（先解析落地页 `citation_pdf_url`，**校园网/机构订阅网络下可直接取得订阅版 PDF**，无权限再回退 Unpaywall/Crossref 的开放获取），但工具描述却写成"只下载 OA 文献，不碰付费墙"，与实际行为不符。现统一为完整顺序说明，并保留合规边界：只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。同步 `plugin/host.js`、`npm-package/lib/index.js`、`mcp-server/server.py` 三处工具描述与 README（中英）、npm/mcp 文档、QUICKSTART
 - **`doi_pdf.mjs` 尊重 `UNPAYWALL_EMAIL`**：Node 下载器的 Unpaywall 请求此前硬编码示例邮箱（`researcher@university.edu`），配置项只对 Python 回退路径生效；现与引擎一致读取该环境变量
@@ -27,7 +31,7 @@
 - MCP `server.py`：`kb_search`/`kb_rag` 签名改 Optional，未传参不再以默认值覆盖引擎模式化缺省；请求剔除 null 值；引擎 `_depth_flag` null 语义兜底
 
 ### 真·一键安装
-- **新微包 `dsh-kb-rag-install`**（待发布）：裸 `npx dsh-kb-rag-install` 直接可用，根治"包名与 bin 名不一致导致裸命令 E404"的老坑；微包零逻辑（定位依赖转发），安装逻辑仍在主包维护；npm 平铺/嵌套双布局验证通过
+- **新微包 `dsh-kb-rag-install`**（已发布 1.0.0）：裸 `npx dsh-kb-rag-install` 直接可用，根治"包名与 bin 名不一致导致裸命令 E404"的老坑；微包零逻辑（定位依赖转发），安装逻辑仍在主包维护；npm 平铺/嵌套双布局验证通过
 - **profile 自动检测**：未指定 `-Profile` 时扫 `~/.dsh/profiles/`（含 cordis.yml/package.json 才算，排除 node_modules 误报）——唯一 profile 直接用；多个时列出（交互可选、非交互走默认目录）
 - **模型预下载默认开**：`install.mjs` 默认注入 `--models`（配合直连失败自动切 hf-mirror.com 镜像重试，装完即全就绪），`--no-models` 可跳过（两平台脚本均支持）
 - **非交互默认**：`install.mjs` 默认注入 `--yes`（npx 场景不再被 pnpm 确认卡住）；pnpm 全局安装失败自动回退 `corepack enable pnpm`
