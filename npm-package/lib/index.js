@@ -645,7 +645,7 @@ function apply(ctx) {
     lines.push("**知识库来源 Top-" + items.length + "**" + (quick ? "（快速检索）" : (value.depth === "deep" ? "（深度检索）" : "")));
     // 实际使用的检索路径（引擎会因 mode 参数或向量不可用而降级）：写死"混合检索"会误导
     const MODE_LABEL = { hybrid: "混合检索", keyword: "关键词检索", vector: "向量检索" };
-    lines.push((MODE_LABEL[value.mode_used] || "混合检索") + (value.reranker ? " · 精排 " + value.reranker.split(" ")[0] : "") + (value.cached === true ? " · 缓存命中" : "") + (typeof value.ms === "number" ? " · " + value.ms + "ms" : "") + (value.strict === true ? " · 严格模式" : ""));
+    lines.push((MODE_LABEL[value.mode_used] || "混合检索") + (value.reranker ? " · 精排 " + value.reranker.split(" ")[0] : "") + (value.cached === true ? " · 缓存命中" : "") + (typeof value.ms === "number" ? " · " + value.ms + "ms" : "") + (value.strict === true ? " · 严格模式" : "") + (value.dup_collapsed > 0 ? " · 已折叠 " + value.dup_collapsed + " 份同论文副本" : ""));
     // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
     if (typeof value.lang_note === "string" && value.lang_note.length > 0) {
       lines.push("提示：" + value.lang_note);

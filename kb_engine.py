@@ -2105,7 +2105,10 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     if use_cache:
         cache_key = hashlib.sha1(json.dumps(
             [query, filters, top_k, snippet_w, mode, rerank_flag, _RERANK_NAME,
-             related_flag, related_k],
+             related_flag, related_k,
+             # 把解析器/引擎版本并入 key：升级后旧的缓存响应不该继续被复用
+             # （实测：改了结果的折叠规则后，缓存仍在返回没有新字段的旧响应）
+             PARSER_TOKEN],
             sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")).hexdigest()
         hit = db.execute("SELECT payload FROM cache WHERE key = ?", (cache_key,)).fetchone()
         if hit is not None:
@@ -2181,11 +2184,21 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     seed_doc_ids = []
     caption_cache = {}
     seen_docs = set()
+    seen_dois = set()      # 同一论文的不同 PDF 版本（内容不同 → sha256 去重不合并）
+    dup_collapsed = 0
     for i, score in ranked:
         r = rows[i]
         if r["doc_id"] in seen_docs:
             continue  # 结果层去重：同一篇只保留最高分的一块，避免 Top-K 被同一篇占据
         seen_docs.add(r["doc_id"])
+        # 论文级去重：两份 PDF 是不同的 doc（各自 sha256），会各占一个结果位；有 DOI 时按
+        # 归一化 DOI（大小写不敏感）折叠，保留得分最高的一条，并从后续候选里补齐 Top-K。
+        dkey = (r["doi"] or "").strip().lower().rstrip(".,;")
+        if dkey:
+            if dkey in seen_dois:
+                dup_collapsed += 1
+                continue
+            seen_dois.add(dkey)
         entry = {
             "file": Path(r["path"]).name,
             "path": r["path"],
@@ -2226,6 +2239,8 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
 
     resp = {"query": query, "scored": len(ranked), "top_k": top_k,
             "mode_used": mode_used, "reranker": reranker_used, "results": results,
+            # 折叠掉的同论文副本数（渲染层可提示，便于用户知道库里存在多份副本）
+            "dup_collapsed": dup_collapsed,
             "note": (note + f"命中 {len(ranked)} 块，返回 Top-{len(results)}") if len(ranked) else (note or "无命中"),
             "cached": False,
             "ms": round((time.time() - t0) * 1000)}
