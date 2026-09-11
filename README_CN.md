@@ -193,8 +193,9 @@ plugin host (JS) or MCP server (server.py + engine_client.py)
    v
 kb_engine.py -- resident `serve` daemon (models load once)
    |-- ingest:  sha256 skip -> PyMuPDF extraction -> section chunking -> bge-small encode
-   |             (committed per file; large batches fork an async job under .kb-jobs/,
-   |              return a job_id immediately and are polled with kb_status)
+   |             (committed per file; the MCP server forks large batches as an async job
+   |              under .kb-jobs/, returning a job_id polled with kb_status, while the
+   |              DSH plugin runs the same batch synchronously under a 30-minute deadline)
    |-- search:  SQL prefilter -> BM25 + vector -> RRF fusion -> bge-reranker rerank
    |             -> top-N verbatim passages with DOI, page, section and score
    `-- storage: <kb_root>/kb.sqlite (docs, chunks, vecs, cache; schema v3,

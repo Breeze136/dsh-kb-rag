@@ -18,7 +18,7 @@ and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answer
 
 | Tool | Purpose |
 | --- | --- |
-| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking and vectorisation; large batches run as a background job and report progress |
+| `kb_ingest` | Ingest files/folders (PDF/TXT/MD/DOCX, recursive scan) with incremental skip, dedup, section-aware chunking and vectorisation |
 | `kb_zotero` | Batch-migrate a local Zotero library (items with PDF attachments) into the KB |
 | `kb_search` | Hybrid search Top-N passages with exact provenance (title/authors/year/journal/DOI/section/PDF page/score) |
 | `kb_rag` | Retrieve evidence passages (Top-3 by default) for the model to answer directly, with numbered citations per claim |
@@ -41,7 +41,8 @@ Citation format: with DOI → `[authors, year, journal](https://doi.org/DOI)` (c
 - **Fast and deep modes.** `quick` returns hybrid hits directly (no reranking, citation linking or related work), `deep` runs the full chain.
 - **Incremental indexing and deduplication.** SHA-256 content hashes skip unchanged files and intercept duplicates across folders.
 - **Query cache.** Identical query and filters are not recomputed; any ingest invalidates it.
-- **Resident daemon.** Models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops. Large ingests fork a background job (`job_id`, atomic progress) instead of blocking the session.
+- **Resident daemon.** Models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops. Indexing commits per file, and a long batch is allowed up to 30 minutes before the tool call gives up.
+- **Background jobs (MCP path).** The bundled engine also exposes `ingest_async` and `status`: the MCP server forks large batches under `.kb-jobs/` and returns a `job_id` that is polled with `kb_status`, so a client-side call timeout cannot interrupt the work.
 
 ## Install & Enable
 
