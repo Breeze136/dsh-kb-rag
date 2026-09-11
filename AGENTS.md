@@ -39,3 +39,28 @@ terminal session is exactly what a keyword scan can miss.
 
 When in doubt, replace with a neutral placeholder rather than keeping the real value.
 This is a fixed step of the release routine; it does not need to be requested.
+
+## After publishing a release
+
+1. **Installing a fresh release into a DSH profile needs the exact version.** pnpm 11
+   applies a supply-chain policy (`minimumReleaseAge`): a version published minutes ago
+   is "too young", so `dsh plugin --profile <name> add dsh-kb-rag@latest` quietly
+   resolves to the newest version that is old enough instead — it looks like it worked
+   while nothing changed. Always add the explicit version:
+
+   ```bash
+   dsh plugin --profile web add dsh-kb-rag@<version>
+   ```
+
+   pnpm then appends that version to `minimumReleaseAgeExclude` in the profile's
+   `pnpm-workspace.yaml`. Afterwards, verify three things: the installed
+   `node_modules/dsh-kb-rag/package.json` version, the `dsh.profile.bundles` entry, and
+   that the bundled `kb_engine.py` still matches the repository copy byte for byte.
+
+2. **Verify the npm page from the packument, not the version document.**
+   The registry no longer stores a per-version `readme` field, so
+   `registry.npmjs.org/dsh-kb-rag/<version>.readme` is empty even on a good publish.
+   The page renders `readme` from the top-level packument:
+   `https://registry.npmjs.org/dsh-kb-rag` — check it for the new content, and expect
+   `dist-tags.latest` to lag a minute or two behind the publish.
+
