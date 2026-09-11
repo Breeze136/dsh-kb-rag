@@ -57,7 +57,7 @@ kb-rag 是面向 DSH（DeepSeek Harness）以及任何支持 MCP 的 agent 的�
 >
 > - **首次使用较慢。** 向量化模型（约 95 MB）与重排模型（约 1.1 GB）在首次使用时下载，首次查询需等待约十秒完成加载。此后常驻守护进程将模型保留在内存中，后续查询均在亚秒级完成。
 > - **锚点属于入库时数据。** 页码锚点与上标引用标记在文档解析阶段生成。在 v1.6 之前索引的文库仍可正常使用，但在对文档使用 `force` 重新入库之前，这些字段保持为空。
-> - **批量入库为异步执行。** 待处理文件数超过 `KB_ASYNC_THRESHOLD` 后，MCP 服务器会自动切换为后台任务，因此宿主端的调用超时不会中断该工作。
+> - **批量入库为异步执行。** 待处理文件数超过 `KB_ASYNC_THRESHOLD`（默认 25）时，`kb_ingest` 会自动 fork 为后台任务并立即返回 `job_id`，不再占住本次会话——两种部署形态行为一致，因此宿主端的调用超时不会中断该工作。用 `kb_status` 轮询至状态为 `done`。
 
 ## 三种部署形态
 
@@ -65,8 +65,8 @@ kb-rag 是面向 DSH（DeepSeek Harness）以及任何支持 MCP 的 agent 的�
 
 | 形态 | 入口 | 工具集 |
 |---|---|---|
-| **DSH 插件**（主要形态） | `plugin/` — 在 DSH 会话内以对话方式使用 | 9 个工具，含 `kb_scope`（查询范围与严格模式，属 DSH 会话概念） |
-| **MCP 服务器** | `mcp-server/server.py` — stdio，适用于 Claude Desktop、Cherry Studio、Kimi、DeepSeek、Cursor 等 | 9 个工具；`kb_scope` 由 `kb_status`（后台任务轮询）替代 |
+| **DSH 插件**（主要形态） | `plugin/` — 在 DSH 会话内以对话方式使用 | 10 个工具，新增 `kb_scope`（查询范围与严格模式，属 DSH 会话概念）与 `kb_status`（后台任务轮询） |
+| **MCP 服务器** | `mcp-server/server.py` — stdio，适用于 Claude Desktop、Cherry Studio、Kimi、DeepSeek、Cursor 等 | 9 个工具；`kb_status` 两侧都有，因此只有 `kb_scope` 是 DSH 独有 |
 | **npm 包** | `dsh-kb-rag` — 声明 `dsh.bundle`，因此 `dsh plugin add` 可一步完成安装与启用 | 与 DSH 插件相同 |
 
 ## 快速开始
@@ -120,7 +120,7 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 <details>
 <summary>批量入库 — 避免宿主超时干扰任务</summary>
 
-MCP 服务器会估算待处理文件数，超过 `KB_ASYNC_THRESHOLD`（默认 25）时切换为后台任务。该调用立即返回 `job_id`；通过 `kb_status` 轮询至状态为 `done`。整库 Zotero 迁移使用 `kb_zotero(async_mode=true)`。任务在独立子进程中运行，因此 60 秒的客户端超时不会将其中断。
+待处理文件数超过 `KB_ASYNC_THRESHOLD`（默认 25）时，`kb_ingest` 在两种部署形态下都会切换为后台任务；统计在调用到达时完成（DSH 插件由引擎自己数，MCP 服务器在宿主侧数）。该调用立即返回 `job_id`；通过 `kb_status` 轮询至状态为 `done`。整库 Zotero 迁移使用 `kb_zotero(async_mode=true)`。任务在独立子进程中运行，因此 60 秒的客户端超时不会将其中断。
 </details>
 
 ### 4. 提问
@@ -138,7 +138,7 @@ DSH profile 是一个 **pnpm workspace**（其中包含 `pnpm-lock.yaml`，且 `
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # 最新版本
-dsh plugin --profile web add dsh-kb-rag@1.6.5    # 或固定到指定版本
+dsh plugin --profile web add dsh-kb-rag@1.6.6    # 或固定到指定版本
 ```
 
 重新运行安装脚本效果相同，并会额外校正 Python 依赖：
@@ -150,25 +150,26 @@ npx dsh-kb-rag-install --profile web
 > [!WARNING]
 > **不应在 DSH profile 目录中执行 `npm install dsh-kb-rag`。** 它会在 pnpm 的符号链接存储旁写入 npm 风格的 `node_modules`，此后两种目录结构不再一致，后续 `dsh plugin` 操作将变得不可预测。`npm install` 仅适用于完全由你手工管理的部署（见 [npm-package/README.md](npm-package/README.md) 方式 3）。
 >
-> 升级后请重启 DSH 并新建会话。已有的 `.kb` 文库会自动迁移（见 [docs/MIGRATION.md](docs/MIGRATION.md)），但**页码锚点与上标引用标记需要对更早入库的文档使用 `force` 重新入库**——迁移只新增列，不会重新解析文档。
+> 升级后请重启 DSH 并新建会话。已有的 `.kb` 文库会自动迁移（见 [docs/MIGRATION.md](docs/MIGRATION.md)），但**页码锚点与上标引用标记需要对更早入库的文档使用 `force` 重新入库**——迁移只新增列，不会重新解析文档。当库内部分文档由更早版本的解析器写入时，`kb_stats` 会报告 `stale_docs`，插件会在该会话首次检索时询问一次处理方式：暂不处理、仅刷新元数据，或重新入库。
 
 ## 工具参考
 
-### DSH 插件（9 个工具）
+### DSH 插件（10 个工具）
 
 | 工具 | 用途 | 示例请求 |
 |---|---|---|
-| `kb_ingest` | 入库文件或文件夹：增量跳过、去重、按章节切分、向量化（PDF/TXT/MD/DOCX） | “入库论文文件夹” |
+| `kb_ingest` | 入库文件或文件夹：增量跳过、去重、按章节切分、向量化（PDF/TXT/MD/DOCX）。`metadata_only=true` 原地刷新标题/作者/年份/期刊/DOI，`rebuild=true` 重新解析库内全部文档；大批量自动转后台任务 | “入库论文文件夹” |
+| `kb_status` | 按 `job_id` 轮询后台入库任务：`running` 返回进度（已处理 / 错误 / 分块数），`done` 返回该任务的 totals 与最近文件，另有 `error` 与 `not_found` | “入库进行到哪一步了？” |
 | `kb_zotero` | 迁移本地 Zotero 文库，含 PDF 附件 | “同步 Zotero” |
 | `kb_search` | 混合检索，返回带精确溯源（标题、作者、年份、期刊、DOI、页码、章节）的原文段落 | “检索铜上化学气相沉积石墨烯” |
 | `kb_rag` | 证据式问答，默认返回前 3 条，带编号引用 | “该体系中的磁畴演化由什么主导？” |
 | `kb_scope` | 查询范围（仅文库／文库加网络／仅网络）、严格模式、检索深度 | “切换到严格模式” |
 | `kb_dedup` | 删除重复文档，保留最早的一份 | “去重” |
 | `kb_clear` | 清空全部文档与索引；需要 `confirm=true` | “清空知识库” |
-| `kb_stats` | 文档、分块与向量数量，以及最近的入库记录 | “文库中有什么？” |
+| `kb_stats` | 文档、分块与向量数量、最近的入库记录，以及 `stale_docs`（由更早版本解析器写入的文档数） | “文库中有什么？” |
 | `kb_fetch` | 按 DOI 或 arXiv ID 下载 PDF（优先出版商正式版，校园网/机构订阅可直接下订阅版；无权限回退开放获取） | “下载 10.5555/12345678” |
 
-MCP 服务器暴露同样的九个工具，其中 `kb_scope` 由 `kb_status`（后台任务轮询）替代。配置与客户端配置片段见 [mcp-server/README.md](mcp-server/README.md)。
+MCP 服务器通过 9 个工具暴露同一个引擎，其中也提供 `kb_status`（后台任务轮询），因此只有 `kb_scope` 是 DSH 独有。配置与客户端配置片段见 [mcp-server/README.md](mcp-server/README.md)。
 
 ### 引擎能力
 
@@ -179,8 +180,20 @@ MCP 服务器暴露同样的九个工具，其中 `kb_scope` 由 `kb_status`（�
 - **引用关联。** 文内 `[n]` 标记解析到参考文献条目；Nature 风格的上标依据字体度量识别（`graphene1,2` 转为 `graphene[1,2]`）；被引文献按 DOI、规范化标题，或第一作者加年份与文库匹配，命中项在渲染结果中标记为 `[库内]`。
 - **快速与深度模式。** `quick` 直接返回混合检索结果（不进行重排、引用关联与相关文献检索），`deep` 运行完整链路。
 - **增量索引与去重。** SHA-256 内容哈希跳过未变更的文件（重复运行时约快 40 倍），并拦截跨路径的重复文档。
+- **元数据刷新与陈旧数据检测**（schema v4）。每条文档记录写入它时的解析器版本（`docs.indexed_with`），因此 `kb_stats` 能报告 `stale_docs`——由更早版本解析器写入、增量入库原本永远不会再碰的行。`kb_ingest(metadata_only=true)` 只重新抽取标题、作者、年份、期刊与 DOI，不重切块、不重嵌入（实测约 90 ms/篇）；`kb_ingest(rebuild=true)` 按库内路径原地重新解析全部文档。
 - **查询缓存。** 相同的查询与过滤条件不会重复计算；任何入库操作都会使其失效。
 - **常驻守护进程。** 模型只加载一次，进程崩溃后可自动恢复，插件停止时被回收。
+
+## 检索建议
+
+查询会按原样送入引擎：它不翻译、不扩写、不改写查询，因此检索效果取决于查询语言与库内正文语言是否匹配。典型文库以英文为主（实测正文约 98% 为英文），由此有三条实用规则：
+
+- **查询写成英文术语串。** BM25 按词元匹配，中文查询会让混合检索的关键词路基本空转——中文二元组无法匹配英文正文——命中只能靠向量侧的跨语言匹配。同一个问题，英文术语串的命中明显优于中文问句。
+- **用 3–12 个词的组合** `材料/体系 + 方法/工艺 + 性质/表征`，不要写整句提问：用 `graphene CVD copper single crystal nucleation suppression`，而不是“铜上化学气相沉积石墨烯时如何抑制成核”。
+- **限定条件放 `filters`，不要写进查询。** 年份、期刊、作者、章节与文件类型都属于元数据过滤；留在查询文本里只会把关键词浪费在正文并不包含的词上。
+- **只有确实需要中文文献时，才用原话另发一条中文查询**（例如库内还存放了中文综述）。
+
+当查询含中日韩字符而库内几乎全为英文时，引擎会在响应中附加 `lang_note` 说明这一点，插件会把它与结果一并渲染。
 
 ## 架构
 
@@ -193,12 +206,13 @@ plugin host (JS) or MCP server (server.py + engine_client.py)
    v
 kb_engine.py -- resident `serve` daemon (models load once)
    |-- ingest:  sha256 skip -> PyMuPDF extraction -> section chunking -> bge-small encode
-   |             (committed per file; the MCP server forks large batches as an async job
-   |              under .kb-jobs/, returning a job_id polled with kb_status, while the
-   |              DSH plugin runs the same batch synchronously under a 30-minute deadline)
+   |             (committed per file; above KB_ASYNC_THRESHOLD the batch is forked as a job
+   |              under .kb-jobs/ and a job_id is returned for kb_status to poll, while
+   |              metadata_only reads page 1 only and rebuild re-parses the library's
+   |              own recorded paths)
    |-- search:  SQL prefilter -> BM25 + vector -> RRF fusion -> bge-reranker rerank
    |             -> top-N verbatim passages with DOI, page, section and score
-   `-- storage: <kb_root>/kb.sqlite (docs, chunks, vecs, cache; schema v3,
+   `-- storage: <kb_root>/kb.sqlite (docs, chunks, vecs, cache; schema v4,
                 migrations gated by PRAGMA user_version)
 ```
 
@@ -221,7 +235,7 @@ kb_engine.py -- resident `serve` daemon (models load once)
 | [QUICKSTART.md](QUICKSTART.md) | 五分钟上手：依赖、索引、检索、常见问题 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 设计说明：存储模型、切分策略、检索流水线、引擎协议 |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出与引用规范：页码锚点、引用关联、快速与深度模式 |
-| [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移：`PRAGMA user_version` 门控，v1 到 v2 到 v3 |
+| [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移：`PRAGMA user_version` 门控，v1 到 v4 |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | 已知缺口：未修复问题、待验证项、回归验证方法与记录约定 |
 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具映射、异步行为与超时 |
 | [npm-package/README.md](npm-package/README.md) | npm 包文档与故障排查表 |
@@ -239,7 +253,7 @@ kb_engine.py -- resident `serve` daemon (models load once)
 | `KB_AUTO_PIP` | `0` | npm 包 | 设为 `1` 时在启动阶段安装缺失的 Python 依赖（固定 argv；默认仅打印命令）。动态插件宿主只报告，不安装 |
 | `KB_RAG_ROOT` | DSH：会话工作区 `.kb`；MCP：`~/.kb-rag` | MCP | 知识库目录；可用 `kb_root` 按次调用覆盖 |
 | `KB_RAG_PYTHON` | 当前解释器 | MCP | 引擎所用的解释器，以避免裸 `python` 解析到其他环境 |
-| `KB_ASYNC_THRESHOLD` | `25` | MCP | 待处理文件数超过该值时，`kb_ingest` 切换为后台任务 |
+| `KB_ASYNC_THRESHOLD` | `25` | 引擎 | 待处理文件数超过该值时，`kb_ingest` fork 为后台任务并返回 `job_id`（用 `kb_status` 轮询） |
 | `KB_SQLITE_WAL` | 关闭 | 引擎 | 设为 `1` 启用 SQLite WAL；当 `.kb` 目录会被同步时，默认值更安全 |
 | `UNPAYWALL_EMAIL` | 内置占位值 | 引擎 | `kb_fetch` 查询 Unpaywall 时使用的联系邮箱；建议设置为你自己的地址 |
 
@@ -267,7 +281,7 @@ kb-rag/
 - **页码锚点仅适用于 PDF。** TXT、MD 与 DOCX 文件，以及在 schema v3 之前入库的文档都没有页码，在使用 `force` 重新入库前只能定位到章节级别。
 - **引用关联需要重新入库。** 上标识别与当前的参考文献切分在解析阶段执行；较早建立的文库需要 `force` 才能获得这些能力。
 - **元数据可能误读。** 当 PDF 元数据缺失时，标题与年份由页面文本推断；Zotero 元数据会覆盖该结果。
-- **跨语言检索较弱。** 以中文查询检索英文全文主要依赖向量路径；本地查询翻译在规划中。
+- **跨语言检索较弱。** 以中文查询检索英文全文主要依赖向量路径；本地查询翻译在规划中。替代做法见[检索建议](#检索建议)。
 - **图注仅以文本形式存在。** 图注可作为文本检索，但仅出现在图像内部的内容无法检索。
 - **规模。** 关键词匹配为内存实现。超过数十万 chunk 后，FAISS HNSW 或 SQLite FTS5 是更合适的下一步。
 

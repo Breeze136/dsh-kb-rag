@@ -63,14 +63,17 @@ def _should_async(paths):
 
 @mcp.tool()
 async def kb_ingest(paths: list[str], kb_root: str = "", force: bool = False,
+                    metadata_only: bool = False, rebuild: bool = False,
                     async_mode: bool = False) -> str:
     """把本地文档（PDF/TXT/MD/DOCX）导入知识库并建立索引。支持单个文件或目录（递归扫描）；按章节切分并抽取元数据（标题/作者/年份/DOI）；本地 bge-small 模型生成向量（数据持久化在 kb_root）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记 duplicate 跳过（增量）。
-    大批量自动转后台：当待处理文件很多（目录或 ≥KB_ASYNC_THRESHOLD 个文件，默认 25），本工具自动改用后台执行并立即返回 job_id——宿主单次调用超时（如 Kimi Work 60s）不影响入库，随后用 kb_status(job_id=...) 轮询直到 status=done 拿到 totals。文件少时同步执行直接返回结果。显式 async_mode=true 强制后台，false 强制同步。"""
+    大批量自动转后台：当待处理文件很多（目录或 ≥KB_ASYNC_THRESHOLD 个文件，默认 25），本工具自动改用后台执行并立即返回 job_id——宿主单次调用超时（如 Kimi Work 60s）不影响入库，随后用 kb_status(job_id=...) 轮询直到 status=done 拿到 totals。文件少时同步执行直接返回结果。显式 async_mode=true 强制后台，false 强制同步。
+    metadata_only=true：只刷新元数据（重抽标题/作者/年份/期刊/DOI，不重切块、不重嵌入；实测约 90 ms/篇）——引擎的解析改进不会自动作用于老库，用它让已有文档受益；rebuild=true：按库内现有路径原地重灌全部已入库文档（此时 paths 可省略；不要改成传目录，force 会绕过去重检测而重复入库）。两者可组合使用。"""
+    payload = {"paths": paths, "kb_root": _root(kb_root), "force": force,
+               "metadata_only": metadata_only, "rebuild": rebuild}
     effective_async = async_mode or _should_async(paths)
     if effective_async:
-        return render_async(await engine.call("ingest_async", {
-            "paths": paths, "kb_root": _root(kb_root), "force": force}))
-    return render_ingest(await engine.call("ingest", {"paths": paths, "kb_root": _root(kb_root), "force": force}))
+        return render_async(await engine.call("ingest_async", dict(payload, command="ingest")))
+    return render_ingest(await engine.call("ingest", payload))
 
 
 @mcp.tool()
@@ -100,7 +103,7 @@ async def kb_search(query: str, depth: str = "quick", top_k: int | None = None,
                     kb_root: str = "", authors: str = "", title: str = "",
                     journal: str = "", kind: str = "", section: str = "",
                     year: str = "") -> str:
-    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。depth 双模式：quick（默认）=快速检索，查到信息马上给——工具返回后立即作答，一两句话直接给用户要的信息，不展开背景不做延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 可以是术语、数值、化学式或中文短语。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
+    """在知识库中做混合检索（关键词 BM25 + 向量余弦 RRF 融合），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。depth 双模式：quick（默认）=快速检索，查到信息马上给——工具返回后立即作答，一两句话直接给用户要的信息，不展开背景不做延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 "graphene CVD copper single crystal nucleation suppression"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译。mode 可选 keyword/vector/hybrid（默认 hybrid）。filters 用 authors/title/journal/kind/section/year（year 可用 ">=2020" 形式）做元数据预过滤。回答用户时必须标注来源：有 DOI 用 [作者, 年份, 期刊](https://doi.org/DOI)，无 DOI 用 [作者, 年份, 文件名]。"""
     filters = {k: v for k, v in [("authors", authors), ("title", title), ("journal", journal),
                                  ("kind", kind), ("section", section), ("year", year)] if v}
     call = {"query": query, "depth": depth, "mode": mode,
