@@ -1,4 +1,4 @@
-# QUICKSTART — 五分钟上手（v1.6.6）
+# QUICKSTART — 五分钟上手（v1.6.7）
 
 本页是 **DSH 插件形态** 的 5 分钟路线：装依赖 → 建库 → 检索 → 常见坑。想用 MCP（Claude Desktop / Kimi / Cursor 等桌面 agent）？直接看 [mcp-server/README.md](mcp-server/README.md)。
 
@@ -45,7 +45,7 @@ DSH 的 profile 是 **pnpm 工作区**，升级走 dsh 命令（它会用 pnpm �
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # 升到 latest（推荐）
-dsh plugin --profile web add dsh-kb-rag@1.6.6    # 或钉版本
+dsh plugin --profile web add dsh-kb-rag@1.6.7    # 或钉版本
 ```
 
 或重跑安装器（等价，顺带校准 Python 依赖与模型缓存）：

@@ -9,7 +9,7 @@
 
 Static DSH plugin (Host side): local literature knowledge-base RAG. Lightweight, fast, precise — search + cited QA, token-saving.
 
-> **Latest version v1.6.6** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
+> **Latest version v1.6.7** — install with `dsh plugin --profile web add dsh-kb-rag@latest`. A DSH profile is a pnpm workspace, so do not run `npm install` inside it; for a by-hand deployment see [Option 3](#option-3--manual-npm-install-bring-your-own-activation).
 
 Import PDF / TXT / MD / DOCX files, whole folders, or a Zotero library into a local knowledge base (workspace `/.kb`),
 and run **BM25 + FAISS vector + bge-reranker** hybrid search so the model answers with exact provenance.
@@ -52,7 +52,7 @@ Queries go to the engine verbatim: it never translates, expands or rewrites them
 
 - **Write queries as English term strings.** BM25 matches on tokens, so a CJK query leaves the keyword half of hybrid ranking idle (CJK bigrams cannot match English body text) and the hit rests on cross-language vector similarity alone; for the same question an English term string retrieves noticeably better.
 - **Use the 3–12 word pattern** `material/system + method/process + property/characterisation` rather than a sentence, e.g. `graphene CVD copper single crystal nucleation suppression`.
-- **Put limits in `filters`, not in the query** — year, journal, author, section and kind are metadata filters, and keywords spent on them are keywords the ranked body text cannot match.
+- **Put limits in `filters`, not in the query** — year, journal, author, section and kind are metadata filters, and keywords spent on them are keywords the ranked body text cannot match. One caveat: **`journal` is filled only by the Zotero migration path**, so it stays `NULL` for documents indexed with `kb_ingest` and filtering on it usually returns nothing; use author, year, title or section instead.
 - **Send a second query in the original language only when documents in that language are actually wanted.**
 
 The engine answers a CJK query against an almost entirely English library with a `lang_note` field describing this, and the plugin renders that note with the results.
@@ -113,7 +113,7 @@ Run **inside the DSH profile/deployment directory** (this is where the plugin lo
 
 ```bash
 cd <your-dsh-profile-dir>          # e.g. ~/.dsh/profiles/web
-npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.6 to pin
+npm install dsh-kb-rag@latest      # or npm install dsh-kb-rag@1.6.7 to pin
 ```
 
 Then activate it: add `"dsh-kb-rag"` to `dsh.profile.bundles` in the profile's `package.json`, or copy the bundled `cordis.patch.yml` insert into your own patch layer. Restart DSH and open a new session.
@@ -130,7 +130,7 @@ Install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag            # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.6      # or pin
+dsh plugin --profile web add dsh-kb-rag@1.6.7      # or pin
 ```
 
 **Installed manually via npm** (Option 3) — stay with npm in that profile dir:

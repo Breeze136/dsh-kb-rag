@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.7] - 工具描述与文档写明 `filters.journal` 的可用范围
+
+### 文档：写明 `filters.journal` 的可用范围（BACKLOG §2.8 的 ④，纯文档，无行为变更）
+- **问题**：`extract_meta()` 从不给 `journal` 赋值，只有 Zotero 迁移会写入。因此 `kb_ingest` 建起来的库里该列恒为 `NULL`，`filters.journal` 必然零命中——而工具描述此前只写"期刊子串匹配"，等于给了模型一个静默失效的过滤器。
+- **改动**：`filterSchema.journal` 的字段说明与 `kb_search` 的 filters 说明（`plugin/host.js` 与 `npm-package/lib/index.js` 两个副本、`mcp-server/server.py` 的 `kb_search`/`kb_rag` docstring）都写明"仅 Zotero 迁移填充，`kb_ingest` 入库的文档为 `NULL`，用它过滤通常零命中，请改用 authors/year/title"；`README.md` / `README_CN.md` / `npm-package/README.md` / `mcp-server/README.md` 与 `docs/DESIGN.md`（§4、§5）同步说明。
+- **未做**：字段本身的补全（Crossref 按 DOI 反查权威期刊名）与 §2.6 的 DOI 补全合并评估，仍留在 `docs/BACKLOG.md` §2.8 的 ③。
+
+### 发布前隐私清理（仅注释与文档，无行为变更）
+- `kb_engine.py`（及 `npm-package/kb_engine.py` 副本）中说明"PDF `/Author` 可能是排版/制作人员"的三处注释、`CHANGELOG.md` 的实测案例、`docs/BACKLOG.md` §2.8 与 §2.11 的实测记录里含**真实姓名与真实期刊名**（来自实测 PDF 的生产元数据与 Zotero 记录）。按 `AGENTS.md` 的发布约定统一换成中性占位（`Smith, John`、`Author A`、`Carbon`），具体无关命中文献名改为"三篇不同主题的文档"。
+- 引擎文件因此哈希变化（`fde65ed6` → `ae1da639`），但**只动了注释**：功能与行为不变，`kb_engine.py` 与 `npm-package/kb_engine.py` 仍逐字节一致。
+
 ## [1.6.6] - 元数据刷新通道 + 陈旧数据检测 + 入库进度可见 + 检索语言归 AI 层
 
 ### 新增：元数据刷新通道（`kb_ingest`）
@@ -9,7 +20,7 @@
 
 ### 新增：DOI 与元数据的抽取改进（`PARSER_REV` 2 → 3）
 - **DOI 增加 XMP 来源**：部分出版商 PDF 正文里根本不印 DOI，只写在 XMP 元数据里（实测 Science Advances / RSC / Nature 系）；**16 篇**因此恢复，全库 DOI 覆盖率 **46% → 66%**（191 → 207 篇）
-- **不再盲信 PDF 生产元数据**：`/Author` 形如单个「姓, 名」（排版/制作人员）且首页或文件名给出多作者信号时弃用、改走文件名回退；标题里的生产残片（如 `*.indd`）一律拒绝。实测某篇的 `title='nmat1805 Ramesh Review.indd'`、`authors='Simpson, Derna'` 被修正为真实标题与作者，并因此**恢复了「引文 → 库内匹配」**（`[库内]` 标记此前静默失效）
+- **不再盲信 PDF 生产元数据**：`/Author` 形如单个「姓, 名」（排版/制作人员）且首页或文件名给出多作者信号时弃用、改走文件名回退；标题里的生产残片（如 `*.indd`）一律拒绝。实测某篇的 `title='manuscript-v3 Review.indd'`、`authors='Smith, John'` 被修正为真实标题与作者，并因此**恢复了「引文 → 库内匹配」**（`[库内]` 标记此前静默失效）
 
 ### 新增：陈旧数据检测（schema v3 → v4）与升级提示
 - 每条 `docs` 记录写入 `indexed_with`（形如 `<引擎版本>/rev<N>`）；`PARSER_REV` **只在改动会写进库的解析逻辑时 +1**——判定只看 rev、不看引擎版本号，否则每次发版都会把整库标成陈旧，提示变成噪音

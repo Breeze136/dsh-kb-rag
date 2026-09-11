@@ -1,4 +1,4 @@
-// kb-rag DSH dynamic plugin — Client half (v1.6.6)
+// kb-rag DSH dynamic plugin — Client half (v1.6.7)
 // 用法：把本文件内容作为 cordis_define 的 code.client（纯函数体，直接粘贴）。
 // 说明：注册 kb_rag/kb_search 的工具卡片视图（部分 DSH 界面会渲染）；
 //       不渲染的界面不受影响——核心可点击来源由 Host 输出的 markdown 链接承担。

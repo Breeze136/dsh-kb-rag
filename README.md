@@ -138,7 +138,7 @@ A DSH profile is a **pnpm workspace** (it contains `pnpm-lock.yaml`, and `dsh pl
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag          # latest
-dsh plugin --profile web add dsh-kb-rag@1.6.6    # or pin a version
+dsh plugin --profile web add dsh-kb-rag@1.6.7    # or pin a version
 ```
 
 Re-running the installer is equivalent and additionally reconciles Python dependencies:
@@ -190,7 +190,7 @@ Queries reach the engine verbatim: it never translates, expands or rewrites them
 
 - **Write queries as English term strings.** BM25 matches on tokens, so a CJK query leaves the keyword half of the hybrid ranking idle — CJK bigrams cannot match English body text — and the hit depends on cross-language vector similarity alone. For the same question, an English term string retrieves noticeably better than its translation.
 - **Use the 3–12 word pattern** `material/system + method/process + property/characterisation`, not a full question: `graphene CVD copper single crystal nucleation suppression` rather than "how is nucleation suppressed on copper during chemical vapour deposition of graphene".
-- **Put limits in `filters`, not in the query.** Year, journal, author, section and file kind are metadata filters; keeping them in the query text spends keywords on terms the ranked body text does not contain.
+- **Put limits in `filters`, not in the query.** Year, journal, author, section and file kind are metadata filters; keeping them in the query text spends keywords on terms the ranked body text does not contain. One caveat: **`journal` is populated only by the Zotero migration path**, so it stays `NULL` for everything indexed with `kb_ingest` and filtering on it usually returns nothing — use author, year, title or section instead.
 - **Send a second query in the original language only when documents in that language are actually wanted** — for example when the library also holds Chinese-language reviews.
 
 When a query contains CJK characters and the library is almost entirely English, the engine adds a `lang_note` to the response saying so, and the plugin renders it next to the results.

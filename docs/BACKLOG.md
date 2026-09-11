@@ -2,7 +2,7 @@
 
 > 本文件记录**尚未修复**的已知问题、待验证项与验证方法。
 > 已发布的变更写 [`CHANGELOG.md`](../CHANGELOG.md)；发布流程与隐私约定写 [`AGENTS.md`](../AGENTS.md)。
-> 最近更新：1.6.6。
+> 最近更新：1.6.7。
 
 ---
 
@@ -77,14 +77,19 @@
 
 > 重灌注意：**不能按目录传参**。`force=True` 会绕过去重检测（`kb_engine.py` 中的 `if dup is not None and not force`），传目录会把内容重复的文件当新文献重复入库（实测某目录会多带 31 个重复文件 + 1 个 Office 临时锁文件）。要按库内现有文件路径精确重灌。
 
-### 2.8 元数据字段 `journal` 全库为空（中，已定性未修复）
+### 2.8 元数据字段 `journal` 全库为空（中；④ 文档已写明，③ 字段补全未做）
 
 实测：`journal` **非空 0 / 312（0%）**，而 `title` 100%、`authors` 85%、`year` 99%、`doi` 66%。
 
 - **原因**：`extract_meta()` 把 `journal` 初始化为 `None` 后**从未赋值**（见 `kb_engine.py` 中 `title = authors = journal = doi = None` 之后的全部逻辑）；只有 **Zotero 迁移**路径会从 `publicationTitle` / `journalAbbreviation` 填（`cmd_zotero` 的 `meta["journal"]`）。因此用 `kb_ingest` 建起来的库，这一列永远是 NULL。
-- **影响**：① `filters.journal` 必然零命中（实测：`filters={authors:"Ramesh", journal:"Nature"}` 返回 0 条，去掉 journal 立刻命中）；② 来源行与援引格式里的"期刊"缺失（`[作者, 年份, 期刊](doi)` 退化成没有期刊）；③ 关联文献的"同期刊"打分信号恒为空转。
+- **影响**：① `filters.journal` 必然零命中（实测：`filters={authors:"Author A", journal:"Carbon"}` 返回 0 条，去掉 journal 立刻命中）；② 来源行与援引格式里的"期刊"缺失（`[作者, 年份, 期刊](doi)` 退化成没有期刊）；③ 关联文献的"同期刊"打分信号恒为空转。
 - **可选修法**：① 首页启发式抽取（噪声大，需严格白名单/位置约束）；② 由 DOI 前缀映射**出版商**（10.1038→Nature 系、10.1103→APS…，但那是出版商不是期刊名，容易误导）；③ Crossref 按 DOI 反查权威期刊名（需联网，200+ 次请求，一次可缓存）；④ 维持现状并**在文档中写明"期刊字段只由 Zotero 迁移填充"**。
 - **倾向**：短期做 ④（先把文档说准），中期与 §2.6 的 Crossref 方案合并做 ③。
+- **④ 已完成（本次改动，尚未发版）**：把"期刊字段只由 Zotero 迁移填充"写进所有面向模型与用户的文本——
+  - 工具 schema（两个插件副本 `plugin/host.js` / `npm-package/lib/index.js` 的 `filterSchema.journal`、`mcp-server/server.py` 的 `kb_search` / `kb_rag` docstring）：字段说明里写明"仅 Zotero 迁移填充，`kb_ingest` 入库的文档为 `NULL`，用它过滤通常零命中，请改用 authors/year/title"；`kb_search` 的 filters 说明也加了同样一句
+  - README（`README.md` 英文、`README_CN.md`、`npm-package/README.md` 的 Query guidance，`mcp-server/README.md` 的已知限制）：同一句提醒（顺手修掉 `README_CN.md` "由此有三条实用规则"与 4 条列表不符的笔误）
+  - `docs/DESIGN.md`：§4 元数据抽取列一条"`journal` 不由本通道填充"，§5 加"预过滤字段"条目
+  - 仍未做：③ Crossref 按 DOI 反查真正的期刊名（与 §2.6 合并，需联网 + 缓存），以及 `related` 的"同期刊"打分信号对非 Zotero 库仍恒为空转
 
 ### 2.9 大规模写入的性能与内存（低，运维提示）
 同一次全量 `rebuild` 的两次实测差异很大，原因是机器状态而非代码：
@@ -112,7 +117,7 @@
 | 场景 | 实测结果 |
 |---|---|
 | 陈旧检测闭环 | 用旧引擎（rev3）force 重灌 4 篇 → `stale_docs=4`（`stale_sample` 精确列出这 4 篇）→ `metadata_only` 刷新 → `stale_docs=0` |
-| Zotero 迁移（`limit=5`） | 新增 4 / 内容重复跳过 1；`journal`（Science / Nano Letters / ACS Nano）、`doi`、`zotero_key` 全部写入——**这是 `journal` 唯一的来源**（见 §2.8） |
+| Zotero 迁移（`limit=5`） | 新增 4 / 内容重复跳过 1；`journal`（Zotero 的 `publicationTitle`，如 `Carbon`）、`doi`、`zotero_key` 全部写入——**这是 `journal` 唯一的来源**（见 §2.8） |
 | 扫描件/无文本层 PDF | 逐文件失败 `✗ 1.pdf · ValueError: no text extracted`，不影响整批 |
 | 全量 rebuild 转后台 | 312 篇 `updated`，分块/向量与重灌前**完全一致**（23447 / 20176）→ 解析与嵌入确定性 |
 | 重灌期间并发检索 | 9 次调用全部成功，无 `database is locked` |
@@ -129,7 +134,7 @@
 
 - **结论倾向**：归一化放 **AI 层**（调用方把查询写成英文术语串），引擎保持"按原样检索"（`kb_engine.py` 已注释不接 zh→en 翻译）；引擎侧最多加零成本检测提示，不改写查询。
 - **状态**：方案草案已写（字段约定、query 模板与正反例、语言决策表、二次查询时机、可直接粘贴的工具描述与 README 文案），**未入库、未改任何代码**；待决定是否实施、是否随 1.6.6 一起。
-- **补充实测（2026-09-11）**：向量路**没有相关性下限**——纯乱码中文 query（"魑魅魍魉麒麟饕餮"）仍返回 Top-3（Bi₂WO₆ / MXene / Bi₂WO₆ 综述，全部无关）。因此"零命中"几乎不出现；`note: 知识库为空或过滤条件过严` 只在过滤真的排空候选时触发（实测：给 journal 一个不存在的值）。若希望无关 query 返回空，需要引入最低分阈值（产品决策，未做）。
+- **补充实测（2026-09-11）**：向量路**没有相关性下限**——纯乱码中文 query（"魑魅魍魉麒麟饕餮"）仍返回 Top-3（三篇不同主题的文档，全部无关）。因此"零命中"几乎不出现；`note: 知识库为空或过滤条件过严` 只在过滤真的排空候选时触发（实测：给 journal 一个不存在的值）。若希望无关 query 返回空，需要引入最低分阈值（产品决策，未做）。
 
 ---
 
