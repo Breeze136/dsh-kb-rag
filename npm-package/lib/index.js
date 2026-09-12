@@ -3,9 +3,14 @@
 // 加载：部署的 cordis 组合中加入本包（cordis-plugin-loader 按 npm 包名解析）。
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { fileURLToPath } from "node:url";
+import { guidedDescription, resultNotes, makeThrottle } from "./guidance.js";
 
 const name = "kb-rag";
-const inject = ["tools", "timer"];
+// subprocess 必须声明在 inject 里：cordis 只等待 inject 中的服务，而 loader 并发激活各 entry
+// （cordis-plugin-loader 的 group 用 Promise.allSettled），本包体积小、往往在
+// @deepseek-ai/dsh-subprocess-local 注册服务之前就执行 apply()，这时 ctx.get("subprocess")
+// 是 undefined（未注册返回 undefined 而不抛错）→ 提前 return，10 个工具全部不注册。
+const inject = ["tools", "timer", "subprocess"];
 
 const ENGINE_DIR = fileURLToPath(new URL("..", import.meta.url)); // package root
 const ENGINE_PATH = fileURLToPath(new URL("../kb_engine.py", import.meta.url));
@@ -18,11 +23,45 @@ const SCOPE_NOTE = {
 const STRICT_NOTE = '严格模式：答案仅允许基于本次检索返回的 evidence/results 内容；禁止补充库外知识、常识外延或未出现在证据中的文献与数据；证据不足时直接说明"根据现有资料无法回答"。';
 
 function apply(ctx) {
+  // inject 已声明 subprocess，正常情况下这里一定有值；保留兜底只为诊断注入被改坏的场景。
   const subprocess = ctx.get("subprocess");
   if (subprocess === undefined) {
-    console.error("[kb-rag] subprocess service unavailable; tools not registered");
+    console.error("[kb-rag] subprocess service unavailable despite inject; tools not registered");
     return;
   }
+
+  // ---- 提示层：规则全部声明在 guidance.js，这里只做注入与节流记账 ----
+  // 会话级状态落地前先用进程内 Map（与现有 scopePref 同粒度）；makeThrottle 接受任意
+  // 读写适配器，将来换成「按会话 + 工作区 state.json」不用改任何规则。
+  const guidanceSeen = new Map();
+  const guidanceThrottle = makeThrottle(
+    (id) => guidanceSeen.get(id),
+    (id, value) => { guidanceSeen.set(id, value); },
+  );
+  // 描述注入：agent 每轮都会读到工具描述，调用纪律就落在这里（规则来自 guidance.js）
+  const tool = (spec) => defineTool(Object.assign({}, spec, {
+    description: guidedDescription(spec.name, spec.description),
+  }));
+  // 结果注入：把命中规则的提示追加到渲染文本末尾；tellUser 的那些标成"可转达给用户"
+  const withNotes = (toolName, renderer) => (args, value) => {
+    const out = renderer(args, value);
+    try {
+      const notes = resultNotes(toolName, value, guidanceThrottle);
+      if (notes.lines.length === 0 && notes.userHints.length === 0) return out;
+      const extra = notes.lines.slice();
+      if (notes.userHints.length > 0) extra.push("（可转达给用户）" + notes.userHints.join(" "));
+      const blocks = Array.isArray(out) ? out.slice() : [{ type: "text", text: String(out) }];
+      const last = blocks[blocks.length - 1];
+      if (last !== undefined && last !== null && last.type === "text" && typeof last.text === "string") {
+        blocks[blocks.length - 1] = Object.assign({}, last, { text: last.text + "\n\n" + extra.join("\n") });
+      } else {
+        blocks.push({ type: "text", text: extra.join("\n") });
+      }
+      return blocks;
+    } catch (e) {
+      return out;   // 提示层出错绝不影响检索结果
+    }
+  };
 
   let daemon = null;
   let spawning = null;
@@ -500,6 +539,12 @@ function apply(ctx) {
     lines.push("总耗时 " + (totalMs >= 1000 ? (totalMs / 1000).toFixed(1) + "s" : totalMs + "ms")
       + (value.embedding ? " · " + value.embedding : "")
       + (typeof totals.chunks === "number" ? " · " + totals.chunks + " 块 / " + (totals.vectors || 0) + " 向量" : ""));
+    // 「N 块 / 0 向量」必须给原因：以前只有 embedding=null，用户看不出向量根本没建，
+    // 也不知道检索已经退化成纯关键词（issue #2）。
+    if (value.embedding_error) {
+      lines.push("⚠ 未建向量（嵌入模型不可用：" + String(value.embedding_error).slice(0, 160)
+        + "）—— 本次只建了关键词索引，检索会降级为纯关键词。修好环境后重跑 kb_ingest 即可补齐缺失向量（无需全量重建）。");
+    }
     if (files.length > 0) {
       lines.push("");
       lines.push("**最近入库（滚动）**");
@@ -526,6 +571,26 @@ function apply(ctx) {
     const lines = [];
     lines.push("**知识库统计** · " + (value.docs || 0) + " 文档 / " + (value.chunks || 0) + " 块 / " + (value.vectors || 0) + " 向量");
     if (value.db) lines.push("数据库：" + value.db);
+    // 向量链路状态：缺失向量是"检索退化成纯关键词"的直接信号，以前完全没渲染（issue #2）
+    if (typeof value.embedding === "string" && value.embedding.length > 0) lines.push("嵌入模型：" + value.embedding);
+    if (value.embedding_error) lines.push("⚠ 嵌入模型加载失败：" + String(value.embedding_error).slice(0, 160));
+    // 计算设备：装了 GPU 却没吃上、或 OOM 已回退 CPU —— 这两种情况以前完全看不出来
+    const dev = value.device !== null && typeof value.device === "object" ? value.device : null;
+    if (dev !== null) {
+      const bits = [];
+      if (dev.embed_device) bits.push("嵌入=" + dev.embed_device);
+      if (dev.rerank_device) bits.push("精排=" + dev.rerank_device);
+      if (dev.gpu) bits.push(dev.gpu);
+      if (dev.cuda_available === false) bits.push("CUDA 不可用（torch " + (dev.torch || "?") + "）→ 装 CUDA 版 torch 可加速");
+      else if (dev.cuda_available === true && !dev.embed_device) bits.push("CUDA 可用（模型未加载）");
+      if (dev.note) bits.push(dev.note);
+      if (bits.length > 0) lines.push("计算设备：" + bits.join(" · "));
+    }
+    const health = value.health && typeof value.health === "object" ? value.health : null;
+    if (health !== null && (Number(health.missing_vecs) > 0 || Number(health.orphan_chunks) > 0)) {
+      lines.push("⚠ 索引不完整：缺失向量 " + (health.missing_vecs || 0) + " 块 · 孤儿分块 " + (health.orphan_chunks || 0)
+        + " —— 缺失向量的分块不参与向量检索；重跑 kb_ingest 可补齐，或用 kb_ingest(rebuild=true) 全量重灌。");
+    }
     const recent = Array.isArray(value.recent) ? value.recent : [];
     if (recent.length > 0) {
       lines.push("");
@@ -650,6 +715,11 @@ function apply(ctx) {
     if (typeof value.lang_note === "string" && value.lang_note.length > 0) {
       lines.push("提示：" + value.lang_note);
     }
+    // 引擎的降级原因（如"向量索引缺失，降级为纯关键词"）以前被丢弃：用户只看到检索方式从
+    // 混合变成关键词，不知道原因。只在含"降级"时透传，避免重复"命中 N 块，返回 Top-N"这类常规文案。
+    if (typeof value.note === "string" && value.note.indexOf("降级") >= 0) {
+      lines.push("提示：" + String(value.note).replace(/命中 \d+ 块，返回 Top-\d+/, "").trim());
+    }
     items.forEach(function (r, i) {
       const title = String(r.title || r.file || "");
       const doi = typeof r.doi === "string" && r.doi.length > 0 ? r.doi : null;
@@ -755,7 +825,7 @@ function apply(ctx) {
     },
   };
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_ingest",
     description: "把本地文档（PDF/TXT/MD/DOCX）导入 DSH 知识库并建立索引（轻量 RAG 工作流的入库步骤）。支持单个文件或目录（递归扫描并只处理 PDF/TXT/MD/DOCX）；按章节切分并抽取元数据（标题/作者/年份/DOI）；同时用本地 bge-small 模型生成向量（数据持久化在工作区/.kb）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记为 duplicate 跳过（增量）。paths 用工作区内的相对路径或绝对路径。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。重复调用安全。metadata_only=true 只刷新元数据（秒级，不重切块/不重嵌入，适合引擎升级后让老库的标题/作者/DOI 生效）；rebuild=true 原地重灌库内全部已入库文档（不会因传目录而重复入库）；大批量会自动转后台并返回 job_id，用 kb_status 轮询。",
     parameters: {
@@ -767,7 +837,7 @@ function apply(ctx) {
       metadata_only: { type: "boolean", description: "true 时只刷新元数据（重抽标题/作者/年份/期刊/DOI，秒级；不重切块、不重嵌入；内容已变的文件不动）。" },
       rebuild: { type: "boolean", description: "true 时原地重灌库内全部已入库文档（路径取自库内，可省略 paths）。大批量会自动转后台并返回 job_id。" },
     },
-    output: { schema: { type: "json" }, render: renderIngest },
+    output: { schema: { type: "json" }, render: withNotes("kb_ingest", renderIngest) },
     timeoutMs: 1800000,
     execute(args, exec) {
       return runEngine("ingest", {
@@ -781,7 +851,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_search",
     description: "在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 \"graphene CVD copper single crystal nucleation suppression\"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 \">=2020\" 形式）；其中 journal 目前只由 Zotero 迁移填充，kb_ingest 入库的文档该字段为 NULL，用它过滤通常零命中。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。",
     parameters: {
@@ -796,7 +866,7 @@ function apply(ctx) {
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
     },
-    output: { schema: { type: "json" }, render: renderSources },
+    output: { schema: { type: "json" }, render: withNotes("kb_search", renderSources) },
     presentCall: presentQueryCall,
     execute(args, exec) {
       const strict = args.strict === undefined ? scopeStrict : args.strict === true;
@@ -815,7 +885,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_rag",
     description: "在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链「《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问」；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。",
     parameters: {
@@ -828,7 +898,7 @@ function apply(ctx) {
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
     },
-    output: { schema: { type: "json" }, render: renderSources },
+    output: { schema: { type: "json" }, render: withNotes("kb_rag", renderSources) },
     presentCall: presentQueryCall,
     execute(args, exec) {
       const strict = args.strict === undefined ? scopeStrict : args.strict === true;
@@ -845,7 +915,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_zotero",
     description: "把本地 Zotero 文献库中带 PDF 附件的文献批量迁移到知识库（轻量 RAG 工作流的 Zotero 接口）。读取 zotero.sqlite（默认自动定位 ~/Zotero、~/Documents/Zotero、%APPDATA% 配置；找不到时用 zotero_db 显式指定），解析每篇文献的元数据（标题/作者/年份/期刊/DOI）与 PDF 附件路径（storage 目录），逐篇解析入库并生成向量；已入库附件自动跳过，重复内容标记 duplicate 跳过（增量，可反复运行）。附件文件本体缺失的条目标记为 missing 并跳过（不尝试下载）。dry_run=true 时只列候选不写入；limit 限制迁移条数。",
     parameters: {
@@ -855,7 +925,7 @@ function apply(ctx) {
       force: { type: "boolean", description: "true 时强制重新解析已入库附件（默认 false）。" },
       dry_run: { type: "boolean", description: "true 时只列候选文献，不导入（默认 false）。" },
     },
-    output: { schema: { type: "json" }, render: renderIngest },
+    output: { schema: { type: "json" }, render: withNotes("kb_zotero", renderIngest) },
     timeoutMs: 1800000,
     execute(args, exec) {
       return runEngine("zotero", {
@@ -868,7 +938,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_dedup",
     description: "清理知识库中的重复文档：删除 sha256 与早期文档相同的后来入库项（保留最早 id）并同步清除其分块/向量/缓存。返回 removed 与当前总数。反复调用安全。",
     parameters: {
@@ -880,7 +950,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_clear",
     description: "清空知识库中的全部文献与索引（文档/分块/向量/缓存全部删除，不可恢复；数据库文件保留结构）。必须显式传 confirm: true 才会执行（否则拒绝）。清空后可重新 kb_ingest 或 kb_zotero 重建。",
     parameters: {
@@ -893,7 +963,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_fetch",
     description: "按 DOI / arXiv ID 把论文 PDF 下载到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。按标准元标签与公开 API 解析地址，顺序为：arXiv 直连 → 出版商正式版（落地页 citation_pdf_url；在校园网/机构订阅网络下可直接取得订阅版 PDF，无需额外配置）→ 落地页内常见 pdf 链接 → 开放获取兜底（Unpaywall / Crossref）。只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。",
     parameters: {
@@ -909,7 +979,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_scope",
     description: "设置/查看知识库查询范围、回答深度与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。depth 可选：quick=快速检索（亚秒级响应，直出结果）；deep=深度检索（重排序+引文关联全链路，跨文献综合论述）。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false）。用户说\"封闭库/全网/都要/严格只按库内/快速检索/深度检索\"等要求时，调本工具设定后再检索。",
     parameters: {
@@ -928,7 +998,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_stats",
     description: "查看知识库统计：文档数、分块数、向量数、最近入库列表及数据库位置。用于检查哪些文档已入库、索引状态；检索无命中时先调它确认库里有什么。",
     parameters: {
@@ -940,7 +1010,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register(tool({
     name: "kb_status",
     description: "查询后台任务进度或结果。大批量入库（kb_ingest）会自动转后台并返回 job_id，用本工具轮询：running 时给出已处理篇数/错误数/分块数，done 时给出 totals 与最近 20 条文件，error/not_found 时说明原因。宿主调用超时不会中断后台任务。",
     parameters: {

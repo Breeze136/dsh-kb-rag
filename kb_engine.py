@@ -34,7 +34,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 SUPPORTED_EXTS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
 
 # 解析器版本：**只在改动会写进库的解析逻辑时 +1**（分块、元数据/标识符抽取、引文切分）。
@@ -1200,11 +1200,151 @@ def _migrate(db, created):
 
 _EMBEDDER = None
 _EMBED_ERR = None
+_EMBED_ERR_AT = 0.0
 _EMBED_NAME = None
 
 BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 
 _HF_MIRROR = "https://hf-mirror.com"
+
+
+def _env_float(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+# 模型加载失败的重试间隔（秒）。失败状态以前在守护进程内**永久**缓存：依赖装好、模型就位后
+# 同一进程依然返回 None（表现为"修了还是没用"，必须杀掉守护进程或重启 DSH 才恢复，见 issue #2）。
+# 0 = 每次调用都重试；负数 = 永不重试（旧行为）。守护进程内可用 reload 命令立即清缓存重试。
+MODEL_RETRY_SECS = _env_float("KB_MODEL_RETRY_SECS", 120.0)
+
+
+def _retry_due(err_at):
+    """失败缓存是否已过期（决定这次调用是否重新尝试加载模型）。"""
+    if MODEL_RETRY_SECS < 0:
+        return False
+    return (time.time() - err_at) >= MODEL_RETRY_SECS
+
+
+# ---------------------------------------------------------------- device / batch
+#
+# 设备策略：默认 auto = **不改动** sentence-transformers 的选择 —— 只要解释器里装的是
+# CUDA 版 torch，模型就会自动加载到 GPU（引擎不需要为此写任何调用代码）。
+# KB_DEVICE=cpu 可强制 CPU（显存紧张 / 排障 / 与其它吃显存的程序共存）；=cuda / =cuda:1 / =mps 显式指定。
+# 批大小可配：GPU 上 batch=32 喂不饱算力，未配置时按设备自动给默认值。
+
+KB_DEVICE = (os.environ.get("KB_DEVICE") or "auto").strip().lower()
+_CUDA = None
+_DEVICE_NOTE = None    # 例如 "embed: CUDA OOM → 已回退 CPU"：让 kb_stats/kb_ingest 看得到
+
+
+def _device_kwargs():
+    """auto 时不传 device（保持自动选择）；显式设置时才传给模型构造器。"""
+    if KB_DEVICE in ("", "auto", "none"):
+        return {}
+    return {"device": KB_DEVICE}
+
+
+def _cuda_available():
+    global _CUDA
+    if _CUDA is None:
+        try:
+            import torch
+            _CUDA = bool(torch.cuda.is_available())
+        except Exception:
+            _CUDA = False
+    return _CUDA
+
+
+def _batch_size(env_name, cpu_default, gpu_default):
+    """批大小可配；未配时按设备给默认值（`KB_EMBED_BATCH` / `KB_RERANK_BATCH`）。"""
+    raw = os.environ.get(env_name)
+    if raw:
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            pass
+    return gpu_default if _cuda_available() else cpu_default
+
+
+def _is_oom(err):
+    return "out of memory" in str(err).lower()
+
+
+def _free_cuda_cache():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+_BATCH_DEFAULTS = {"embed": (32, 128), "rerank": (16, 64)}
+
+
+def _with_oom_retry(tag, model, run):
+    """run(batch_size) → 结果。显存不足时：清缓存 + 缩到 batch=4 重试；仍 OOM 就回退 CPU 再试。
+    没有这层，一次 OOM 就等于"这个会话再也用不了向量"（与 issue #2 的永久缓存同一个坑）。"""
+    cpu_default, gpu_default = _BATCH_DEFAULTS.get(tag, (16, 16))
+    try:
+        return run(_batch_size("KB_%s_BATCH" % tag.upper(), cpu_default, gpu_default))
+    except Exception as e:
+        if not _is_oom(e):
+            raise
+        _free_cuda_cache()
+        try:
+            return run(4)
+        except Exception as e2:
+            if not _is_oom(e2):
+                raise
+            if not _fallback_cpu(model, tag):
+                raise
+            return run(4)
+
+
+def _fallback_cpu(model, tag):
+    global _DEVICE_NOTE
+    try:
+        model.to("cpu")
+        _DEVICE_NOTE = "%s: CUDA OOM → 已回退 CPU（重启守护进程可重新尝试 GPU）" % tag
+        _free_cuda_cache()
+        return True
+    except Exception as e:
+        _DEVICE_NOTE = "%s: CUDA OOM 且回退 CPU 失败（%s: %s）" % (tag, type(e).__name__, str(e)[:80])
+        return False
+
+
+def device_report():
+    """现在实际跑在哪、为什么 —— 让"装了 GPU 却没吃上"和"OOM 已回退"都可见。
+    torch 未加载时不主动 import（kb_stats 要保持便宜），只报已加载模型的实际 device。"""
+    info = {"requested": KB_DEVICE}
+    if _DEVICE_NOTE:
+        info["note"] = _DEVICE_NOTE
+    if "torch" not in sys.modules:
+        # 不为了体检去 import torch（约 1–3 s + 数百 MB）；跑一次入库/深查后这里就有真值了
+        info["hint"] = ("torch 尚未加载：跑一次 kb_ingest 或 depth=deep 的检索后，"
+                        "此处会显示 torch / cuda_available / gpu 与各模型实际 device")
+    if "torch" in sys.modules:
+        try:
+            import torch
+            info["torch"] = torch.__version__
+            info["cuda_available"] = bool(torch.cuda.is_available())
+            if info["cuda_available"]:
+                try:
+                    info["gpu"] = torch.cuda.get_device_name(0)
+                except Exception:
+                    pass
+        except Exception as e:
+            info["torch_error"] = "%s: %s" % (type(e).__name__, str(e)[:120])
+    for tag, model in (("embed", _EMBEDDER), ("rerank", _RERANKER)):
+        if model is not None:
+            dev = getattr(model, "device", None)
+            if dev is not None:
+                info[tag + "_device"] = str(dev)
+    return info
 
 
 def _apply_hf_mirror():
@@ -1222,37 +1362,50 @@ def _apply_hf_mirror():
 
 
 def get_embedder():
-    """Lazy singleton; prefers the local HF cache, downloads with mirror auto-retry."""
-    global _EMBEDDER, _EMBED_ERR, _EMBED_NAME
-    if _EMBEDDER is not None or _EMBED_ERR is not None:
+    """Lazy singleton; prefers the local HF cache, downloads with mirror auto-retry.
+
+    失败不再永久缓存：超过 MODEL_RETRY_SECS 会重新尝试加载，因此修好依赖/模型后
+    不需要重启守护进程（issue #2）。"""
+    global _EMBEDDER, _EMBED_ERR, _EMBED_ERR_AT, _EMBED_NAME
+    if _EMBEDDER is not None:
         return _EMBEDDER
+    if _EMBED_ERR is not None and not _retry_due(_EMBED_ERR_AT):
+        return None
     name = os.environ.get("KB_EMBED_MODEL", "BAAI/bge-small-zh-v1.5")
+    dev = _device_kwargs()
     try:
         from sentence_transformers import SentenceTransformer
         try:
-            model = SentenceTransformer(name, local_files_only=True)
+            model = SentenceTransformer(name, local_files_only=True, **dev)
         except Exception:
             try:
-                model = SentenceTransformer(name)
+                model = SentenceTransformer(name, **dev)
             except Exception:
                 _apply_hf_mirror()  # direct download failed; retry via mirror
-                model = SentenceTransformer(name)
+                model = SentenceTransformer(name, **dev)
         _EMBEDDER = model
         _EMBED_NAME = name
+        _EMBED_ERR = None          # 之前失败过、这次成功：清掉旧错误，kb_stats 不再报
     except Exception as e:
         _EMBED_ERR = f"{type(e).__name__}: {e}"[:300]
+        _EMBED_ERR_AT = time.time()
     return _EMBEDDER
 
 
 def encode(texts, is_query=False, cjk=False):
+    """嵌入；批大小按设备自动选（`KB_EMBED_BATCH` 可覆盖），OOM 有缩批/回退兜底。"""
     model = get_embedder()
     if model is None:
         raise RuntimeError("embedding model unavailable: " + (_EMBED_ERR or "unknown"))
     prefix = BGE_QUERY_PREFIX if is_query and cjk else ""
     if prefix:
         texts = [prefix + t for t in texts]
-    return model.encode(texts, normalize_embeddings=True, batch_size=32,
-                        show_progress_bar=False).astype("float32")
+
+    def _run(bs):
+        return model.encode(texts, normalize_embeddings=True, batch_size=bs,
+                            show_progress_bar=False).astype("float32")
+
+    return _with_oom_retry("embed", model, _run)
 
 
 def pack_vec(v):
@@ -1267,20 +1420,26 @@ def unpack_vec(b):
 
 _RERANKER = None
 _RERANK_ERR = None
+_RERANK_ERR_AT = 0.0
 _RERANK_NAME = None
 
 
 def get_reranker():
     """Stage-2 scorer: cached bge-reranker-base Cross-Encoder first, then a
-    download with mirror auto-retry (bounded), then the local bge-large-en bi-encoder."""
-    global _RERANKER, _RERANK_ERR, _RERANK_NAME
-    if _RERANKER is not None or _RERANK_ERR is not None:
+    download with mirror auto-retry (bounded), then the local bge-large-en bi-encoder.
+
+    失败同样按 MODEL_RETRY_SECS 重试（issue #2）。"""
+    global _RERANKER, _RERANK_ERR, _RERANK_ERR_AT, _RERANK_NAME
+    if _RERANKER is not None:
         return _RERANKER
+    if _RERANK_ERR is not None and not _retry_due(_RERANK_ERR_AT):
+        return None
     name = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
     try:  # already cached locally?
         from sentence_transformers import CrossEncoder
         _RERANKER = CrossEncoder(name, local_files_only=True)
         _RERANK_NAME = name
+        _RERANK_ERR = None
         return _RERANKER
     except Exception:
         pass
@@ -1293,9 +1452,11 @@ def get_reranker():
             _apply_hf_mirror()
             _RERANKER = CrossEncoder(name)
         _RERANK_NAME = name
+        _RERANK_ERR = None
         return _RERANKER
     except Exception as e1:
         _RERANK_ERR = f"cross-encoder: {str(e1)[:120]}"
+        _RERANK_ERR_AT = time.time()
     try:  # offline fallback: large bi-encoder re-scoring
         from sentence_transformers import SentenceTransformer
         _RERANKER = SentenceTransformer("BAAI/bge-large-en-v1.5", local_files_only=True)
@@ -1303,23 +1464,30 @@ def get_reranker():
         return _RERANKER
     except Exception as e2:
         _RERANK_ERR = f"{_RERANK_ERR}; bi-encoder: {str(e2)[:120]}"
+        _RERANK_ERR_AT = time.time()
     return None
 
 
 def rerank(query, texts):
-    """Scores (query, text) pairs; returns (scores list, model name)."""
+    """Scores (query, text) pairs; returns (scores list, model name).
+
+    批大小按设备自动选（`KB_RERANK_BATCH` 可覆盖，GPU 上 16 偏小）；OOM 处理同 encode()。"""
     model = get_reranker()
     if model is None:
         raise RuntimeError("reranker unavailable: " + (_RERANK_ERR or "unknown"))
-    if _RERANK_NAME and "bi-encoder" not in _RERANK_NAME:
-        import numpy as np
-        pairs = [[query, t[:1800]] for t in texts]
-        scores = model.predict(pairs, batch_size=16, show_progress_bar=False)
-        return np.asarray(scores, dtype="float32").flatten().tolist(), _RERANK_NAME
     import numpy as np
-    q = model.encode([query], normalize_embeddings=True)
-    d = model.encode([t[:1800] for t in texts], normalize_embeddings=True)
-    return (d @ q.T).flatten().tolist(), _RERANK_NAME
+    cross = bool(_RERANK_NAME and "bi-encoder" not in _RERANK_NAME)
+
+    def _run(bs):
+        if cross:
+            pairs = [[query, t[:1800]] for t in texts]
+            scores = model.predict(pairs, batch_size=bs, show_progress_bar=False)
+            return np.asarray(scores, dtype="float32").flatten().tolist(), _RERANK_NAME
+        q = model.encode([query], normalize_embeddings=True)
+        d = model.encode([t[:1800] for t in texts], normalize_embeddings=True)
+        return (d @ q.T).flatten().tolist(), _RERANK_NAME
+
+    return _with_oom_retry("rerank", model, _run)
 
 
 # ---------------------------------------------------------------- ingest
@@ -1396,6 +1564,7 @@ def cmd_ingest(req):
               "chunks": 0, "vectors": 0,
               "meta_updated": 0, "meta_changed": 0, "changed": 0, "not_indexed": 0}
     processed = 0
+    vectors_missing = 0   # 全库"有分块但没向量"的块数：向量链路没跑通的直接证据（issue #2）
 
     def _prog():
         if progress_path:
@@ -1436,9 +1605,13 @@ def cmd_ingest(req):
                 _prog()
         if totals["added"] or totals["updated"] or totals["meta_changed"]:
             db.execute("DELETE FROM cache")  # 索引或元数据变化都让查询缓存失效
+        vectors_missing = db.execute(
+            "SELECT COUNT(*) AS n FROM chunks c LEFT JOIN vecs v ON v.chunk_id = c.id "
+            "WHERE v.chunk_id IS NULL AND c.weight > 0").fetchone()["n"]
         db.commit()
     finally:
         db.close()
+    emb = get_embedder()
     resp = {
         "ok": True,
         "kb_root": str(Path(kb_root).resolve()),
@@ -1449,7 +1622,14 @@ def cmd_ingest(req):
         "totals": totals,
         "mode": "metadata_only" if metadata_only else ("rebuild" if rebuild else "ingest"),
         "indexed_with": PARSER_TOKEN,
-        "embedding": _EMBED_NAME if get_embedder() is not None else None,
+        "embedding": _EMBED_NAME if emb is not None else None,
+        # 向量链路不可用必须显式说明：以前只回 embedding=null，渲染层只剩"N 块 / 0 向量"，
+        # 用户既不知道原因、也不知道检索已经降级（issue #2）。
+        "embedding_error": None if emb is not None else (_EMBED_ERR or "embedding model unavailable"),
+        "vectors_missing": vectors_missing,
+        "retry_secs": MODEL_RETRY_SECS,
+        # 现在跑在 CPU 还是 GPU、torch 是不是 CUDA 版、有没有 OOM 回退过 —— 一次入库就能看清
+        "device": device_report(),
         "ms": round((time.time() - t0) * 1000),
     }
     return resp
@@ -1543,8 +1723,13 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         if row is not None and row["sha256"] == sha and not force:
             n = db.execute(
                 "SELECT COUNT(*) AS n FROM chunks WHERE doc_id = ?", (row["id"],)).fetchone()["n"]
-            entry.update({"status": "skipped", "chunks": n,
+            # 补齐历史缺失的向量：模型不可用时入库不会建向量，而增量入库会跳过内容未变的文件，
+            # 所以"修好环境后重跑 kb_ingest"以前永远补不回来（只能 rebuild=true 全量重灌，
+            # 312 篇约 322 s）——见 issue #2。向量齐全时这只是一条 SELECT，代价可忽略。
+            n_vec = _embed_new_chunks(db, row["id"])
+            entry.update({"status": "skipped", "chunks": n, "vectors": n_vec,
                           "ms": round((time.time() - t0) * 1000)})
+            totals["vectors"] += n_vec
             totals["skipped"] += 1
             files.append(entry)
             return
@@ -2239,6 +2424,8 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
 
     resp = {"query": query, "scored": len(ranked), "top_k": top_k,
             "mode_used": mode_used, "reranker": reranker_used, "results": results,
+            # 本次检索实际用到的设备（模型此刻已加载，所以这里必然有真值）
+            "device": device_report(),
             # 折叠掉的同论文副本数（渲染层可提示，便于用户知道库里存在多份副本）
             "dup_collapsed": dup_collapsed,
             "note": (note + f"命中 {len(ranked)} 块，返回 Top-{len(results)}") if len(ranked) else (note or "无命中"),
@@ -2412,6 +2599,13 @@ def cmd_stats(req):
         "stale_sample": stale_sample,
         "migration": migration,
         "health": health,
+        # 向量链路状态：只反映本进程已有的加载结果，不主动加载模型（kb_stats 要便宜）。
+        # missing_vecs / embedding_error 一起给出"检索为什么退化成纯关键词"的直接证据（issue #2）。
+        "embedding": _EMBED_NAME if _EMBEDDER is not None else None,
+        "embedding_error": _EMBED_ERR,
+        "vectors_missing": missing_vecs,
+        "retry_secs": MODEL_RETRY_SECS,
+        "device": device_report(),
         "docs": docs_n,
         "chunks": chunks_n,
         "vectors": vecs_n,
@@ -2422,6 +2616,34 @@ def cmd_stats(req):
             "chunks": r["chunk_count"], "indexed_at": r["indexed_at"],
         } for r in rows],
         "ms": round((time.time() - t0) * 1000),
+    }
+
+
+def cmd_reload(req):
+    """清掉模型加载失败的缓存并立刻重试（无需杀掉守护进程，issue #2）。
+
+    drop_models=true 连已加载的模型一起释放（下次使用时重新加载）；rerank=true 顺带探测
+    精排模型（默认只探测嵌入模型：精排模型可能触发 GB 级下载，不该被一次 reload 带出来）。"""
+    global _EMBEDDER, _EMBED_ERR, _EMBED_ERR_AT, _EMBED_NAME
+    global _RERANKER, _RERANK_ERR, _RERANK_ERR_AT, _RERANK_NAME
+    if req.get("drop_models"):
+        _EMBEDDER = None
+        _EMBED_NAME = None
+        _RERANKER = None
+        _RERANK_NAME = None
+    _EMBED_ERR = None
+    _EMBED_ERR_AT = 0.0
+    _RERANK_ERR = None
+    _RERANK_ERR_AT = 0.0
+    emb = get_embedder()
+    rr = get_reranker() if req.get("rerank") else _RERANKER
+    return {
+        "ok": True,
+        "embedding": _EMBED_NAME if emb is not None else None,
+        "embedding_error": None if emb is not None else (_EMBED_ERR or "embedding model unavailable"),
+        "reranker": _RERANK_NAME if rr is not None else None,
+        "reranker_error": None if rr is not None else _RERANK_ERR,
+        "retry_secs": MODEL_RETRY_SECS,
     }
 
 
@@ -3078,7 +3300,8 @@ def cmd_serve():
         handler = {"ingest": cmd_ingest, "ingest_async": cmd_ingest_async, "status": cmd_status,
                    "search": cmd_search, "rag": cmd_rag,
                    "stats": cmd_stats, "zotero": cmd_zotero,
-                   "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(req.get("command"))
+                   "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch,
+                   "reload": cmd_reload}.get(req.get("command"))
         try:
             if handler is None:
                 raise ValueError(f"unknown command: {req.get('command')}")
@@ -3097,7 +3320,7 @@ def cmd_serve():
 
 def main():
     if len(sys.argv) < 2:
-        sys.stdout.write(json.dumps({"ok": False, "error": "usage: kb_engine.py <ingest|search|rag|stats|serve>"}))
+        sys.stdout.write(json.dumps({"ok": False, "error": "usage: kb_engine.py <ingest|search|rag|stats|zotero|dedup|clear|fetch|reload|serve>"}))
         return 1
     command = sys.argv[1]
     if command == "serve":
@@ -3109,7 +3332,8 @@ def main():
     handler = {"ingest": cmd_ingest, "ingest_async": cmd_ingest_async, "status": cmd_status,
                "search": cmd_search, "rag": cmd_rag,
                "stats": cmd_stats, "zotero": cmd_zotero,
-               "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch}.get(command)
+               "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch,
+               "reload": cmd_reload}.get(command)
     if handler is None:
         sys.stdout.write(json.dumps({"ok": False, "error": f"unknown command: {command}"}))
         return 1

@@ -16,6 +16,7 @@
   },
   "files": [
     "lib/index.js",
+    "lib/guidance.js",
     "install.mjs",
     "kb_engine.py",
     "cordis.patch.yml",
