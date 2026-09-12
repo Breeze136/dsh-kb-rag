@@ -1230,24 +1230,46 @@ def _retry_due(err_at):
 
 # ---------------------------------------------------------------- device / batch
 #
-# 设备策略：默认 auto = **不改动** sentence-transformers 的选择 —— 只要解释器里装的是
-# CUDA 版 torch，模型就会自动加载到 GPU（引擎不需要为此写任何调用代码）。
-# KB_DEVICE=cpu 可强制 CPU（显存紧张 / 排障 / 与其它吃显存的程序共存）；=cuda / =cuda:1 / =mps 显式指定。
+# 设备策略：默认 auto = **不改动** sentence-transformers 的选择 —— 解释器里装的是 CUDA 版
+# torch 且 GPU 真能用，模型就自动加载到 GPU（引擎不需要为此写任何调用代码）。
+# KB_DEVICE=cpu 可强制 CPU（显存紧张 / 排障 / 与其它吃显存的程序共存）；
+# =cuda / =cuda:1 / =mps 显式指定，**失败也会自动退回 CPU**（见 _load_with_cpu_fallback）。
 # 批大小可配：GPU 上 batch=32 喂不饱算力，未配置时按设备自动给默认值。
+#
+# 兜底的硬约束（本模块的设计不变量，改动时不要破坏）：
+#   ① GPU 不存在 / CUDA 不可用 → 直接用 CPU，**不做任何重试**；
+#   ② GPU 在但用不了（驱动或内核不匹配、cuDNN/cuBLAS 报错、加载期显存不足）→ 退回 CPU
+#      一次，并把本进程的 GPU 标记为不可用，后续加载不再尝试（不死磕同一堵墙）；
+#   ③ 运行中出 CUDA 类错误（含 OOM）→ 清缓存缩批重试 → 仍失败则把模型移到 CPU 继续跑；
+#   ④ 设备探测一律缓存：torch.cuda.is_available() 每进程最多问一次（失败结果同样缓存）；
+#   ⑤ 任何兜底都不能把"模型确实不可用"（文件缺失、格式错）也吞掉 —— 只有 CUDA 特征串走兜底。
 
 KB_DEVICE = (os.environ.get("KB_DEVICE") or "auto").strip().lower()
-_CUDA = None
-_DEVICE_NOTE = None    # 例如 "embed: CUDA OOM → 已回退 CPU"：让 kb_stats/kb_ingest 看得到
+_CUDA = None        # torch.cuda.is_available() 的缓存（None = 还没问过）
+_GPU_OK = None      # None = 待定；False = 本进程已判定 GPU 不可用（sticky，不再尝试）
+_GPU_WHY = None     # 判定不可用的原因（进 device_report，便于排障）
+# 设备异常说明：{tag: 说明}，例如 {"embed": "GPU 不可用（…）→ 已改用 CPU"}，让 kb_stats/kb_ingest 看得到。
+# 用 dict 而不是单字符串：embed 与 rerank 各记各的，且**正常加载成功时能清掉**（否则一次瞬时故障
+# 会让"已回退 CPU"永远挂在报告里，用户以为现在还在 CPU 上跑）。
+_DEVICE_NOTE = {}
 
 
 def _device_kwargs():
-    """auto 时不传 device（保持自动选择）；显式设置时才传给模型构造器。"""
+    """给模型构造器的 device 参数。优先级：
+    ① 本进程已判定 GPU 不可用 → **显式 CPU**（连上游的自动选择都不给它机会，避免又撞一次）；
+    ② auto（默认）→ 不传 device，交给 sentence-transformers 自动选择；
+    ③ 显式 cuda* 但没有可用 GPU → 直接 CPU，不做注定失败的尝试（不死磕）。"""
+    if _GPU_OK is False:
+        return {"device": "cpu"}
     if KB_DEVICE in ("", "auto", "none"):
         return {}
+    if KB_DEVICE.startswith("cuda") and not _cuda_available():
+        return {"device": "cpu"}
     return {"device": KB_DEVICE}
 
 
 def _cuda_available():
+    """torch 是否报告 CUDA 可用。**每进程只探测一次**（失败结果也缓存），避免反复死磕。"""
     global _CUDA
     if _CUDA is None:
         try:
@@ -1258,6 +1280,60 @@ def _cuda_available():
     return _CUDA
 
 
+def _gpu_usable():
+    """本进程还能不能尝试 GPU。一旦判定不可用就永久返回 False（sticky）。"""
+    if _GPU_OK is False:
+        return False
+    if KB_DEVICE == "cpu":
+        return False
+    if KB_DEVICE in ("", "auto", "none"):
+        return _cuda_available()
+    return True                        # 显式 cuda/mps：先试一次，失败由 _disable_gpu 关掉
+
+
+def _disable_gpu(tag, err):
+    """把本进程的 GPU 标记为不可用：后续加载直接走 CPU，不再反复尝试同一堵墙（不死磕）。"""
+    global _GPU_OK, _GPU_WHY
+    _GPU_OK = False
+    _GPU_WHY = "%s: %s" % (type(err).__name__, str(err)[:120])
+    _set_device_note(tag, "GPU 不可用（%s）→ 已改用 CPU，本次不再尝试 GPU" % _GPU_WHY)
+    return False
+
+
+# CUDA 类故障的特征串。只认这些：普通故障（文件缺失、模型格式错、依赖缺失）照常上抛，
+# 不被兜底掩盖成"悄悄降级"。
+_CUDA_ERR_HINTS = ("out of memory", "cuda", "cudnn", "cublas", "cufft", "nccl",
+                   "no kernel image", "device-side assert", "gpu", "nvml",
+                   "driver", "no available kernel", "not compiled with cuda")
+
+
+def _is_cuda_error(err):
+    """是否是设备侧故障（显存不足 / 内核或驱动不匹配 / cuDNN/cuBLAS 报错 / 无可用设备）。"""
+    msg = str(err).lower()
+    return any(h in msg for h in _CUDA_ERR_HINTS)
+
+
+def _is_oom(err):
+    """（保留旧名）仅判定显存不足。"""
+    return "out of memory" in str(err).lower()
+
+
+def _load_with_cpu_fallback(tag, build):
+    """build(**device_kwargs) → (模型, 是否走了 CPU 兜底)。
+
+    这是"GPU 用不了也不能让整条链路死掉"的关键一层：加载期就撞 CUDA（驱动/内核/cuDNN/
+    加载期显存）时，如果不兜底，下面的三级加载链（本地缓存 → 下载 → 镜像）会**在 GPU 上
+    连撞三次**全部失败，最终把模型判成不可用 —— 而 CPU 明明能跑。"""
+    try:
+        return build(**_device_kwargs()), False
+    except Exception as e:
+        if not _is_cuda_error(e):
+            raise                          # 非设备故障：不兜底，避免掩盖真实原因
+        _free_cuda_cache()
+        _disable_gpu(tag, e)
+        return build(device="cpu"), True   # 显式 CPU 再试一次；这一次不再碰 GPU
+
+
 def _batch_size(env_name, cpu_default, gpu_default):
     """批大小可配；未配时按设备给默认值（`KB_EMBED_BATCH` / `KB_RERANK_BATCH`）。"""
     raw = os.environ.get(env_name)
@@ -1266,11 +1342,7 @@ def _batch_size(env_name, cpu_default, gpu_default):
             return max(1, int(raw))
         except (TypeError, ValueError):
             pass
-    return gpu_default if _cuda_available() else cpu_default
-
-
-def _is_oom(err):
-    return "out of memory" in str(err).lower()
+    return gpu_default if _gpu_usable() else cpu_default
 
 
 def _free_cuda_cache():
@@ -1285,44 +1357,97 @@ def _free_cuda_cache():
 _BATCH_DEFAULTS = {"embed": (32, 128), "rerank": (16, 64)}
 
 
-def _with_oom_retry(tag, model, run):
-    """run(batch_size) → 结果。显存不足时：清缓存 + 缩到 batch=4 重试；仍 OOM 就回退 CPU 再试。
-    没有这层，一次 OOM 就等于"这个会话再也用不了向量"（与 issue #2 的永久缓存同一个坑）。"""
+def _with_device_retry(tag, model, run):
+    """run(batch_size) → 结果。设备侧故障逐级兜底：
+    ① 清 CUDA 缓存 + 缩批到 4 重试；② 仍失败 → 把模型移到 CPU 再试；③ 还不行才把异常抛出去。
+    覆盖的不只是 OOM，也包括运行中才暴露的 CUDA 错（内核不匹配、cuBLAS/cuDNN 报错、设备丢失）——
+    否则一次瞬时故障就等于"这个会话再也用不了向量"（与 issue #2 的永久缓存同一个坑）。
+    非设备故障（数据/格式问题）不兜底，原样上抛。"""
     cpu_default, gpu_default = _BATCH_DEFAULTS.get(tag, (16, 16))
+    bs = _batch_size("KB_%s_BATCH" % tag.upper(), cpu_default, gpu_default)
     try:
-        return run(_batch_size("KB_%s_BATCH" % tag.upper(), cpu_default, gpu_default))
+        return run(bs)
     except Exception as e:
-        if not _is_oom(e):
+        if not _is_cuda_error(e):
             raise
         _free_cuda_cache()
         try:
-            return run(4)
+            return run(min(4, bs))
         except Exception as e2:
-            if not _is_oom(e2):
+            if not _is_cuda_error(e2):
                 raise
             if not _fallback_cpu(model, tag):
                 raise
-            return run(4)
+            return run(min(4, bs))
+
+
+# 旧名（补丁里叫 _with_oom_retry）：保留以免外部验证脚本失效
+_with_oom_retry = _with_device_retry
+
+
+def _set_device_note(tag, text):
+    """记录/清除某条链路的设备异常说明（text=None 表示清除）。"""
+    if text:
+        _DEVICE_NOTE[tag] = text
+    else:
+        _DEVICE_NOTE.pop(tag, None)
+
+
+def _device_note_text():
+    return "；".join("%s: %s" % (t, _DEVICE_NOTE[t])
+                     for t in ("embed", "rerank") if t in _DEVICE_NOTE) or None
+
+
+def _move_model_to_cpu(model):
+    """把模型移到 CPU：CrossEncoder 与 SentenceTransformer 的 API 不一样 ——
+    SentenceTransformer（bi-encoder）有 .to()，而 CrossEncoder 包的是 HF 模型、
+    本身不一定有，需要退到 model.model.to()。逐个候选尝试，成功后同步 device 属性。
+    没有这层，_fallback_cpu 会在 CrossEncoder 上抛 AttributeError，
+    OOM 兜底反而把原始 OOM 变成"回退也失败"（issue #2 里那个坑的同类）。"""
+    last = None
+    for target in (model, getattr(model, "model", None)):
+        to = getattr(target, "to", None)
+        if not callable(to):
+            continue
+        try:
+            to("cpu")
+        except Exception as e:
+            last = e          # 换下一个候选继续试
+            continue
+        try:
+            import torch
+            if hasattr(model, "device"):
+                model.device = torch.device("cpu")
+        except Exception:
+            pass
+        return True
+    raise AttributeError("model has no usable .to('cpu')" if last is None else str(last))
 
 
 def _fallback_cpu(model, tag):
-    global _DEVICE_NOTE
+    """运行期兜底：把已加载的模型移到 CPU，让这次调用能跑完。
+    注意这里**不**全局关掉 GPU（只有加载期就撞墙才 _disable_gpu）：另一个模型可能仍然好用。"""
     try:
-        model.to("cpu")
-        _DEVICE_NOTE = "%s: CUDA OOM → 已回退 CPU（重启守护进程可重新尝试 GPU）" % tag
+        _move_model_to_cpu(model)
+        _set_device_note(tag, "CUDA 故障 → 该模型已回退 CPU（重启守护进程或 reload 后会自动重试 GPU）")
         _free_cuda_cache()
         return True
     except Exception as e:
-        _DEVICE_NOTE = "%s: CUDA OOM 且回退 CPU 失败（%s: %s）" % (tag, type(e).__name__, str(e)[:80])
+        _set_device_note(tag, "CUDA 故障且回退 CPU 失败（%s: %s）" % (type(e).__name__, str(e)[:80]))
         return False
 
 
 def device_report():
-    """现在实际跑在哪、为什么 —— 让"装了 GPU 却没吃上"和"OOM 已回退"都可见。
+    """现在实际跑在哪、为什么 —— 让"装了 GPU 却没吃上"、"GPU 用不了已退 CPU"、"OOM 已回退"都可见。
     torch 未加载时不主动 import（kb_stats 要保持便宜），只报已加载模型的实际 device。"""
     info = {"requested": KB_DEVICE}
-    if _DEVICE_NOTE:
-        info["note"] = _DEVICE_NOTE
+    if _GPU_OK is False:
+        info["gpu_usable"] = False       # 已判定：不需要碰 torch 就能答
+        if _GPU_WHY:
+            info["gpu_disabled_reason"] = _GPU_WHY
+    note = _device_note_text()
+    if note:
+        info["note"] = note
     if "torch" not in sys.modules:
         # 不为了体检去 import torch（约 1–3 s + 数百 MB）；跑一次入库/深查后这里就有真值了
         info["hint"] = ("torch 尚未加载：跑一次 kb_ingest 或 depth=deep 的检索后，"
@@ -1332,6 +1457,7 @@ def device_report():
             import torch
             info["torch"] = torch.__version__
             info["cuda_available"] = bool(torch.cuda.is_available())
+            info.setdefault("gpu_usable", _gpu_usable())
             if info["cuda_available"]:
                 try:
                     info["gpu"] = torch.cuda.get_device_name(0)
@@ -1372,20 +1498,31 @@ def get_embedder():
     if _EMBED_ERR is not None and not _retry_due(_EMBED_ERR_AT):
         return None
     name = os.environ.get("KB_EMBED_MODEL", "BAAI/bge-small-zh-v1.5")
-    dev = _device_kwargs()
-    try:
+
+    def _build(**dkw):
+        """三级加载（本地缓存 → 直连下载 → 镜像下载）。CUDA 类错误立刻上抛，
+        交给 _load_with_cpu_fallback 退 CPU —— 不在 GPU 上把三级链逐条撞一遍。"""
         from sentence_transformers import SentenceTransformer
         try:
-            model = SentenceTransformer(name, local_files_only=True, **dev)
-        except Exception:
-            try:
-                model = SentenceTransformer(name, **dev)
-            except Exception:
-                _apply_hf_mirror()  # direct download failed; retry via mirror
-                model = SentenceTransformer(name, **dev)
+            return SentenceTransformer(name, local_files_only=True, **dkw)
+        except Exception as e:
+            if _is_cuda_error(e):
+                raise
+        try:
+            return SentenceTransformer(name, **dkw)
+        except Exception as e:
+            if _is_cuda_error(e):
+                raise
+        _apply_hf_mirror()  # direct download failed; retry via mirror
+        return SentenceTransformer(name, **dkw)
+
+    try:
+        model, fell_back = _load_with_cpu_fallback("embed", _build)
         _EMBEDDER = model
         _EMBED_NAME = name
         _EMBED_ERR = None          # 之前失败过、这次成功：清掉旧错误，kb_stats 不再报
+        if not fell_back:
+            _set_device_note("embed", None)   # 正常加载成功 → 旧的"已退 CPU"记录不再成立
     except Exception as e:
         _EMBED_ERR = f"{type(e).__name__}: {e}"[:300]
         _EMBED_ERR_AT = time.time()
@@ -1405,7 +1542,7 @@ def encode(texts, is_query=False, cjk=False):
         return model.encode(texts, normalize_embeddings=True, batch_size=bs,
                             show_progress_bar=False).astype("float32")
 
-    return _with_oom_retry("embed", model, _run)
+    return _with_device_retry("embed", model, _run)
 
 
 def pack_vec(v):
@@ -1437,30 +1574,48 @@ def get_reranker():
     name = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
     try:  # already cached locally?
         from sentence_transformers import CrossEncoder
-        _RERANKER = CrossEncoder(name, local_files_only=True)
+        _RERANKER, fell_back = _load_with_cpu_fallback(
+            "rerank", lambda **dkw: CrossEncoder(name, local_files_only=True, **dkw))
         _RERANK_NAME = name
         _RERANK_ERR = None
+        if not fell_back:
+            _set_device_note("rerank", None)
         return _RERANKER
-    except Exception:
-        pass
+    except Exception as e0:
+        if _is_cuda_error(e0):
+            _RERANK_ERR = f"cross-encoder: {str(e0)[:120]}"
+            _RERANK_ERR_AT = time.time()
+            return None
     try:  # bounded download attempt; direct first, then auto-retry via the CN mirror
         os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")
         from sentence_transformers import CrossEncoder
-        try:
-            _RERANKER = CrossEncoder(name)
-        except Exception:
-            _apply_hf_mirror()
-            _RERANKER = CrossEncoder(name)
+
+        def _build(**dkw):
+            try:
+                return CrossEncoder(name, **dkw)
+            except Exception as e:
+                if _is_cuda_error(e):
+                    raise                     # 设备问题：不要在同一条路上连撞两次
+                _apply_hf_mirror()
+                return CrossEncoder(name, **dkw)
+
+        _RERANKER, fell_back = _load_with_cpu_fallback("rerank", _build)
         _RERANK_NAME = name
         _RERANK_ERR = None
+        if not fell_back:
+            _set_device_note("rerank", None)
         return _RERANKER
     except Exception as e1:
         _RERANK_ERR = f"cross-encoder: {str(e1)[:120]}"
         _RERANK_ERR_AT = time.time()
     try:  # offline fallback: large bi-encoder re-scoring
         from sentence_transformers import SentenceTransformer
-        _RERANKER = SentenceTransformer("BAAI/bge-large-en-v1.5", local_files_only=True)
+        _RERANKER, fell_back = _load_with_cpu_fallback(
+            "rerank", lambda **dkw: SentenceTransformer("BAAI/bge-large-en-v1.5",
+                                                        local_files_only=True, **dkw))
         _RERANK_NAME = "BAAI/bge-large-en-v1.5 (bi-encoder)"
+        if not fell_back:
+            _set_device_note("rerank", None)
         return _RERANKER
     except Exception as e2:
         _RERANK_ERR = f"{_RERANK_ERR}; bi-encoder: {str(e2)[:120]}"
@@ -1487,7 +1642,7 @@ def rerank(query, texts):
         d = model.encode([t[:1800] for t in texts], normalize_embeddings=True)
         return (d @ q.T).flatten().tolist(), _RERANK_NAME
 
-    return _with_oom_retry("rerank", model, _run)
+    return _with_device_retry("rerank", model, _run)
 
 
 # ---------------------------------------------------------------- ingest
