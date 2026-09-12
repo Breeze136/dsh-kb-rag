@@ -42,8 +42,12 @@ SUPPORTED_EXTS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
 # 跳过未变文件，引擎的解析改进不会自动作用于老库（实测：一处抽取改动漏了 49 篇的 DOI，
 # 直到一次全量重灌才暴露）。注意判定只看 rev，不看引擎 VERSION：否则每次发版都会把
 # 整个库标成陈旧，提示就变成噪音。
-PARSER_REV = 4
+PARSER_REV = 5
 PARSER_TOKEN = "%s/rev%d" % (VERSION, PARSER_REV)
+# 哪些 rev 改动了**分块/向量**（而不只是元数据）。升级提示据此决定给用户哪个建议：
+# `metadata_only`（秒级刷元数据）对分块类改动**无效** —— 给一个无效选项比不给更糟。
+# rev 5：References 判定护栏 + 整篇不可检索兜底（会改变分块与向量）。
+CHUNK_AFFECTING_REVS = {4, 5}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -237,6 +241,106 @@ def _ref_entry_count(text):
     return n
 
 
+# ---------------------------------------------------------------- 条目"像文献"的证据分
+#
+# 为什么需要它：判断"这段是不是参考文献"以前只看"像不像条目编号"（行首数字/方括号数字），
+# 于是作者单位行（'1,2,3,*'）、正文编号列表、末页图注数字都能触发，触发后整篇按 References
+# 处理（weight 0）→ 文档从检索里消失，而增量入库不会自愈。这里改成看**每条条目里的文献特征**：
+# DOI / 卷-页 / 期刊缩写是强信号，单纯一个年份只是弱信号（图注、表格里也有年份）。
+
+_REF_DOI_RE = re.compile(r"10\.\d{4,9}/")
+_REF_VOLPAGE_RE = re.compile(r"\b\d{1,4}\s*,\s*\d{1,5}\b")
+_REF_YEAR_PAREN_RE = re.compile(r"\((?:18|19|20)\d{2}[a-z]?\)")
+_REF_YEAR_TOKEN_RE = re.compile(r"\b(?:18|19|20)\d{2}[a-z]?\b")
+_REF_ETAL_RE = re.compile(r"\bet\s+al\.?\b")
+_REF_JOURNAL_RE = re.compile(
+    r"\b(?:Nature|Science|Phys\.|Phys\s+Rev|Appl\.|J\.|Chem\.|Rev\.|Adv\.|Nano\s+Lett|"
+    r"Ferroelectrics|Carbon|ACS\s+Nano|PRB|PRL)\b")
+_REF_SIGNAL_RE = re.compile(
+    r"\b(?:18|19|20)\d{2}[a-z]?\b|\bet\s+al\.?\b|&\s+[A-Z]|\bdoi:|\bvol\.|\bpp\.|"
+    r"\bProc\.|\bJ\.\s*[A-Z]|\bPhys\.|\bChem\.|\bNature\b|\bScience\b|\bAppl\.|\bRev\.")
+
+# 参考文献条目的**版式特征**（由维护者给出的判别依据，比"数字+年份"稳得多）：
+#   ① 条目以编号开头，编号在文档内**递增**（1 / 1. / [1]）
+#   ② 整块通常落在文末
+#   ③ **人名一定在首位**，后面依次是期刊缩写、年份、卷页等（其余位置可以变）
+# 第 ③ 条是关键：正文里的编号列表（"1. Introduction…"、"3. Data analysis…"）编号后面
+# 接的是小写词或抽象名词，几乎不可能是"姓, 首字母"或"首字母. 姓"。
+_REF_NAME_FIRST_RE = re.compile(
+    r"^(?:"
+    r"(?:[A-Z][A-Za-z\u00c0-\u024f'’\-]{1,}(?:\s+(?:and|&)\s+[A-Z][A-Za-z'’\-]{1,})?)"   # Smith / Smith and Jones
+    r"(?:\s*,\s*(?:[A-Z]\.\s*){0,3})"                                                    # , J. / , J. A.
+    r"|(?:[A-Z]\.\s*){1,3}[A-Z][A-Za-z\u00c0-\u024f'’\-]{1,}"                           # J. Smith / J. A. Smith
+    r"|(?:[A-Z][A-Za-z\u00c0-\u024f'’\-]{1,}\s+){1,2}[A-Z][A-Za-z'’\-]{1,}"             # Chinese-style pinyin "Wang Lei"
+    r"|[A-Z][A-Za-z\u00c0-\u024f'’\-]{1,}\s+(?:et\s+al\.?)"                              # Smith et al.
+    r")")
+
+
+def _ref_entry_like(seg):
+    """一条条目是否像参考文献 —— **主判据**（维护者给出的版式特征）：
+
+    ① 编号在条目首位且在全文中递增（1 / 1. / [1]）
+    ② 整块通常落在文末
+    ③ **人名一定在首位**，其后依次是期刊缩写、年份、卷页等（其余位置可变）
+
+    人名在首位是最强判别信号：正文编号列表（"1. Introduction…"）编号后接小写词或抽象名词，
+    不可能长得像"姓, 首字母"。缺年份、或只有人名（致谢里的姓名串）都不算。"""
+    s = (seg or "").lstrip()
+    if not s or not _REF_NAME_FIRST_RE.match(s):
+        return False
+    if not _REF_YEAR_TOKEN_RE.search(s):
+        return False
+    return bool(_REF_JOURNAL_RE.search(s) or _REF_VOLPAGE_RE.search(s) or _REF_DOI_RE.search(s))
+
+
+def _ref_entry_strong(seg):
+    """条目判据（主判据 或 证据分兜底）。
+
+    为什么要兜底：人名在首位是**英文期刊**的版式；中文文献（"张三, 物理学报, 2020, 69: 123"）、
+    期刊名被抽取打散、只用姓氏缩写等情况下会判不出来，实测会让约 250 个引用块失去标注
+    （退出引文关联的数据源）。兜底分支仍要求 DOI/卷页/年份这类实打实的证据，不是"像编号就算"。"""
+    return _ref_entry_like(seg) or _ref_entry_evidence(seg) >= 0.35
+
+
+def _refs_text_like(text, min_score=0.45):
+    """整块"像参考文献列表"的**密度**判据 —— 对"流式条目"版式有效。
+
+    逐条目正则锚在行首，所以 `References 1. Author … 2. Author …`（标题与全部条目挤在同一段）
+    这种版式数不到条目。实测本机 316 篇里有 28 篇是这种，旧代码靠"≥1 条"的宽松门放进来，
+    一旦把门收紧就会全部漏判（真参考文献不再入库 → 引文关联退化）。这里用整体信号密度兜住：
+    年份数 + 卷-页/DOI 的绝对下限，再用 DOI/et al 与期刊缩写加分。
+
+    反例（实测得分均为 0）：作者单位行、正文编号列表、图注块、含年份的普通正文段落。"""
+    t = text or ""
+    if len(t) < 200:
+        return False
+    years = len(_REF_YEAR_TOKEN_RE.findall(t))
+    volpage = len(_REF_VOLPAGE_RE.findall(t))
+    dois = len(_REF_DOI_RE.findall(t))
+    if years < 4 or (volpage < 1 and dois < 1):
+        return False
+    etal = len(_REF_ETAL_RE.findall(t))
+    journ = len(_REF_JOURNAL_RE.findall(t))
+    score = (0.30 * min(1.0, years / 8.0) + 0.25 * min(1.0, volpage / 4.0)
+             + 0.20 * min(1.0, (dois + etal) / 4.0) + 0.15 * min(1.0, journ / 6.0))
+    return score >= min_score
+
+
+def _ref_entry_evidence(seg):
+    """一条条目"像文献"的程度（0..1）。seg = 条目起点后的 ≤250 字。"""
+    seg = seg or ""
+    score = 0.0
+    if _REF_DOI_RE.search(seg):
+        score += 0.5                                  # DOI：几乎不可能是别的
+    if _REF_VOLPAGE_RE.search(seg):
+        score += 0.3                                  # 卷, 页
+    if _REF_YEAR_PAREN_RE.search(seg) or _REF_SIGNAL_RE.search(seg):
+        score += 0.3                                  # 括号年份 / et al / & X / 期刊缩写
+    if re.search(r"\bet\s+al\.?\b|&\s+[A-Z]", seg):
+        score += 0.2                                  # 作者串信号
+    return min(1.0, score)
+
+
 def _ascending_ref_spans(text, min_chain=6, max_gap=900):
     """无标题 References：全文任意位置（偏后半）的递增条目链。
 
@@ -270,8 +374,8 @@ def _ascending_ref_spans(text, min_chain=6, max_gap=900):
         first = ch[0][1]
         if first != 1 and first != last_num + 1:
             continue  # 不从头开始也不续接：多为 Methods 编号步骤等，宁缺勿错
-        if ch[0][0] < len(text) * 0.3:
-            continue  # 引文链不会出现在全文前 30%
+        if ch[0][0] < len(text) * REF_CHAIN_MIN_CHAR_POS:
+            continue  # 引文链不会出现在全文前半段（正文编号小节多在更前面）
         if not _chain_citation_like(text, ch):
             continue
         spans.append((ch[0][0], _chain_end(text, ch[-1][0], lines)))
@@ -279,12 +383,15 @@ def _ascending_ref_spans(text, min_chain=6, max_gap=900):
     return spans
 
 
-def _chain_citation_like(text, ch, min_frac=0.6):
-    """链上过半条目含文献信号（括号年份 / et al / & 姓氏首字母），排除编号步骤列表。"""
+def _chain_citation_like(text, ch, min_frac=0.5):
+    """链上条目是否像参考文献：按"编号递增 + 人名在首位 + 年份 + 期刊/卷页/DOI"判定。
+
+    这是唯一的条目判据（旧实现是"宽松正则 + 抬高条数门槛"两套，收紧了就丢掉整条链）。
+    正文编号列表在"人名在首位"这一条上直接出局。"""
     hits = 0
     for k, (pos, _num) in enumerate(ch):
-        nxt = ch[k + 1][0] if k + 1 < len(ch) else min(pos + 700, len(text))
-        if re.search(r"\((?:18|19|20)\d{2}\)|et\s+al\.?|\&\s+[A-Z]", text[pos:nxt]):
+        nxt = ch[k + 1][0] if k + 1 < len(ch) else len(text)
+        if _ref_entry_strong(text[pos:min(nxt, pos + 250)]):
             hits += 1
     return hits >= max(3, int(len(ch) * min_frac))
 
@@ -344,21 +451,32 @@ def _apply_ref_spans(paragraphs, pages, spans):
     return out_p, ref_paras, (None if pages is None else out_g)
 
 
-def _refs_block_like(text, min_entries=4, min_frac=0.5):
-    """段块整体是否像参考文献列表：过半条目带年份/et al/& 信号。
+def _refs_block_like(text, min_entries=4, min_frac=0.5, min_evidence=1.2):
+    """段块整体是否像参考文献列表。
 
-    挡住 stage-2 的图注/坐标轴数字误报（末页图区满是行首数字，但几乎无年份）。"""
-    ms = list(_REF_ENTRY_RE.finditer(text or "")) + \
-        list(_REF_ENTRY_TIGHT_RE.finditer(text or "")) + \
-        list(_REF_ENTRY_BRACKET_RE.finditer(text or ""))
+    主判据 = **人名在首位的条目占比**（维护者给出的版式特征，见 _ref_entry_like）：
+    编号后接人名 + 年份 + 期刊/卷页/DOI，这是参考文献；编号后接小写词或抽象名词的
+    正文编号列表直接出局。
+    兜底判据 = 逐条目证据分（DOI/卷页/年份）总分，用于人名版式不标准的库（中文文献、
+    只用首字母、期刊名被抽取打散等），此时要求证据总分达标以免"一堆弱信号凑数"。"""
+    ms = sorted(list(_REF_ENTRY_RE.finditer(text or "")) +
+                list(_REF_ENTRY_TIGHT_RE.finditer(text or "")) +
+                list(_REF_ENTRY_BRACKET_RE.finditer(text or "")),
+                key=lambda m: m.start())
     if len(ms) < min_entries:
         return False
-    hits = 0
+    name_first = 0
+    ev = []
     for i, m in enumerate(ms):
-        nxt = ms[i + 1].start() if i + 1 < len(ms) else min(m.start() + 250, len(text))
-        if re.search(r"\((?:18|19|20)\d{2}\)|\b(?:19|20)\d{2}\b|et\s+al\.?|\&\s+[A-Z]", text[m.end():nxt]):
-            hits += 1
-    return hits >= max(2, int(len(ms) * min_frac))
+        nxt = ms[i + 1].start() if i + 1 < len(ms) else min(m.end() + 250, len(text))
+        seg = text[m.end():nxt]
+        if _ref_entry_strong(seg):
+            name_first += 1
+        ev.append(_ref_entry_evidence(seg))
+    if name_first >= max(2, int(len(ms) * min_frac)):
+        return True
+    hits = sum(1 for e in ev if e >= 0.3)
+    return hits >= max(2, int(len(ms) * min_frac)) and sum(ev) >= min_evidence
 
 
 def _find_ref_index(paragraphs, pages=None):
@@ -371,15 +489,28 @@ def _find_ref_index(paragraphs, pages=None):
     2) 无标题：文末【真正连续】的序号条目高密度段（每段 ≥2 条目；允许跳过 1 个
        尾部噪声段。修复：旧实现用 n-run_start 判断"成片"，单段公式噪声即可劫持）；
     3) Nature 式无标题引文链：递增 'N.' 条目链（正文 refs + Methods refs 两段离散链），
-       见 _ascending_ref_spans。"""
+       见 _ascending_ref_spans。
+
+    位置口径：一律按**字符**占比（不再用段落序号）—— 正文段长、文献条目段短，两种口径
+    在同一篇里能差一倍，实测有 11 篇真参考文献因为"段落位置"过早而被整条漏掉。"""
     n = len(paragraphs)
+    offsets, pos = [], 0
+    for p in paragraphs:
+        offsets.append(pos)
+        pos += len(p) + 1
+    total_chars = max(1, pos)
     idx = None
     for i, p in enumerate(paragraphs):
         m = _REF_HEAD_RE.search(p)
-        if not m or i < n * 0.5:
-            continue                      # 只在文档后半段找
+        # 标题必须落在字符位置 50% 之后（参考文献很少更早出现）；只看位置、不看段落序号
+        if not m or offsets[i] < total_chars * REF_HEAD_MIN_CHAR_POS:
+            continue
         tail = p[m.start():] + "\n" + "\n".join(paragraphs[i + 1:i + 6])
-        if _ref_entry_count(tail) >= 1:
+        # 旧判据是"tail 里有 ≥1 条像条目"，于是标题行 + 作者单位行就能骗过它。
+        # 现在两条通道任一成立才算（标题本身已是强证据）：
+        #   ① 逐条目证据分（条目在行首的常规版式）
+        #   ② 整块密度判据（标题与条目同段的"流式"版式，逐条目正则数不到）
+        if _refs_block_like(tail, min_entries=3, min_frac=0.5, min_evidence=0.9) or _refs_text_like(tail):
             idx = i                        # 取最后一个同时满足条件的段
     if idx is not None:
         m = _REF_HEAD_RE.search(paragraphs[idx])
@@ -416,6 +547,19 @@ def _find_ref_index(paragraphs, pages=None):
     return paragraphs, set(), pages
 
 
+# 参考文献最多占全文**字符**的比例。超过就判定过宽并放弃 References 判定（见 chunk_document）。
+# 为什么按字符而不是段落数：很多 PDF 把每条参考文献单独成段，于是"段落占比"会在**真参考文献**
+# 上飙到 60%（实测 id=302：60% 段但只有 29% 字符），而"吞掉整篇"的病例是 66%–100% 字符。
+# 实测对照组（真参考文献、判得对）：字符占比 28%–41%。
+REF_MAX_CHAR_SHARE = 0.6
+# 位置口径：一律按**字符**占比，不用段落序号（正文段长、文献条目段短，两种口径能差一倍）。
+# 实测：同一批文档里，标题的段落位置 26%–57% 对应字符位置 34%–74%。
+REF_HEAD_MIN_CHAR_POS = 0.5     # 有标题的 References 不会出现在前半段
+REF_CHAIN_MIN_CHAR_POS = 0.3    # 无标题的递增引文链起点门槛（Nature 系正文 refs 可能较早）
+# 整篇不可检索时的兜底：写回哪一节的下限（太短的段落救出来也只是噪声）。
+RESCUE_MIN_CHARS = 800
+
+
 def chunk_document(full_text, paras=None):
     """Section-aware chunking; falls back to paragraph merging.
     返回 [(section, weight, text, para_start, para_end, page_start, page_end)]。
@@ -430,6 +574,19 @@ def chunk_document(full_text, paras=None):
         pages = [pg for pg, _ in paras]
         paragraphs = [t for _, t in paras]
     paragraphs, ref_paras, pages = _find_ref_index(paragraphs, pages)
+    # 总量上限：按**字符占比**判断"这次判定是不是把整篇都算成参考文献了"。
+    # 超限时**宁可少判**：退回"没有 References"，让整篇按正文索引 —— 判错的代价
+    # （正文查不到）远大于少判（引文关联少一点数据源）。
+    total_chars = sum(len(p) for p in paragraphs) or 1
+    ref_chars = sum(len(paragraphs[i]) for i in ref_paras if i < len(paragraphs))
+    if ref_chars > REF_MAX_CHAR_SHARE * total_chars:
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
+        if paras is not None:
+            pages = [pg for pg, _ in paras]
+            paragraphs = [t for _, t in paras]
+        else:
+            pages = None
+        ref_paras = set()
 
     def _pg_of(pno):
         """段落序号 -> PDF 页码（无页信息返回 None）。"""
@@ -498,29 +655,48 @@ def chunk_document(full_text, paras=None):
 
     sectioned = _promote_abstract(sectioned)
 
-    chunks = []
-    for sec, w, paras in sectioned:
+    def _emit(sec, w, paras, force_weight=None):
+        """把一节切成分块。force_weight 用于兜底写回（见下）。"""
+        ww = w if force_weight is None else force_weight
         ps, pe = paras[0][0], paras[-1][0]
         pgs = [pg for pg in (_pg_of(pno) for (pno, _) in paras) if pg is not None]
         pg_s = min(pgs) if pgs else None
         pg_e = max(pgs) if pgs else None
         # References 保留换行结构（引文条目按行切分）；其余章节照常 clean 压平
-        if sec == "References":
-            text = "\n".join(t for _, t in paras)
+        if sec == "References" and force_weight is None:
+            body = "\n".join(t for _, t in paras)
         else:
-            text = clean(" ".join(t for _, t in paras))
-        if len(text) < 40:
-            continue
-        if w <= 0 and sec != "References":
-            continue                     # 仅 References 保留（引文关联数据源），其余权重 0 章节丢弃
-        if len(text) > 1200:
-            if sec == "References":
-                pieces = split_refs(text)          # 行边界切分，保留 'N.' 行首锚点
+            body = clean(" ".join(t for _, t in paras))
+        if len(body) < 40:
+            return []
+        if ww <= 0 and sec != "References":
+            return []                    # 仅 References 保留（引文关联数据源），其余权重 0 章节丢弃
+        if len(body) > 1200:
+            if sec == "References" and force_weight is None:
+                pieces = split_refs(body)          # 行边界切分，保留 'N.' 行首锚点
             else:
-                pieces = split_long(text)
-            chunks.extend((sec, w, piece, ps, pe, pg_s, pg_e) for piece in pieces)
-        else:
-            chunks.append((sec, w, text, ps, pe, pg_s, pg_e))
+                pieces = split_long(body)
+            return [(sec, ww, piece, ps, pe, pg_s, pg_e) for piece in pieces]
+        return [(sec, ww, body, ps, pe, pg_s, pg_e)]
+
+    chunks = []
+    for sec, w, paras in sectioned:
+        chunks.extend(_emit(sec, w, paras))
+
+    # ── 整篇不可检索兜底 ──────────────────────────────────────────────────────
+    # 若一篇文档**没有任何 weight > 0 的分块**，它在检索里等于不存在（向量也只给 weight>0 的
+    # 分块建），而用户完全无从察觉。References 判定一旦整体跑偏（作者单位行/编号正文/算法伪代码
+    # 触发），就会得到这个结果。这里做最后一道保证：宁可把被判成 References 的内容按正文
+    # 权重写回，也不能让整篇消失。section 名带 (rescued) 后缀，便于在结果里一眼看出发生过兜底。
+    if not any(c[1] > 0 for c in chunks):
+        for sec, w, paras in reversed(sectioned):
+            body_len = len(clean(" ".join(t for _, t in paras)))
+            if body_len < RESCUE_MIN_CHARS:
+                continue
+            rescued = _emit("%s (rescued)" % sec, 1.0, paras, force_weight=1.0)
+            if rescued:
+                chunks = rescued
+                break
     return chunks
 
 
@@ -2116,7 +2292,10 @@ _CAPTION_NUM_RE = re.compile(r"\d+")
 _INCITE_RE = re.compile(
     r"\[(\d{1,3}(?:\s*[–\-]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[–\-]\s*\d{1,3})?)*)\]")
 _REF_ENTRY_RE = re.compile(r"(?m)^\s*(\d{1,3})\s*(?:[\.\)]\s+|\s+)(?=\S)")
-_REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(\d{1,3})(?=[A-Z])")
+# 紧贴式条目（'1Smith J., Nature…'）：数字后**紧跟一个"大写+小写"的词**才算条目。
+# 旧写法是 (?=[A-Z])，于是正文里的 '2D materials' / '3D printing' / '4H-SiC' / '3C-SiC'
+# 也被当成条目编号 —— 这是 References 误判吞正文的一个真实来源。
+_REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(\d{1,3})(?=[A-Z][a-z])")
 _CITE_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s,;\"'<>\)\]]+", re.I)
 _CITE_YEAR_RE = re.compile(r"\((\d{4})\)\s*[.\s]*$")
 
@@ -2708,6 +2887,26 @@ def cmd_rag(req):
 # ---------------------------------------------------------------- stats
 
 
+def _rev_of(token):
+    """从 indexed_with（形如 '3.2.0/rev5'）里取 rev；无标记的老行返回 0。"""
+    m = re.search(r"/rev(\d+)", token or "")
+    return int(m.group(1)) if m else 0
+
+
+def _stale_kind(stale_revs):
+    """陈旧数据该给哪种升级建议：
+    'none' 无陈旧；'chunk' 需要全量重灌（区间 (旧 rev, 当前 rev] 里有一个改动分块的 rev）；
+    'meta'  只刷元数据即可。区间为空（同 rev）不会进到这里。"""
+    if not stale_revs:
+        return "none"
+    for rev in stale_revs:
+        if rev == 0:
+            return "chunk"        # 没有标记的老行：无从判断，按最保守的重灌处理
+        if any(r in CHUNK_AFFECTING_REVS for r in range(rev + 1, PARSER_REV + 1)):
+            return "chunk"
+    return "meta"
+
+
 def cmd_stats(req):
     t0 = time.time()
     db = connect(req.get("kb_root") or ".kb")
@@ -2723,23 +2922,34 @@ def cmd_stats(req):
         missing_vecs = db.execute(
             "SELECT COUNT(*) AS n FROM chunks c LEFT JOIN vecs v ON v.chunk_id = c.id "
             "WHERE v.chunk_id IS NULL AND c.weight > 0").fetchone()["n"]
+        # 整篇不可检索：一篇文档一个 weight>0 的分块都没有 → 它在检索里等于不存在。
+        # 这类问题以前**完全不可见**（用户既搜不到、也没有任何提示），现在进 health。
+        blind_sql = ("SELECT d.path FROM docs d WHERE NOT EXISTS "
+                     "(SELECT 1 FROM chunks c WHERE c.doc_id = d.id AND c.weight > 0)")
+        blind_docs = db.execute(
+            "SELECT COUNT(*) AS n FROM docs d WHERE NOT EXISTS "
+            "(SELECT 1 FROM chunks c WHERE c.doc_id = d.id AND c.weight > 0)").fetchone()["n"]
+        blind_sample = [Path(r["path"]).name for r in
+                        db.execute(blind_sql + " ORDER BY d.id LIMIT 5").fetchall()]
         rows = db.execute(
             "SELECT path,title,authors,year,kind,chunk_count,indexed_at "
             "FROM docs ORDER BY indexed_at DESC LIMIT 20").fetchall()
         # 陈旧数据：入库时用的解析器版本（rev）与当前不一致。取 '/rev' 之后的部分做**精确**
         # 比较，避免 'rev2' 前缀误匹配 'rev20'；NULL / 无标记的老行都算陈旧。
+        stale_sql = ("WHERE COALESCE(substr(indexed_with, instr(indexed_with, '/rev') + 4), '') <> ?")
         stale_docs = db.execute(
-            "SELECT COUNT(*) AS n FROM docs WHERE "
-            "COALESCE(substr(indexed_with, instr(indexed_with, '/rev') + 4), '') <> ?",
-            (str(PARSER_REV),)).fetchone()["n"]
+            "SELECT COUNT(*) AS n FROM docs " + stale_sql, (str(PARSER_REV),)).fetchone()["n"]
+        stale_revs = {_rev_of(r["indexed_with"]) for r in
+                      db.execute("SELECT indexed_with FROM docs " + stale_sql,
+                                 (str(PARSER_REV),)).fetchall()}
         stale_sample = [Path(r["path"]).name for r in db.execute(
-            "SELECT path FROM docs WHERE "
-            "COALESCE(substr(indexed_with, instr(indexed_with, '/rev') + 4), '') <> ? "
-            "ORDER BY id LIMIT 5", (str(PARSER_REV),)).fetchall()]
+            "SELECT path FROM docs " + stale_sql + " ORDER BY id LIMIT 5",
+            (str(PARSER_REV),)).fetchall()]
     finally:
         db.close()
     health = {"orphan_chunks": orphan_chunks, "missing_vecs": missing_vecs,
-              "ok": orphan_chunks == 0 and missing_vecs == 0}
+              "docs_without_retrievable_chunks": blind_docs, "blind_sample": blind_sample,
+              "ok": orphan_chunks == 0 and missing_vecs == 0 and blind_docs == 0}
     migration = dict(_LAST_CONNECT)
     migration.pop("logged", None)
     return {
@@ -2748,10 +2958,13 @@ def cmd_stats(req):
         "schema_version": SCHEMA_VERSION,
         "parser_rev": PARSER_REV,
         "indexed_with": PARSER_TOKEN,
-        # >0 表示库里有文档是用旧解析器入库的：增量入库不会自愈，可用
-        # kb_ingest(metadata_only=true) 秒级刷新元数据，或 kb_ingest(rebuild=true) 全量重灌
+        # >0 表示库里有文档是用旧解析器入库的：增量入库不会自愈。
+        # stale_kind 决定给用户哪个建议：'chunk' = 必须全量重灌（分块/向量会变），
+        # 'meta' = 秒级刷元数据即可。给"无效的选项"比不给更糟，所以这里要分清楚。
         "stale_docs": stale_docs,
         "stale_sample": stale_sample,
+        "stale_kind": _stale_kind(stale_revs),
+        "chunk_affecting_revs": sorted(CHUNK_AFFECTING_REVS),
         "migration": migration,
         "health": health,
         # 向量链路状态：只反映本进程已有的加载结果，不主动加载模型（kb_stats 要便宜）。
