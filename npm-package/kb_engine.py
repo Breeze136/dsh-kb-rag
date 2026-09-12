@@ -1942,6 +1942,10 @@ def cmd_ingest(req):
         db.commit()
     finally:
         db.close()
+    # 同进程内的写入：立刻清掉内存缓存。跨进程的写入（另一个 CLI / 后台子进程在写同一个库）
+    # 由 _search_core 的库文件指纹兜住，所以这里不是唯一防线，但是最快最确定的一层。
+    _invalidate_caches("ingest added=%d updated=%d meta=%d"
+                       % (totals["added"], totals["updated"], totals["meta_changed"]))
     emb = get_embedder()
     resp = {
         "ok": True,
@@ -2067,9 +2071,15 @@ def _ingest_file(db, f, force, files, totals, meta=None):
         dup = db.execute("SELECT id, path FROM docs WHERE sha256 = ? AND path != ?",
                          (sha, key)).fetchone()
         if dup is not None and not force:  # same content already indexed elsewhere
+            # 与 skipped 分支同理：内容已在别处入库 ≠ 那篇的向量是齐的。模型不可用时入库过的
+            # 文档同样会 0 向量，这里也补一次缺失向量（否则"重复内容"永远补不上，
+            # 用户只能 rebuild=true 全量重灌）。
+            n_vec = _embed_new_chunks(db, dup["id"])
             entry.update({"status": "duplicate", "of": dup["path"],
+                          "vectors": n_vec,
                           "ms": round((time.time() - t0) * 1000)})
             totals["duplicates"] = totals.get("duplicates", 0) + 1
+            totals["vectors"] += n_vec
             files.append(entry)
             return
         text, pdf_meta = read_document(f)
@@ -2265,7 +2275,7 @@ def keyword_ranking(rows, query, ckey=None):
         lowered = [t.lower() for t in texts]
         avgdl = sum(len(t) for t in texts) / max(1, n)
         if ckey is not None and n <= KB_CORPUS_CACHE_MAX:
-            _BM25_CACHE[ckey] = {"lowered": lowered, "avgdl": avgdl, "n": n}
+            _cache_put(_BM25_CACHE, ckey, {"lowered": lowered, "avgdl": avgdl, "n": n})
     texts = [r["text"] for r in rows]
     k1, b = 1.2, 0.75
     scores = [0.0] * n
@@ -2630,15 +2640,67 @@ KB_RERANK_POOL = int(_env_float("KB_RERANK_POOL", 20))   # 精排候选池下限
 KB_RERANK_CHARS = int(_env_float("KB_RERANK_CHARS", 1800))    # 每条候选喂给精排的字符数
 # 单次查询扫描到多少块时给出"该做索引化了"的提示（只提示，不改行为）
 KB_SCAN_WARN_CHUNKS = int(_env_float("KB_SCAN_WARN_CHUNKS", 100000))
+# 查询响应缓存（cache 表）保留的最大行数：超过就按 created 修剪最旧的（每 200 次写入检查一次）
+KB_QUERY_CACHE_MAX = int(_env_float("KB_QUERY_CACHE_MAX", 3000))
+_CACHE_WRITES = 0
 # 语料缓存（R9 的实用部分）：一次查询要把参与检索的分块（文本 + 向量）读进内存，
 # 同一会话里反复查同一个库时这是纯重复劳动。缓存按 (库路径, 规模签名, 是否要向量, WHERE)
 # 记账，签名变化（入库/清库/过滤条件变）即失效 —— 不改变任何排序结果，只省掉重复读取。
 # 超过 KB_CORPUS_CACHE_MAX 块时不缓存（避免守护进程常驻几百 MB）。
 KB_CORPUS_CACHE_MAX = int(_env_float("KB_CORPUS_CACHE_MAX", 60000))
+# 缓存**条数**上限：key 里含过滤条件（where/args），而每条是整库分块的副本（文本 + 向量）。
+# 不设上限时，用户试几种 filters 就能把守护进程撑到几百 MB —— 这是典型的"缓存自己变成问题"。
+KB_CORPUS_CACHE_ENTRIES = int(_env_float("KB_CORPUS_CACHE_ENTRIES", 2))
 KV_CORPUS_CACHE_ON = os.environ.get("KB_CORPUS_CACHE", "1").strip().lower() not in ("0", "false", "off", "no")
 _CORPUS_CACHE = {}
 # BM25 的小写文本 / 平均长度缓存（同一语料签名；见 keyword_ranking）
 _BM25_CACHE = {}
+
+
+def _db_file_signature(db_path):
+    """库文件层面的变更指纹（主库 + WAL 的 mtime/大小）。
+
+    为什么除了 SQL 侧签名还需要它：SQL 侧只看 chunks/docs 的规模与时间戳，**看不到
+    "只改元数据字段"的更新** —— 实测 `metadata_only` 刷新后 title/authors/year 变了，
+    但 MAX(chunks.id) / COUNT(docs) / MAX(indexed_at) 全都没变，检索继续返回旧值。
+    文件指纹对任何一次提交都会变，也能覆盖**跨进程**写入（另一个 CLI 在往同一个库写时，
+    进程内的失效钩子根本不会被调用）。"""
+    sig = []
+    for p in (db_path, db_path + "-wal"):
+        try:
+            st = os.stat(p)
+            sig.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append(None)
+    return tuple(sig)
+
+
+def _cache_put(store, key, value):
+    """往内存缓存里放一条，并按 KB_CORPUS_CACHE_ENTRIES 淘汰最旧的插入项。
+
+    key 里含过滤条件，每条又是整库分块的副本；不设条数上限时"多试几种 filters"就能把
+    守护进程撑到几百 MB。淘汰按插入顺序（dict 保序），够用且零依赖。"""
+    store[key] = value
+    while len(store) > KB_CORPUS_CACHE_ENTRIES:
+        oldest = next(iter(store))
+        if oldest == key:
+            break
+        store.pop(oldest, None)
+
+
+def _invalidate_caches(reason=""):
+    """任何写库操作之后必须调用：内存里的语料 / BM25 / 中文占比 / 文档质心缓存都按"库内容"算。
+
+    漏掉这一步的后果实测过（_test_cache_staleness.py）：元数据刷新后，同一守护进程里的
+    检索仍返回旧的 title/authors/year，而 kb_stats 走另一条查询所以显示的是新值 ——
+    这种"一半新一半旧"最难排查。"""
+    n = (len(_CORPUS_CACHE) + len(_BM25_CACHE) + len(_CJK_SHARE_CACHE) + len(_REL_CENTROID))
+    _CORPUS_CACHE.clear()
+    _BM25_CACHE.clear()
+    _CJK_SHARE_CACHE.clear()
+    _REL_CENTROID.clear()
+    if n and reason:
+        _log("[kb-rag] 内存缓存已失效（%s）：语料/BM25/中文占比/质心共 %d 项" % (reason, n))
 # 缓存 key 里用**配置名**而不是运行时的 _RERANK_NAME：后者在模型加载前是 None、加载后变成
 # 模型名，于是"某进程第一次 deep 检索"写下的缓存行永远命中不了（key 已经变了）。
 RERANK_KEY_NAME = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
@@ -2698,12 +2760,18 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     ckey = None
     if KV_CORPUS_CACHE_ON:
         try:
-            # 签名要便宜又要可靠：MAX(chunks.id) 走主键、O(1)，任何"重灌/新增文档"都会抬升它；
-            # COUNT(docs) 只扫 docs（几百行），清库/去重会改变它。
+            # 签名要便宜又要可靠：
+            #   MAX(chunks.id) 走主键 O(1)，任何"重灌/新增文档"都会抬升它；
+            #   COUNT(docs) 只扫 docs（几百行），清库/去重会改变它；
+            #   MAX(indexed_at) 覆盖"重灌但 id 未变"的情形；
+            #   文件指纹（mtime/大小）覆盖**元数据字段更新**与**跨进程写入** —— 只靠前三项
+            #   会漏掉 metadata_only 刷新（实测：检索返回旧 title）。
             # （不用 PRAGMA data_version：实测它只在同一连接内有效，新连接看不到他连接提交后的变化。）
             sig = db.execute("SELECT (SELECT COALESCE(MAX(id), 0) FROM chunks) AS mx, "
-                             "(SELECT COUNT(*) FROM docs) AS dc").fetchone()
-            ckey = (db_path, need_vec, int(sig["mx"]), int(sig["dc"]), where, tuple(str(a) for a in args))
+                             "(SELECT COUNT(*) FROM docs) AS dc, "
+                             "(SELECT COALESCE(MAX(indexed_at), 0) FROM docs) AS ia").fetchone()
+            ckey = (db_path, need_vec, int(sig["mx"]), int(sig["dc"]), float(sig["ia"]),
+                    _db_file_signature(db_path), where, tuple(str(a) for a in args))
             cached = _CORPUS_CACHE.get(ckey)
             if cached is not None:
                 rows = cached
@@ -2715,7 +2783,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "SELECT " + cols + " FROM chunks c JOIN docs d ON d.id = c.doc_id" + vec_join + where,
             args).fetchall()
         if ckey is not None and len(rows) <= KB_CORPUS_CACHE_MAX:
-            _CORPUS_CACHE[ckey] = rows
+            _cache_put(_CORPUS_CACHE, ckey, rows)
     load_ms = round((time.time() - t_load) * 1000)
 
     if not rows:
@@ -2940,6 +3008,15 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
         try:
             db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
                        (cache_key, json.dumps(resp, ensure_ascii=True), time.time()))
+            # 查询缓存行数没有天然上界（每个不同查询一行、每行几 KB），而只有"入库/元数据变化"
+            # 时会整体清空 —— 长期使用会一直涨。这里按写入次数偶尔修剪，保留最近
+            # KB_QUERY_CACHE_MAX 条（默认 3000）。计数在进程内，不额外查库。
+            global _CACHE_WRITES
+            _CACHE_WRITES += 1
+            if _CACHE_WRITES % 200 == 0:
+                db.execute("DELETE FROM cache WHERE key NOT IN "
+                           "(SELECT key FROM cache ORDER BY created DESC LIMIT ?)",
+                           (KB_QUERY_CACHE_MAX,))
         except sqlite3.OperationalError as ex:
             # 缓存只是加速：异步入库的子进程正持有写锁时会撞锁，而结果已经算完——
             # 不能因为写缓存失败让整次检索作废（与上面 related_docs 的容错一致）。
@@ -3313,6 +3390,7 @@ def cmd_zotero(req):
         db.commit()
     finally:
         db.close()
+    _invalidate_caches("zotero added=%d updated=%d" % (totals["added"], totals["updated"]))
     return {"ok": True, "zotero_db": zdb, "candidates": len(entries),
             # dry_run 语义是"预览全部候选"，不截断；真实迁移才只回最近 20 条压缩 JSON
             "dry_run": dry_run,
@@ -3356,6 +3434,8 @@ def cmd_dedup(req):
         n_chunks = db.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
     finally:
         db.close()
+    if removed:
+        _invalidate_caches("dedup removed=%d" % len(removed))
     return {"ok": True, "removed": len(removed), "docs": n_docs,
             "chunks": n_chunks, "files": removed,
             "ms": round((time.time() - t0) * 1000)}
@@ -3365,8 +3445,8 @@ def cmd_dedup(req):
 
 
 def cmd_clear(req):
-    _REL_CENTROID.clear()
     """Wipe every doc/chunk/vector/cache row; destructive, requires confirm: true."""
+    _REL_CENTROID.clear()
     t0 = time.time()
     if req.get("confirm") is not True:
         return {"ok": False,
@@ -3393,6 +3473,7 @@ def cmd_clear(req):
         db_path = str((Path(req.get("kb_root") or ".kb") / "kb.sqlite").resolve())
     finally:
         db.close()
+    _invalidate_caches("clear docs=%d chunks=%d" % (docs_n, chunks_n))
     return {"ok": True, "cleared_docs": docs_n, "cleared_chunks": chunks_n,
             "db": db_path,
             "note": "已清空全部文献与索引（含后台任务记录），可用 kb_ingest 或 kb_zotero 重建。",
