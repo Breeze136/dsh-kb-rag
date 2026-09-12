@@ -116,15 +116,18 @@ function apply(ctx) {
     ]);
   }
 
-  // 入库数据版本：先问引擎要"旧解析器入库"的文档数（stats.stale_docs）；
+  // 入库数据版本：先问引擎要"旧解析器入库"的文档数（stats.stale_docs）与陈旧类型
+  // （stats.stale_kind：'chunk' 会改变分块/向量，必须全量重灌；'meta' 秒级刷元数据即可）。
   // 取不到（旧引擎/无库/调用失败）就静默跳过这条问题，绝不影响首次工具调用。
   function staleCountOf(kbRoot, exec) {
     return runEngine("stats", { kb_root: kbRoot }, exec).then(function (resp) {
       const n = resp ? Number(resp.stale_docs) : 0;
-      return Number.isFinite(n) && n > 0 ? n : 0;
+      if (!Number.isFinite(n) || n <= 0) return { n: 0, kind: "none" };
+      const kind = resp && resp.stale_kind === "meta" ? "meta" : "chunk";
+      return { n: n, kind: kind };
     }).catch(function (e) {
       console.error("[kb-rag] stale check skipped:", String(e));
-      return 0;
+      return { n: 0, kind: "none" };
     });
   }
 
@@ -154,7 +157,9 @@ function apply(ctx) {
     if (scopeAsked || userQuestions === undefined) return;
     scopeAsked = true;
     const root = typeof kbRoot === "string" && kbRoot.length > 0 ? kbRoot : workspaceOf(exec) + "/.kb";
-    staleCountOf(root, exec).then(function (stale) {
+    staleCountOf(root, exec).then(function (staleInfo) {
+      const stale = staleInfo && staleInfo.n ? staleInfo.n : 0;
+      const staleKind = staleInfo && staleInfo.kind ? staleInfo.kind : "none";
       const request = {
         questions: [{
           id: "kb-scope",
@@ -176,15 +181,26 @@ function apply(ctx) {
         }],
       };
       if (stale > 0) {
+        // stale_kind='chunk' 时**不提供**"只刷新元数据"：分块/向量的改动刷新元数据不会生效，
+        // 给用户一个无效选项比不给更糟（他会以为修好了）。
+        const chunkLevel = staleKind === "chunk";
+        const opts = [
+          { label: "暂不处理", description: "保持现状，随时可用 kb_ingest 的 metadata_only/rebuild 手动刷新" },
+        ];
+        if (!chunkLevel) {
+          opts.push({ label: "只刷新元数据（推荐）", description: "秒级完成，仅重抽标题/作者/DOI，不重切块、不重嵌入" });
+        }
+        opts.push({
+          label: chunkLevel ? "全量重灌（必须）" : "全量重灌（较慢）",
+          description: chunkLevel
+            ? "本次改动会改变分块与向量，只刷元数据不生效；重新解析并重新嵌入全部文档，期间转后台，可用 kb_status 查进度"
+            : "重新解析并重新嵌入全部文档，期间会转后台，可用 kb_status 查进度",
+        });
         request.questions.push({
           id: "kb-stale",
           header: "入库数据版本",
           question: "库内有 " + stale + " 篇文档是用旧版解析器入库的（引擎的解析改进不会自动作用于已有数据）。是否刷新？",
-          options: [
-            { label: "暂不处理", description: "保持现状，随时可用 kb_ingest 的 metadata_only/rebuild 手动刷新" },
-            { label: "只刷新元数据（推荐）", description: "秒级完成，仅重抽标题/作者/DOI，不重切块、不重嵌入" },
-            { label: "全量重灌（较慢）", description: "重新解析并重新嵌入全部文档，期间会转后台，可用 kb_status 查进度" },
-          ],
+          options: opts,
         });
       }
       if (agent !== undefined) request.agent = agent;
@@ -590,6 +606,13 @@ function apply(ctx) {
     if (health !== null && (Number(health.missing_vecs) > 0 || Number(health.orphan_chunks) > 0)) {
       lines.push("⚠ 索引不完整：缺失向量 " + (health.missing_vecs || 0) + " 块 · 孤儿分块 " + (health.orphan_chunks || 0)
         + " —— 缺失向量的分块不参与向量检索；重跑 kb_ingest 可补齐，或用 kb_ingest(rebuild=true) 全量重灌。");
+    }
+    // 整篇不可检索：这些文档在搜索里等于不存在，以前完全没有信号（References 判定误吞正文的后果）
+    if (health !== null && Number(health.docs_without_retrievable_chunks) > 0) {
+      const sample = Array.isArray(health.blind_sample) && health.blind_sample.length > 0
+        ? "（示例：" + health.blind_sample.slice(0, 3).join("、") + "）" : "";
+      lines.push("⚠ " + health.docs_without_retrievable_chunks + " 篇文档没有任何可检索分块" + sample
+        + " —— 这些文档**查不到**（通常是解析时整篇被误判为参考文献）；需 kb_ingest(rebuild=true) 全量重灌。");
     }
     const recent = Array.isArray(value.recent) ? value.recent : [];
     if (recent.length > 0) {
