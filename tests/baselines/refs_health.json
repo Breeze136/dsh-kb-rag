@@ -1,0 +1,15 @@
+{
+  "_说明": "全库切块健康度的验收基线（316 篇真实 PDF 实测，2026-09 的 1.6.7 状态）。s_refs_real 用它判定回归。",
+  "measured_at": "1.6.7 引文关联修复后",
+  "docs": 316,
+  "chunks": 23550,
+  "zero_chunks": 3424,
+  "zero_share": 0.1454,
+  "blind_docs": 0,
+  "heavy_docs": 3,
+  "tolerances": {
+    "zero_share_delta": 0.015,
+    "blind_docs": 0,
+    "heavy_docs": "不得超过 heavy_docs"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "_说明": "引文关联命中率的验收基线：文内 [n] 编号能在文末找到对应条目的比例。s_cites_real 用它判定回归；baseline_commit 是「改前」引擎所在的提交，用于对照。",
+  "measured_at": "1.6.7 引文关联修复后（316 篇真实 PDF）",
+  "baseline_commit": "961e7c4",
+  "hit_rate": 0.816,
+  "entries": 16929,
+  "incites": 15813,
+  "resolved": 12911,
+  "no_entries": 38,
+  "baseline_incites": 15695,
+  "baseline_hit_rate": 0.799,
+  "baseline_entries": 16479,
+  "regressed_docs_max": 8,
+  "improved_docs": 25,
+  "tolerances": {
+    "hit_rate_delta": -0.005,
+    "entries_ratio": 0.97,
+    "no_entries": "不得超过 no_entries"
+  }
+}

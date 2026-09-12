@@ -15,3 +15,8 @@ Thumbs.db
 # 个人资料（勿提交）
 tools/doc_list.txt
 tools/交接文档.md
+
+# 测试框架的运行产物（沙箱与报告；可随时重建）
+tests/_sandbox/
+tests/_reports/
+tests/_cache/
