@@ -2175,6 +2175,25 @@ def extract_terms(query):
     return terms
 
 
+def _norm_filter_text(s):
+    """filters 文本归一化：连字符/下划线/连续空格 → 单空格，并小写。
+
+    实测现场：标题 'Electric-field control of local ferromagnetism' 用不同写法查过 3 遍
+    （含 2 次零命中）—— 库里存的是连字符版，查询里是空格版。SQLite 的 LIKE 对 ASCII 本来
+    就大小写不敏感，真正的坑是连字符/下划线/空格的不一致。"""
+    return re.sub(r"\s+", " ", re.sub(r"[\-_]+", " ", (s or "").strip().lower()))
+
+
+def _sq_norm(expr):
+    """SQL 侧的同一套归一化（列名由内部常量给出，不含用户输入，无注入面）。"""
+    return ("lower(replace(replace(replace(replace(replace(%s,'-',' '),'_',' '),"
+            "'  ',' '),'   ',' '),'    ',' '))" % expr)
+
+
+_NORM_SQL = {"title": _sq_norm("d.title"), "authors": _sq_norm("d.authors"),
+             "journal": _sq_norm("d.journal")}
+
+
 def build_where(filters):
     where, args = [], []
     for key, col in FILTER_COLS.items():
@@ -2192,9 +2211,18 @@ def build_where(filters):
                 if m:
                     where.append(f"{col} {m.group(1) or '='} ?")
                     args.append(int(m.group(2)))
-        else:
-            where.append(f"{col} LIKE ?")
-            args.append(f"%{v}%")
+            continue
+        if key == "authors":
+            # 作者按**分词 AND**匹配："Smith J" 要能命中库里存的 "Smith, J.; Jones, B."
+            # （整串子串匹配在标点/顺序不同时必然零命中——实测穷举 author filter 是 agent
+            # "来回找"的典型原因之一）
+            for tok in [t for t in _norm_filter_text(v).split(" ") if t]:
+                where.append(f"{_NORM_SQL['authors']} LIKE ?")
+                args.append("%" + tok + "%")
+            continue
+        expr = _NORM_SQL.get(key, col)
+        where.append(f"{expr} LIKE ?")
+        args.append("%" + _norm_filter_text(v) + "%")
     return (" WHERE " + " AND ".join(where)) if where else "", args
 
 
