@@ -1,6 +1,27 @@
 # Changelog
 
-## [1.6.7] - 工具描述与文档写明 `filters.journal` 的可用范围
+## [1.6.7] - 工具注册竞态修复 + 向量链路降级可见可重试 + GPU 设备可见
+
+### 修复：启动时 `kb_*` 工具一个都不注册（issue #1）
+- `inject` 补上 `subprocess`（`npm-package/lib/index.js`、`plugin/host.js`）。原因：cordis 只等待 `inject` 中声明的服务，而 loader 并发激活各 entry（`cordis-plugin-loader` 用 `Promise.allSettled`），本包体积小、往往在 `@deepseek-ai/dsh-subprocess-local` 注册服务之前就执行 `apply()`，此时 `ctx.get("subprocess")` 返回 `undefined`（未注册返回 `undefined` 而不抛错）→ 提前 `return`，10 个工具全部丢失。声明 inject 后 cordis 会 park 本插件直到该服务就绪
+- 动态插件侧（`plugin/host.js`）同样受影响：沙箱的 `ctx.get(name)` 是"可选查询"、不要求声明，服务未就绪时同样是静默丢工具；属性访问 `ctx.subprocess` 才必须声明
+- 保留 `ctx.get("subprocess") === undefined` 的兜底日志（措辞改为 "despite inject"），便于诊断注入被改坏的场景
+
+### 修复：嵌入/精排不可用时静默降级，用户看不到原因（issue #2）
+- `kb_ingest` 新增返回字段 `embedding_error` / `vectors_missing` / `retry_secs`；插件在「N 块 / 0 向量」旁直接给出原因与下一步动作。此前只有 `embedding: null`，用户看到的是一个"成功"却没有任何解释的入库结果
+- `kb_stats` 新增 `embedding` / `embedding_error` / `vectors_missing`（只反映本进程已有的加载结果，不主动加载模型），插件渲染 `health.missing_vecs` / `health.orphan_chunks`
+- `kb_search`/`kb_rag` 的渲染层此前丢弃引擎的 `note`，降级原因（「向量索引缺失，降级为纯关键词」）到不了用户；现在透传含"降级"的 note。1.6.6 已按 `mode_used` 渲染检索方式，本次补齐原因
+
+### 修复：模型加载失败被永久缓存 + 修好环境后补不回向量（issue #2）
+- `get_embedder()` / `get_reranker()` 的失败状态此前在守护进程内永久短路：依赖装好、模型就位后同一进程依然返回 `None`，表现为"修了还是没用"，必须杀掉守护进程或重启 DSH。新增 `KB_MODEL_RETRY_SECS`（默认 120 秒，`0` = 每次重试，负数 = 旧行为）：失败过期后自动重试
+- 新增引擎命令 `reload`：清除失败缓存并立刻重试（`drop_models=true` 连已加载模型一起释放；`rerank=true` 顺带探测精排模型）。已登记到 `kb_engine.py` 的两处命令表与 `plugin/kbrag.plugin.json` 的 `engine.commands`
+- 增量入库在内容未变时直接 `skipped` 返回、从不补向量，所以"修好环境后重跑 `kb_ingest`"过去补不回来（只能 `rebuild=true` 全量重灌，312 篇约 322 秒）。现在该分支会对已入库文档做一次"只补缺失向量"，并把补出的数量计入 `totals.vectors`；向量齐全时只是一条 SELECT，代价可忽略
+### 新增：GPU 感知（设备可见、批大小可配、OOM 有兜底）
+- **设备可见**：`kb_stats` / `kb_ingest` 新增 `device` 字段（`requested` = `KB_DEVICE` 取值、`torch` 版本、`cuda_available`、`gpu` 名称、各模型实际 `device`、以及 OOM 回退记录）。此前"装了 CUDA 版 torch、模型却仍跑在 CPU"完全看不出来——与 issue #2 的可见性同源
+- **设备可控**：`KB_DEVICE=auto`（默认，不改动 sentence-transformers 的自动选择）/ `cpu` / `cuda` / `mps`。默认路径下装上 CUDA 版 torch 即自动使用 GPU，无需改代码
+- **批大小可配**：新增 `KB_EMBED_BATCH`（默认 CPU 32 / GPU 128）与 `KB_RERANK_BATCH`（默认 CPU 16 / GPU 64）。原来两处写死（32 / 16），GPU 上喂不饱算力
+- **OOM 不再是死路**：`encode()` / `rerank()` 捕获显存不足 → 清 CUDA 缓存 + 缩到 batch 4 重试；仍 OOM 则把模型回退 CPU 重试，并把"已回退 CPU"记进 `device.note`。否则一次瞬时 OOM 就会变成"整个会话再也用不了向量"（issue #2 的永久缓存坑）
+- 引擎 `VERSION` 3.1.0 → 3.2.0（`PARSER_REV` 保持 4：本次不改解析逻辑与库结构，不产生陈旧标记）；搜索缓存 key 含引擎 token，升级后不会复用旧响应
 
 ### 文档：写明 `filters.journal` 的可用范围（BACKLOG §2.8 的 ④，纯文档，无行为变更）
 - **问题**：`extract_meta()` 从不给 `journal` 赋值，只有 Zotero 迁移会写入。因此 `kb_ingest` 建起来的库里该列恒为 `NULL`，`filters.journal` 必然零命中——而工具描述此前只写"期刊子串匹配"，等于给了模型一个静默失效的过滤器。

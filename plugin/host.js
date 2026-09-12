@@ -3,12 +3,14 @@
 // 依赖：工作区根目录存在 kb_engine.py；Python 环境装有 PyMuPDF/faiss-cpu/sentence-transformers。
 return {
   name: 'kb-rag',
-  inject: ['timer'],
+  // subprocess 必须声明在 inject 里：动态插件沙箱的 ctx.get(name) 是"可选查询"，服务还没注册时
+  // 返回 undefined，下面的兜底就会静默丢工具；声明后 cordis 会 park 本插件直到服务就绪（issue #1）。
+  inject: ['timer', 'subprocess'],
   apply(ctx) {
     const subprocess = ctx.get('subprocess')
     const sandboxPolicy = ctx.get('sandboxPolicy')
     if (subprocess === undefined) {
-      console.error('[kb-rag] subprocess service unavailable; tools not registered')
+      console.error('[kb-rag] subprocess service unavailable despite inject; tools not registered')
       return
     }
 
@@ -424,6 +426,11 @@ return {
       lines.push('总耗时 ' + (totalMs >= 1000 ? (totalMs / 1000).toFixed(1) + 's' : totalMs + 'ms')
         + (value.embedding ? ' · ' + value.embedding : '')
         + (typeof totals.chunks === 'number' ? ' · ' + totals.chunks + ' 块 / ' + (totals.vectors || 0) + ' 向量' : ''))
+      // 「N 块 / 0 向量」必须给原因：以前只有 embedding=null，用户看不出向量根本没建（issue #2）
+      if (value.embedding_error) {
+        lines.push('⚠ 未建向量（嵌入模型不可用：' + String(value.embedding_error).slice(0, 160)
+          + '）—— 本次只建了关键词索引，检索会降级为纯关键词。修好环境后重跑 kb_ingest 即可补齐缺失向量（无需全量重建）。')
+      }
       if (files.length > 0) {
         lines.push('')
         lines.push('**最近入库（滚动）**')
@@ -450,6 +457,26 @@ return {
       const lines = []
       lines.push('**知识库统计** · ' + (value.docs || 0) + ' 文档 / ' + (value.chunks || 0) + ' 块 / ' + (value.vectors || 0) + ' 向量')
       if (value.db) lines.push('数据库：' + value.db)
+      // 向量链路状态：缺失向量是"检索退化成纯关键词"的直接信号，以前完全没渲染（issue #2）
+      if (typeof value.embedding === 'string' && value.embedding.length > 0) lines.push('嵌入模型：' + value.embedding)
+      if (value.embedding_error) lines.push('⚠ 嵌入模型加载失败：' + String(value.embedding_error).slice(0, 160))
+      // 计算设备：装了 GPU 却没吃上、或 OOM 已回退 CPU —— 这两种情况以前完全看不出来
+      const dev = value.device !== null && typeof value.device === 'object' ? value.device : null
+      if (dev !== null) {
+        const dbits = []
+        if (dev.embed_device) dbits.push('嵌入=' + dev.embed_device)
+        if (dev.rerank_device) dbits.push('精排=' + dev.rerank_device)
+        if (dev.gpu) dbits.push(dev.gpu)
+        if (dev.cuda_available === false) dbits.push('CUDA 不可用（torch ' + (dev.torch || '?') + '）→ 装 CUDA 版 torch 可加速')
+        else if (dev.cuda_available === true && !dev.embed_device) dbits.push('CUDA 可用（模型未加载）')
+        if (dev.note) dbits.push(dev.note)
+        if (dbits.length > 0) lines.push('计算设备：' + dbits.join(' · '))
+      }
+      const health = value.health && typeof value.health === 'object' ? value.health : null
+      if (health !== null && (Number(health.missing_vecs) > 0 || Number(health.orphan_chunks) > 0)) {
+        lines.push('⚠ 索引不完整：缺失向量 ' + (health.missing_vecs || 0) + ' 块 · 孤儿分块 ' + (health.orphan_chunks || 0)
+          + ' —— 缺失向量的分块不参与向量检索；重跑 kb_ingest 可补齐，或用 kb_ingest(rebuild=true) 全量重灌。')
+      }
       const recent = Array.isArray(value.recent) ? value.recent : []
       if (recent.length > 0) {
         lines.push('')
@@ -573,6 +600,10 @@ return {
       // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
       if (typeof value.lang_note === 'string' && value.lang_note.length > 0) {
         lines.push('提示：' + value.lang_note)
+      }
+      // 引擎的降级原因（如"向量索引缺失，降级为纯关键词"）以前被丢弃，用户不知道检索为何变成关键词（issue #2）
+      if (typeof value.note === 'string' && value.note.indexOf('降级') >= 0) {
+        lines.push('提示：' + String(value.note).replace(/命中 \d+ 块，返回 Top-\d+/, '').trim())
       }
       items.forEach(function (r, i) {
         const title = String(r.title || r.file || '')
