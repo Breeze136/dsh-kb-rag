@@ -40,7 +40,9 @@ return {
         }
         const content = Array.isArray(block.content) ? block.content : []
         const text = content.map(function (c) { return (c && c.type === 'text') ? String(c.text || '') : '' }).join('\n')
-        const linkRe = /\[(\d+)\] \[([^\]]+)\]\(([^)]+)\)/g
+        // 宿主渲染的格式是「1. [标题](https://doi.org/...)」；旧正则按「[1] [标题](...)」写，
+        // **永远匹配不上** → 卡片恒显示"无命中"。（与 npm 侧 lib/client.js 保持同一实现）
+        const linkRe = /(\d{1,3})\s*\.?\s*\[([^\]]{2,240})\]\(([^)\s]+)\)/g
         const items = []
         let m = null
         while ((m = linkRe.exec(text)) !== null) {

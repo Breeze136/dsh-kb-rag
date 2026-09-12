@@ -821,6 +821,34 @@ function apply(ctx) {
     return [{ type: "text", text: lines.join("\n") }];
   };
 
+  // 结构化来源投影（output.presentationMeta）：客户端半边（lib/client.js）用它渲染来源卡片。
+  // 为什么不塞进 render 的文本里：ContentBlockMap 只有 text/reasoning/image/tool-call/tool-result，
+  // 没有自定义块类型；结构化数据的**正规通道**是 presentationMeta → 客户端 props.block.meta。
+  const sourcesMeta = (_args, value) => {
+    if (value === null || typeof value !== "object") return null;
+    const list = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : []);
+    return {
+      verdict: value.verdict === undefined ? null : value.verdict,
+      no_hit: value.no_hit === true,
+      max_score: value.max_score === undefined ? null : value.max_score,
+      floor: value.floor === undefined ? null : value.floor,
+      mode_used: value.mode_used || null,
+      cached: value.cached === true,
+      closest: Array.isArray(value.closest) ? value.closest.slice(0, 5) : [],
+      sources: list.slice(0, 10).map(function (r, i) {
+        return {
+          idx: i + 1,
+          title: r && (r.title || r.file) ? String(r.title || r.file) : null,
+          doi: r && typeof r.doi === "string" && r.doi.length > 0 ? r.doi : null,
+          authors: r && typeof r.authors === "string" ? r.authors : null,
+          year: r && r.year ? r.year : null,
+          section: r && r.section ? r.section : null,
+          score: r && typeof r.score === "number" ? r.score : null,
+        };
+      }),
+    };
+  };
+
   const renderSources = (_args, value) => {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
     const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : []);
@@ -1025,7 +1053,7 @@ function apply(ctx) {
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
     },
-    output: { schema: { type: "json" }, render: withNotes("kb_search", renderSources) },
+    output: { schema: { type: "json" }, render: withNotes("kb_search", renderSources), presentationMeta: sourcesMeta },
     presentCall: presentQueryCall,
     execute(args, exec) {
       const strict = args.strict === undefined ? stateOf(exec).strict : args.strict === true;
@@ -1057,7 +1085,7 @@ function apply(ctx) {
       kb_root: { type: "string", description: "知识库目录（默认：工作区下的 .kb）。" },
       filters: filterSchema,
     },
-    output: { schema: { type: "json" }, render: withNotes("kb_rag", renderSources) },
+    output: { schema: { type: "json" }, render: withNotes("kb_rag", renderSources), presentationMeta: sourcesMeta },
     presentCall: presentQueryCall,
     execute(args, exec) {
       const strict = args.strict === undefined ? stateOf(exec).strict : args.strict === true;
