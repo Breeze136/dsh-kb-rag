@@ -2388,7 +2388,10 @@ def _parse_references(text, cap=400):
 
 
 def _cited_refs(db, doc_id, chunk_text, cache):
-    """取本块正文引用的 [n] 对应参考文献条目（含范围/逗号列表展开），供引文关联建议使用。"""
+    """取本块正文引用的 [n] 对应参考文献条目（含范围/逗号列表展开），供引文关联建议使用。
+
+    条目里若带 DOI 就一并给出（`doi` 字段）：agent 可以直接 kb_fetch 把它拉进库，
+    这是"库内只有一两篇 → 循引文补库"这条深挖路径的关键一步。"""
     refs = _parse_references(_doc_references(db, doc_id, cache))
     if not refs:
         return []
@@ -2399,7 +2402,8 @@ def _cited_refs(db, doc_id, chunk_text, cache):
     for n in nums:
         if n in refs and n not in seen:
             seen.add(n)
-            out.append({"n": n, "text": refs[n]})
+            m = _REF_DOI_RE.search(refs[n])
+            out.append({"n": n, "text": refs[n], "doi": m.group(0) if m else None})
         if len(out) >= 8:
             break
     _annotate_lib_matches(db, doc_id, out, cache)
@@ -3571,9 +3575,95 @@ def cmd_fetch(req):
     note += "付费墙文献不自动绕过：请在浏览器打开对应 DOI 手动下载后 kb_ingest 入库；下载好的 PDF 用「文件 → 添加文件」手动导入 Zotero。"
     if node_note:
         note += " " + node_note
+    # ingest=true：下载即入库（"深挖模式"里 agent 要反复"找文献 → 入库 → 再查"，
+    # 少一次往返就少一轮；增量入库会按 sha256 自动跳过已入库的文件，重复调用安全）
+    ingest_result = None
+    if req.get("ingest") and downloaded:
+        paths = [f["path"] for f in files if f["status"] == "downloaded" and f.get("path")]
+        if paths:
+            try:
+                ingest_result = cmd_ingest({"kb_root": req.get("kb_root") or ".kb", "paths": paths})
+                ingest_result.pop("device", None)      # 响应里不必重复一整块设备信息
+                note += " 已直接入库 %d 篇（可用 kb_search 立即检索）。" % len(paths)
+            except Exception as e:
+                ingest_result = {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:200])}
+                note += " 入库失败：%s" % str(ingest_result["error"])[:120]
     return {"ok": True, "target": target, "total": len(ids), "downloaded": downloaded,
-            "files": files, "note": note, "network": {"env": net_env, "proxy": proxy_report},
+            "files": files, "note": note, "ingest": ingest_result,
+            "network": {"env": net_env, "proxy": proxy_report},
             "ms": round((time.time() - t0) * 1000)}
+
+
+# ---------------------------------------------------------------- 工作区状态文件
+
+# 允许持久化的键与取值（插件侧会话默认值；写别的键一律忽略，避免状态文件变成杂物堆）
+STATE_KEYS = {
+    "scope": ("kb", "both", "web"),
+    "depth": ("quick", "deep"),
+    "strict": (True, False),
+    "enabled": (True, False),
+    "diligence": ("normal", "thorough"),
+}
+
+
+def _state_path(kb_root):
+    """<workspace>/.kb-rag/state.json —— 与 .kb 同级，用户可见、可手改、跨会话记住。"""
+    return Path(kb_root or ".kb").resolve().parent / ".kb-rag" / "state.json"
+
+
+def cmd_state(req):
+    """读写工作区状态文件。
+
+    为什么由引擎代写：插件跑在宿主进程里、受 sandboxPolicy 约束，直接写文件不保险；
+    引擎本来就在工作区里读写（.kb / .kb-jobs），这条路更干净。
+    action: read（默认）/ write（带 state 对象）/ reset。
+    """
+    path = _state_path(req.get("kb_root"))
+    cur = {}
+    try:
+        if path.is_file():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                cur = {k: v for k, v in loaded.items() if k in STATE_KEYS or k == "throttle"}
+    except Exception:
+        cur = {}
+    action = req.get("action") or "read"
+    if action == "read":
+        return {"ok": True, "path": str(path), "state": cur}
+    if action == "reset":
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return {"ok": True, "path": str(path), "state": {}, "reset": True}
+    if action == "write":
+        patch = req.get("state") or {}
+        if not isinstance(patch, dict):
+            return {"ok": False, "error": "state 必须是对象"}
+        rejected = []
+        for k, v in patch.items():
+            if k == "throttle":
+                if isinstance(v, dict):
+                    cur["throttle"] = v
+                else:
+                    rejected.append(k)
+                continue
+            allowed = STATE_KEYS.get(k)
+            if allowed is None:
+                rejected.append(k)
+                continue
+            if v not in allowed:
+                rejected.append(k)
+                continue
+            cur[k] = v
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": "写入失败 %s: %s" % (type(e).__name__, str(e)[:150])}
+        return {"ok": True, "path": str(path), "state": cur,
+                "rejected": rejected or None}
+    return {"ok": False, "error": "unknown action: %s" % action}
 
 
 # ------------------------------------------------- async ingest (MCP 60s 超时解药)
@@ -3758,7 +3848,7 @@ def cmd_serve():
                    "search": cmd_search, "rag": cmd_rag,
                    "stats": cmd_stats, "zotero": cmd_zotero,
                    "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch,
-                   "reload": cmd_reload}.get(req.get("command"))
+                   "reload": cmd_reload, "state": cmd_state}.get(req.get("command"))
         try:
             if handler is None:
                 raise ValueError(f"unknown command: {req.get('command')}")
@@ -3777,7 +3867,7 @@ def cmd_serve():
 
 def main():
     if len(sys.argv) < 2:
-        sys.stdout.write(json.dumps({"ok": False, "error": "usage: kb_engine.py <ingest|search|rag|stats|zotero|dedup|clear|fetch|reload|serve>"}))
+        sys.stdout.write(json.dumps({"ok": False, "error": "usage: kb_engine.py <ingest|search|rag|stats|zotero|dedup|clear|fetch|reload|state|serve>"}))
         return 1
     command = sys.argv[1]
     if command == "serve":
@@ -3790,7 +3880,7 @@ def main():
                "search": cmd_search, "rag": cmd_rag,
                "stats": cmd_stats, "zotero": cmd_zotero,
                "dedup": cmd_dedup, "clear": cmd_clear, "fetch": cmd_fetch,
-               "reload": cmd_reload}.get(command)
+               "reload": cmd_reload, "state": cmd_state}.get(command)
     if handler is None:
         sys.stdout.write(json.dumps({"ok": False, "error": f"unknown command: {command}"}))
         return 1

@@ -31,22 +31,98 @@ function apply(ctx) {
   }
 
   // ---- 提示层：规则全部声明在 guidance.js，这里只做注入与节流记账 ----
-  // 会话级状态落地前先用进程内 Map（与现有 scopePref 同粒度）；makeThrottle 接受任意
-  // 读写适配器，将来换成「按会话 + 工作区 state.json」不用改任何规则。
-  const guidanceSeen = new Map();
-  const guidanceThrottle = makeThrottle(
-    (id) => guidanceSeen.get(id),
-    (id, value) => { guidanceSeen.set(id, value); },
-  );
+  // （节流记录、会话状态、注册入口见下方"会话级状态"块）
+
+  let daemon = null;
+  let spawning = null;
+  let netEnv = "unknown";
+
+  // ── 会话级状态（#7）────────────────────────────────────────────────────────
+  // 以前 scope/depth/strict 是 apply() 闭包里的**单份**变量：第二个会话起不再询问，
+  // 某个会话改一次就污染整个 app（含并行 subagent）。现在按会话键隔离，
+  // 并可持久化成工作区默认值（<workspace>/.kb-rag/state.json，由引擎代读写）。
+  // 会话键来源：exec.agent —— dsh 的 Agent.id 就是 SessionId（@deepseek-ai/dsh-agent）。
+  const SESSION_DEFAULTS = {
+    scope: "kb", depth: "deep", strict: false, enabled: true,
+    diligence: "normal", askedAt: 0, netAsked: false,
+  };
+  const sessionStates = new Map();
+  let persisted = {};          // state.json 里的默认值（引擎代读写，插件不直接碰文件系统）
+  let persistedLoaded = false;
+
+  function sessionKey(exec) {
+    const a = exec && exec.agent;
+    const id = a && (a.id || a.sessionId);
+    return (id === undefined || id === null) ? "__default__" : String(id);
+  }
+
+  function stateOf(exec) {
+    const k = sessionKey(exec);
+    let st = sessionStates.get(k);
+    if (st === undefined) {
+      st = Object.assign({}, SESSION_DEFAULTS, persisted);   // 会话初始值 = 持久化默认值
+      sessionStates.set(k, st);
+    }
+    return st;
+  }
+
+  function loadPersistedDefaults(kbRoot, exec) {
+    if (persistedLoaded) return;
+    persistedLoaded = true;
+    runEngine("state", { kb_root: kbRoot, action: "read" }, exec).then(function (resp) {
+      const s = resp && resp.state;
+      if (s !== null && typeof s === "object") persisted = s;
+    }).catch(function (e) {
+      console.error("[kb-rag] state read skipped:", String(e));
+      persistedLoaded = false;      // 允许下一次调用再试
+    });
+  }
+
+  function savePersistedDefaults(patch, kbRoot, exec) {
+    Object.assign(persisted, patch);
+    runEngine("state", { kb_root: kbRoot, action: "write", state: patch }, exec)
+      .catch(function (e) { console.error("[kb-rag] state write failed:", String(e)); });
+  }
+
+  // 惰性读取 userQuestions（#13）：apply() 期一次性捕获会在"服务尚未注册"时把后续所有询问
+  // 静默跳过；而**不能**把它写进 inject —— 它是可选服务，未注册会让插件永远 park
+  //（把"丢 10 个工具"升级成"插件永不激活且无日志"）。
+  let warnedNoUserQuestions = false;
+  function userQuestionsNow() {
+    const uq = ctx.get("userQuestions");
+    if (uq === undefined && !warnedNoUserQuestions) {
+      warnedNoUserQuestions = true;
+      console.error("[kb-rag] userQuestions 服务当前不可用：跳过本次询问（可用 kb_scope / /kb 手动设置）");
+    }
+    return uq;
+  }
+
+  // ── 节流按会话隔离（R6）──────────────────────────────────────────────────
+  // 规则里的 maxPerSession / once 本来就该是"每会话"；进程级 Map 会让第二个会话看不到
+  // 开场提示。会话键随响应传进来（见 reg() 给响应打的 __session），所以无需改规则本身。
+  const throttleBySession = new Map();
+  function throttleFor(key) {
+    const k = String(key || "__default__");
+    let store = throttleBySession.get(k);
+    if (store === undefined) { store = new Map(); throttleBySession.set(k, store); }
+    return makeThrottle((id) => store.get(id), (id, value) => { store.set(id, value); });
+  }
+
+  const toolDisposers = [];      // 硬关闭用：ctx.tools.register 返回的 disposer
+
   // 描述注入：agent 每轮都会读到工具描述，调用纪律就落在这里（规则来自 guidance.js）
-  const tool = (spec) => defineTool(Object.assign({}, spec, {
-    description: guidedDescription(spec.name, spec.description),
+  // diligence 由会话状态决定：用户明确要求"深挖"时，描述层换成"深挖流程"（不设调用上限）
+  const tool = (spec, exec) => defineTool(Object.assign({}, spec, {
+    description: guidedDescription(spec.name, spec.description, {
+      diligence: exec === undefined ? "normal" : stateOf(exec).diligence,
+    }),
   }));
   // 结果注入：把命中规则的提示追加到渲染文本末尾；tellUser 的那些标成"可转达给用户"
   const withNotes = (toolName, renderer) => (args, value) => {
     const out = renderer(args, value);
     try {
-      const notes = resultNotes(toolName, value, guidanceThrottle);
+      const notes = resultNotes(toolName, value, throttleFor(value && value.__session),
+        { diligence: (value && value.__diligence) || "normal" });
       if (notes.lines.length === 0 && notes.userHints.length === 0) return out;
       const extra = notes.lines.slice();
       if (notes.userHints.length > 0) extra.push("（可转达给用户）" + notes.userHints.join(" "));
@@ -63,15 +139,35 @@ function apply(ctx) {
     }
   };
 
-  let daemon = null;
-  let spawning = null;
-  let scopePref = "kb";
-  let scopeDepth = "deep";
-  let scopeStrict = false;
-  let scopeAsked = false;
-  let netEnv = "unknown";
-  let netAsked = false;
-  const userQuestions = ctx.get("userQuestions");
+  // 统一注册入口：① 软关闭（enabled=false 时直接返回"已关闭"，不拉起守护进程）
+  // ② 给响应打上会话键与当前 diligence，供结果层节流/规则使用 ③ 收集 disposer 供硬关闭
+  const reg = (spec) => {
+    const inner = spec.execute;
+    const wrapped = Object.assign({}, spec, {
+      execute(args, exec) {
+        const st = stateOf(exec);
+        if (st.enabled === false) {
+          return Promise.resolve({
+            ok: true, kb_rag_disabled: true, scope: st.scope,
+            note: "kb-rag 当前处于关闭状态（/kb on 可开启库内检索）",
+          });
+        }
+        const out = inner(args, exec);
+        const tag = (v) => {
+          if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+            if (v.__session === undefined) v.__session = sessionKey(exec);
+            if (v.__diligence === undefined) v.__diligence = st.diligence;
+          }
+          return v;
+        };
+        return (out !== null && typeof out === "object" && typeof out.then === "function")
+          ? out.then(tag) : tag(out);
+      },
+    });
+    const dispose = ctx.tools.register(wrapped);
+    toolDisposers.push({ name: spec.name, dispose: dispose });
+    return dispose;
+  };
 
   // ---- 下载前网络环境探测:代理检测(env 变量;本机代理端口由引擎探测) ----
   function envProxyDetect() {
@@ -83,10 +179,12 @@ function apply(ctx) {
     return set;
   }
 
-  // 下载前询问网络环境(校园网可下订阅版;家庭网络以 OA 为主),非阻塞,仅首次
-  function askNetworkOnce(agent) {
-    if (netAsked || userQuestions === undefined) return;
-    netAsked = true;
+  // 下载前询问网络环境(校园网可下订阅版;家庭网络以 OA 为主),非阻塞,**每会话**首次
+  function askNetworkOnce(agent, exec) {
+    const st = stateOf(exec);
+    const uq = userQuestionsNow();
+    if (st.netAsked || uq === undefined) return;
+    st.netAsked = true;
     const request = {
       questions: [{
         id: "kb-net",
@@ -101,7 +199,7 @@ function apply(ctx) {
     };
     if (agent !== undefined) request.agent = agent;
     Promise.race([
-      userQuestions.ask(request).then(function (answer) {
+      uq.ask(request).then(function (answer) {
         const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0];
         if (typeof picked === "string") {
           if (picked.indexOf("校园网") === 0) netEnv = "campus";
@@ -154,8 +252,17 @@ function apply(ctx) {
   }
 
   function askScopeOnce(agent, exec, kbRoot) {
-    if (scopeAsked || userQuestions === undefined) return;
-    scopeAsked = true;
+    const st = stateOf(exec);
+    const uq = userQuestionsNow();
+    if (st.askedAt || uq === undefined) return;
+    // 用户已经表达过偏好（上次会话选过，或用 /kb save 存过默认值）→ 不再重复询问。
+    // 这就是「会话开始问一次并记住」的落点：问一次、写进 state.json、以后各会话直接用。
+    if (persisted.scope) {
+      st.askedAt = Date.now();
+      console.log("[kb-rag] scope 已记住（state.json）：", persisted.scope, "depth:", persisted.depth);
+      return;
+    }
+    st.askedAt = Date.now();
     const root = typeof kbRoot === "string" && kbRoot.length > 0 ? kbRoot : workspaceOf(exec) + "/.kb";
     staleCountOf(root, exec).then(function (staleInfo) {
       const stale = staleInfo && staleInfo.n ? staleInfo.n : 0;
@@ -205,21 +312,23 @@ function apply(ctx) {
       }
       if (agent !== undefined) request.agent = agent;
       return Promise.race([
-        userQuestions.ask(request).then(function (answer) {
+        uq.ask(request).then(function (answer) {
           const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0];
-          if (typeof picked === "string" && picked.indexOf("仅封闭") === 0) scopePref = "kb";
-          else if (typeof picked === "string" && picked.indexOf("知识库+全网") === 0) scopePref = "both";
-          else if (typeof picked === "string" && picked.indexOf("仅全网") === 0) scopePref = "web";
+          if (typeof picked === "string" && picked.indexOf("仅封闭") === 0) st.scope = "kb";
+          else if (typeof picked === "string" && picked.indexOf("知识库+全网") === 0) st.scope = "both";
+          else if (typeof picked === "string" && picked.indexOf("仅全网") === 0) st.scope = "web";
           const pickedDepth = answer && answer.answers && answer.answers[1] && answer.answers[1].selected && answer.answers[1].selected[0];
           if (typeof pickedDepth === "string") {
-              if (pickedDepth.indexOf("深度检索") === 0) scopeDepth = "deep"
-              else if (pickedDepth.indexOf("快速检索") === 0) scopeDepth = "quick"
+              if (pickedDepth.indexOf("深度检索") === 0) st.depth = "deep"
+              else if (pickedDepth.indexOf("快速检索") === 0) st.depth = "quick"
             };
           const pickedStale = answer && answer.answers && answer.answers[2] && answer.answers[2].selected && answer.answers[2].selected[0];
           if (typeof pickedStale === "string" && pickedStale.indexOf("只刷新元数据") === 0) refreshStale(root, exec, true);
           else if (typeof pickedStale === "string" && pickedStale.indexOf("全量重灌") === 0) refreshStale(root, exec, false);
           else if (typeof pickedStale === "string") console.log("[kb-rag] 旧数据暂不刷新（需要时用 kb_ingest 的 metadata_only / rebuild）");
-          console.log("[kb-rag] query scope:", scopePref, "depth:", scopeDepth);
+          // 用户明确选过的偏好写进工作区默认值：下次会话直接用，不再重复问
+          savePersistedDefaults({ scope: st.scope, depth: st.depth }, root, exec);
+          console.log("[kb-rag] query scope:", st.scope, "depth:", st.depth, "(已记住)");
         }).catch(function (e) {
           console.error("[kb-rag] scope question failed:", String(e));
         }),
@@ -231,11 +340,13 @@ function apply(ctx) {
   }
 
   function scopeWrapped(exec, engineCall, strict, kbRoot) {
+    loadPersistedDefaults(kbRoot, exec);        // 首次调用时异步读一次工作区默认值
     askScopeOnce(exec && exec.agent, exec, kbRoot);
+    const st = stateOf(exec);
     return engineCall.then(function (resp) {
-      resp.scope = scopePref;
-      resp.scope_note = SCOPE_NOTE[scopePref];
-      resp.depth_note = scopeDepth === "quick" ? "快速检索" : "深度检索";
+      resp.scope = st.scope;
+      resp.scope_note = SCOPE_NOTE[st.scope];
+      resp.depth_note = st.depth === "quick" ? "快速检索" : "深度检索";
       resp.strict = strict === true;
       if (strict === true) resp.strict_note = STRICT_NOTE;
       return resp;
@@ -871,7 +982,9 @@ function apply(ctx) {
     },
   };
 
-  ctx.tools.register(tool({
+  // 10 个工具集中注册：包成函数是为了支持**硬关闭**（运行时撤掉再恢复，不用重启 DSH）
+  function registerAllTools() {
+  reg(tool({
     name: "kb_ingest",
     description: "把本地文档（PDF/TXT/MD/DOCX）导入 DSH 知识库并建立索引（轻量 RAG 工作流的入库步骤）。支持单个文件或目录（递归扫描并只处理 PDF/TXT/MD/DOCX）；按章节切分并抽取元数据（标题/作者/年份/DOI）；同时用本地 bge-small 模型生成向量（数据持久化在工作区/.kb）。已入库且内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库时标记为 duplicate 跳过（增量）。paths 用工作区内的相对路径或绝对路径。入库后用 kb_search 检索、kb_rag 问答、kb_stats 看统计。重复调用安全。metadata_only=true 只刷新元数据（秒级，不重切块/不重嵌入，适合引擎升级后让老库的标题/作者/DOI 生效）；rebuild=true 原地重灌库内全部已入库文档（不会因传目录而重复入库）；大批量会自动转后台并返回 job_id，用 kb_status 轮询。",
     parameters: {
@@ -897,7 +1010,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_search",
     description: "在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 \"graphene CVD copper single crystal nucleation suppression\"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 \">=2020\" 形式）；其中 journal 目前只由 Zotero 迁移填充，kb_ingest 入库的文档该字段为 NULL，用它过滤通常零命中。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。",
     parameters: {
@@ -915,10 +1028,10 @@ function apply(ctx) {
     output: { schema: { type: "json" }, render: withNotes("kb_search", renderSources) },
     presentCall: presentQueryCall,
     execute(args, exec) {
-      const strict = args.strict === undefined ? scopeStrict : args.strict === true;
+      const strict = args.strict === undefined ? stateOf(exec).strict : args.strict === true;
       const call = runEngine("search", {
         query: args.query,
-        depth: args.depth === undefined ? scopeDepth : args.depth,
+        depth: args.depth === undefined ? stateOf(exec).depth : args.depth,
         top_k: args.top_k,
         snippet: args.snippet,
         mode: args.mode,
@@ -931,7 +1044,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_rag",
     description: "在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答\"根据现有资料无法回答\"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链「《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问」；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。",
     parameters: {
@@ -947,10 +1060,10 @@ function apply(ctx) {
     output: { schema: { type: "json" }, render: withNotes("kb_rag", renderSources) },
     presentCall: presentQueryCall,
     execute(args, exec) {
-      const strict = args.strict === undefined ? scopeStrict : args.strict === true;
+      const strict = args.strict === undefined ? stateOf(exec).strict : args.strict === true;
       const call = runEngine("rag", {
         query: args.query,
-        depth: args.depth === undefined ? scopeDepth : args.depth,
+        depth: args.depth === undefined ? stateOf(exec).depth : args.depth,
         top_k: args.top_k,
         rerank: args.rerank,
         related: args.related,
@@ -961,7 +1074,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_zotero",
     description: "把本地 Zotero 文献库中带 PDF 附件的文献批量迁移到知识库（轻量 RAG 工作流的 Zotero 接口）。读取 zotero.sqlite（默认自动定位 ~/Zotero、~/Documents/Zotero、%APPDATA% 配置；找不到时用 zotero_db 显式指定），解析每篇文献的元数据（标题/作者/年份/期刊/DOI）与 PDF 附件路径（storage 目录），逐篇解析入库并生成向量；已入库附件自动跳过，重复内容标记 duplicate 跳过（增量，可反复运行）。附件文件本体缺失的条目标记为 missing 并跳过（不尝试下载）。dry_run=true 时只列候选不写入；limit 限制迁移条数。",
     parameters: {
@@ -984,7 +1097,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_dedup",
     description: "清理知识库中的重复文档：删除 sha256 与早期文档相同的后来入库项（保留最早 id）并同步清除其分块/向量/缓存。返回 removed 与当前总数。反复调用安全。",
     parameters: {
@@ -996,7 +1109,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_clear",
     description: "清空知识库中的全部文献与索引（文档/分块/向量/缓存全部删除，不可恢复；数据库文件保留结构）。必须显式传 confirm: true 才会执行（否则拒绝）。清空后可重新 kb_ingest 或 kb_zotero 重建。",
     parameters: {
@@ -1009,42 +1122,69 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_fetch",
     description: "按 DOI / arXiv ID 把论文 PDF 下载到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。按标准元标签与公开 API 解析地址，顺序为：arXiv 直连 → 出版商正式版（落地页 citation_pdf_url；在校园网/机构订阅网络下可直接取得订阅版 PDF，无需额外配置）→ 落地页内常见 pdf 链接 → 开放获取兜底（Unpaywall / Crossref）。只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。",
     parameters: {
       identifiers: { type: "array", required: true, items: { type: "string" }, description: "DOI 或 arXiv ID 列表（如 10.5555/12345679 或 arXiv:2401.00001）。" },
       target_dir: { type: "string", description: "下载目录（默认 ~/.kb-rag/downloads）。" },
+      ingest: { type: "boolean", description: "true 时下载完直接入库到知识库（等价于紧接着调一次 kb_ingest；增量入库按 sha256 自动跳过已入库文件，重复调用安全）。深挖模式里用它减少往返。" },
     },
     output: { schema: { type: "json" }, render: renderFetch },
     timeoutMs: 300000,
     execute(args, exec) {
-      askNetworkOnce(exec && exec.agent);
+      askNetworkOnce(exec && exec.agent, exec);
       const network = { env: netEnv, proxy: { env: envProxyDetect() } };
-      return runEngine("fetch", { identifiers: args.identifiers, target_dir: args.target_dir, network: network }, exec);
+      return runEngine("fetch", {
+        identifiers: args.identifiers, target_dir: args.target_dir, network: network,
+        // ingest=true：下载即入库（"深挖模式"里"找文献 → 入库 → 再查"少一次往返）
+        ingest: args.ingest === true, kb_root: kbRootOf(args, exec),
+      }, exec);
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_scope",
-    description: "设置/查看知识库查询范围、回答深度与严格模式（会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。depth 可选：quick=快速检索（亚秒级响应，直出结果）；deep=深度检索（重排序+引文关联全链路，跨文献综合论述）。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false）。用户说\"封闭库/全网/都要/严格只按库内/快速检索/深度检索\"等要求时，调本工具设定后再检索。",
+    description: "设置/查看知识库查询范围、回答深度与严格模式（**按会话隔离**；会话开始时也会询问一次范围）：scope：kb=仅封闭知识库；both=知识库+全网（kb 检索 + web_search 补充）；web=仅全网。depth 可选：quick=快速检索（亚秒级响应，直出结果）；deep=深度检索（重排序+引文关联全链路，跨文献综合论述）。strict 可选：true=严格模式（答案仅基于库内证据，禁止库外知识/常识外延）；false=关闭（默认 false）。diligence 可选：normal=默认（检索有调用上限、无命中即停）；thorough=**深挖模式**（用户明确要求「仔细找/慢慢来/别省时间/把相关文献都找齐」时设置：解除调用上限，允许「反复检索 → kb_fetch 补库 → 引文关联 → 增量入库 → 再查」的循环）。用户说\"封闭库/全网/都要/严格只按库内/快速检索/深度检索/深挖\"等要求时，调本工具设定后再检索。",
     parameters: {
       scope: { type: "string", enum: ["kb", "both", "web"], description: "kb=仅封闭库；both=知识库+全网；web=仅全网。不传则只查看当前设置。" },
       depth: { type: "string", enum: ["quick", "deep"], description: "可选：同时设置检索深度。quick=快速检索；deep=深度检索。" },
       strict: { type: "boolean", description: "可选：同时设置严格模式。true=仅基于库内证据作答；false=关闭（默认）。" },
+      diligence: { type: "string", enum: ["normal", "thorough"], description: "可选：检索纪律。normal=默认（≤3 次调用、无命中即停）；thorough=深挖（用户明确要求彻底查找时用：不限调用次数，允许补库循环）。" },
+      save: { type: "boolean", description: "可选：true 时把本次设置写进工作区默认值（<工作区>/.kb-rag/state.json），以后新会话直接生效。" },
     },
     output: { schema: { type: "json" }, render: renderJson },
-    execute(args, _exec) {
+    execute(args, exec) {
+      const st = stateOf(exec);
       // scope 是可选的：不传时本工具只返回当前会话设置（描述里承诺了"设置/查看"）
-      if (args.scope !== undefined) scopePref = args.scope;
-      if (args.depth !== undefined) scopeDepth = args.depth === "deep" ? "deep" : "quick";
-      if (args.strict !== undefined) scopeStrict = args.strict === true;
-      console.log("[kb-rag] query scope:", scopePref, "depth:", scopeDepth, "strict:", scopeStrict);
-      return Promise.resolve({ ok: true, scope: scopePref, depth: scopeDepth, strict: scopeStrict, scope_note: SCOPE_NOTE[scopePref], depth_note: scopeDepth === "quick" ? "快速检索：kb_search 默认快速检索，kb_rag 可显式 depth=quick" : "深度检索：kb_search/kb_rag 均默认深度检索", strict_note: scopeStrict ? STRICT_NOTE : undefined });
+      const patch = {};
+      if (args.scope !== undefined) { st.scope = args.scope; patch.scope = args.scope; }
+      if (args.depth !== undefined) { st.depth = args.depth === "deep" ? "deep" : "quick"; patch.depth = st.depth; }
+      if (args.strict !== undefined) { st.strict = args.strict === true; patch.strict = st.strict; }
+      if (args.diligence !== undefined) {
+        st.diligence = args.diligence === "thorough" ? "thorough" : "normal";
+        patch.diligence = st.diligence;
+      }
+      if (args.save === true && Object.keys(patch).length > 0) {
+        savePersistedDefaults(patch, kbRootOf(args, exec), exec);
+      }
+      console.log("[kb-rag] query scope:", st.scope, "depth:", st.depth, "strict:", st.strict,
+        "diligence:", st.diligence, "| session:", sessionKey(exec));
+      return Promise.resolve({
+        ok: true, scope: st.scope, depth: st.depth, strict: st.strict, diligence: st.diligence,
+        saved: args.save === true && Object.keys(patch).length > 0,
+        session: sessionKey(exec),
+        scope_note: SCOPE_NOTE[st.scope],
+        depth_note: st.depth === "quick" ? "快速检索：kb_search 默认快速检索，kb_rag 可显式 depth=quick" : "深度检索：kb_search/kb_rag 均默认深度检索",
+        strict_note: st.strict ? STRICT_NOTE : undefined,
+        diligence_note: st.diligence === "thorough"
+          ? "深挖模式：不设检索调用上限；库内不足时按「kb_fetch 补库（ingest=true 可直接入库）→ 引文关联 → 增量入库 → 再查」循环，并把每轮新增/仍缺什么告诉用户。"
+          : "默认纪律：一次提问最多 3 次检索，每次换实质策略；无命中就如实说明，不要换词穷举。",
+      });
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_stats",
     description: "查看知识库统计：文档数、分块数、向量数、最近入库列表及数据库位置。用于检查哪些文档已入库、索引状态；检索无命中时先调它确认库里有什么。",
     parameters: {
@@ -1056,7 +1196,7 @@ function apply(ctx) {
     },
   }));
 
-  ctx.tools.register(tool({
+  reg(tool({
     name: "kb_status",
     description: "查询后台任务进度或结果。大批量入库（kb_ingest）会自动转后台并返回 job_id，用本工具轮询：running 时给出已处理篇数/错误数/分块数，done 时给出 totals 与最近 20 条文件，error/not_found 时说明原因。宿主调用超时不会中断后台任务。",
     parameters: {
@@ -1070,6 +1210,115 @@ function apply(ctx) {
   }));
 
   console.log("[kb-rag] static tools registered (v1.6.7): kb_ingest / kb_search / kb_rag / kb_zotero / kb_dedup / kb_clear / kb_fetch / kb_scope / kb_stats / kb_status");
+  }   // registerAllTools()
+
+  registerAllTools();
+
+  // ── /kb 命令（#9）：显式开关与状态可见性 ──────────────────────────────────
+  // direct UI handler：不进模型、天然按 invocation.agent 会话隔离（CommandInvocation.agent）。
+  // 三档关闭语义：软关闭（enabled=false，工具在但调用即返回"已关闭"，不拉守护进程，默认）/
+  // 硬关闭（撤掉工具注册，运行时生效、无需重启）/ 半关闭（只关检索，保留入库与统计）。
+  const SEARCH_TOOLS = ["kb_search", "kb_rag"];
+  function disposeTools(pred) {
+    const kept = [];
+    toolDisposers.forEach(function (d) {
+      if (pred(d.name)) { try { d.dispose(); } catch (e) { /* 已撤销则忽略 */ } }
+      else kept.push(d);
+    });
+    toolDisposers.length = 0;
+    kept.forEach(function (d) { toolDisposers.push(d); });
+  }
+  function toolsRegistered() { return toolDisposers.length; }
+
+  if (ctx.commands !== undefined && typeof ctx.commands.register === "function") {
+    ctx.commands.register({
+      name: "kb",
+      description: "kb-rag 状态与控制：on / off / status / kb / both / web / quick / deep / strict / thorough / normal / save / policy",
+      input: { hint: "status | on | off | soft | hard | kb | both | web | quick | deep | strict on|off | thorough | normal | save | policy" },
+      handler: function (invocation) {
+        const exec = { agent: invocation && invocation.agent };
+        const st = stateOf(exec);
+        const root = kbRootOf({}, exec);
+        const raw = (invocation && invocation.rawInput ? invocation.rawInput : "").trim().toLowerCase();
+        const parts = raw.split(/\s+/).filter(Boolean);
+        const cmd = parts[0] || "status";
+        const arg = parts[1] || "";
+        const lines = [];
+        // 注意：这里改的都是**本会话**状态；只有 `/kb save` 才写进工作区默认值。
+        // （第一版实现直接持久化，结果 `/kb both` 会污染之后所有新会话 —— 与"会话级状态"
+        //   的目标正好相反。）
+        const persistHint = "（本会话生效；`/kb save` 可存为新会话默认）";
+        switch (cmd) {
+          case "kb": case "both": case "web":
+            st.scope = cmd; lines.push("范围已设为 " + cmd + " " + persistHint); break;
+          case "quick": case "deep":
+            st.depth = cmd; lines.push("深度已设为 " + cmd + " " + persistHint); break;
+          case "strict":
+            st.strict = (arg === "on" || arg === "true" || arg === "");
+            lines.push("严格模式：" + (st.strict ? "开" : "关") + " " + persistHint);
+            break;
+          case "thorough": case "深挖":
+            st.diligence = "thorough";
+            lines.push("已进入**深挖模式**：不设检索调用上限；库内不足时按「kb_fetch(ingest=true) 补库 → 引文关联 → 增量入库 → 再查」循环，直到收敛或你喊停。" + persistHint);
+            break;
+          case "normal":
+            st.diligence = "normal";
+            lines.push("已回到默认纪律：一次提问最多 3 次检索、无命中即停。" + persistHint);
+            break;
+          case "on":
+            st.enabled = true;
+            if (toolsRegistered() === 0) registerAllTools();
+            lines.push("kb-rag 已开启（软关闭解除；硬关闭过的工具已重新注册）。");
+            break;
+          case "off":
+            if (arg === "hard") {
+              st.enabled = false;
+              disposeTools(function () { return true; });
+              lines.push("kb-rag 已**硬关闭**：10 个工具已从本会话撤销（/kb on 可恢复，无需重启）。");
+            } else if (arg === "search") {
+              st.enabled = true;
+              disposeTools(function (n) { return SEARCH_TOOLS.indexOf(n) >= 0; });
+              lines.push("kb-rag 已**半关闭**：只撤掉 kb_search / kb_rag，入库与统计仍可用。");
+            } else {
+              st.enabled = false;
+              lines.push("kb-rag 已**软关闭**：工具仍在，但调用会直接返回「已关闭」（不拉守护进程）。");
+            }
+            break;
+          case "policy":
+            try {
+              const inv = policyInventory();
+              lines.push("**当前提示规则**（" + inv.length + " 条）");
+              inv.forEach(function (r) {
+                lines.push("- `" + r.id + "` · " + r.seat + (r.tools ? " · " + r.tools.join("/") : "")
+                  + (r.tellUser ? " · 会给用户看" : "") + (r.throttle ? " · 节流 " + JSON.stringify(r.throttle) : ""));
+                if (r.doc) lines.push("  " + r.doc);
+              });
+            } catch (e) { lines.push("规则清单读取失败：" + String(e)); }
+            break;
+          case "save":
+            savePersistedDefaults({ scope: st.scope, depth: st.depth, strict: st.strict, diligence: st.diligence, enabled: st.enabled }, root, exec);
+            lines.push("当前设置已写进工作区默认值（新会话直接生效）。");
+            break;
+          case "status": default:
+            break;
+        }
+        lines.push("");
+        lines.push("**kb-rag 状态**（会话 " + sessionKey(exec) + "）");
+        lines.push("- 范围 " + st.scope + " · 深度 " + st.depth + " · 严格 " + (st.strict ? "开" : "关")
+          + " · 纪律 " + (st.diligence === "thorough" ? "深挖" : "默认")
+          + " · 开关 " + (st.enabled === false ? "关（软关闭）" : "开"));
+        lines.push("- 工具注册数：" + toolsRegistered() + " / 10");
+        lines.push("- 状态文件：" + root + "/.kb-rag/state.json（`/kb save` 写入当前设置）");
+        lines.push("- 可用：`/kb kb|both|web` 范围 · `/kb quick|deep` 深度 · `/kb strict on|off` · "
+          + "`/kb thorough|normal` 纪律 · `/kb off [hard|search]` · `/kb on` · `/kb policy` 提示规则");
+        return { kind: "success", text: lines.join("\n") };
+      },
+    });
+  } else {
+    console.error("[kb-rag] commands 服务不可用：/kb 命令未注册（工具与检索不受影响）");
+  }
+
+  console.log("[kb-rag] ready (v1.6.7): 10 tools + /kb command" + (ctx.commands === undefined ? "" : ""));
 }
 
 export { apply, inject, name };
