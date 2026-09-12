@@ -47,8 +47,16 @@ function apply(ctx) {
     diligence: "normal", askedAt: 0, netAsked: false,
   };
   const sessionStates = new Map();
+  // 会话相关表的条数上限：GUI 长跑（成百上千个会话）时不让它们无限增长。
+  const SESSION_MAP_MAX = 100;
+  function boundSessionMap(m) {
+    while (m.size > SESSION_MAP_MAX) {
+      const oldest = m.keys().next().value;
+      if (oldest === undefined) break;
+      m.delete(oldest);
+    }
+  }
   let persisted = {};          // state.json 里的默认值（引擎代读写，插件不直接碰文件系统）
-  let persistedLoaded = false;
 
   function sessionKey(exec) {
     const a = exec && exec.agent;
@@ -62,20 +70,24 @@ function apply(ctx) {
     if (st === undefined) {
       st = Object.assign({}, SESSION_DEFAULTS, persisted);   // 会话初始值 = 持久化默认值
       sessionStates.set(k, st);
+      boundSessionMap(sessionStates);
     }
     return st;
   }
 
+  let persistedLoad = null;    // 首次读取工作区默认值的 Promise（避免"还没读完就判断"的竞态）
   function loadPersistedDefaults(kbRoot, exec) {
-    if (persistedLoaded) return;
-    persistedLoaded = true;
-    runEngine("state", { kb_root: kbRoot, action: "read" }, exec).then(function (resp) {
+    if (persistedLoad !== null) return persistedLoad;
+    persistedLoad = runEngine("state", { kb_root: kbRoot, action: "read" }, exec).then(function (resp) {
       const s = resp && resp.state;
       if (s !== null && typeof s === "object") persisted = s;
+      return persisted;
     }).catch(function (e) {
       console.error("[kb-rag] state read skipped:", String(e));
-      persistedLoaded = false;      // 允许下一次调用再试
+      persistedLoad = null;      // 允许下一次调用再试
+      return persisted;
     });
+    return persistedLoad;
   }
 
   function savePersistedDefaults(patch, kbRoot, exec) {
@@ -104,7 +116,7 @@ function apply(ctx) {
   function throttleFor(key) {
     const k = String(key || "__default__");
     let store = throttleBySession.get(k);
-    if (store === undefined) { store = new Map(); throttleBySession.set(k, store); }
+    if (store === undefined) { store = new Map(); throttleBySession.set(k, store); boundSessionMap(throttleBySession); }
     return makeThrottle((id) => store.get(id), (id, value) => { store.set(id, value); });
   }
 
@@ -340,13 +352,19 @@ function apply(ctx) {
   }
 
   function scopeWrapped(exec, engineCall, strict, kbRoot) {
-    loadPersistedDefaults(kbRoot, exec);        // 首次调用时异步读一次工作区默认值
-    askScopeOnce(exec && exec.agent, exec, kbRoot);
     const st = stateOf(exec);
+    // 先读完工作区默认值再决定要不要问：否则进程重启后的第一次检索会在 persisted 仍是空对象时
+    // 就判断"没有记住偏好"，把用户已经答过的范围又问一遍。
+    loadPersistedDefaults(kbRoot, exec).then(function () {
+      askScopeOnce(exec && exec.agent, exec, kbRoot);
+    }).catch(function (e) {
+      console.error("[kb-rag] scope prompt skipped:", String(e));
+    });
     return engineCall.then(function (resp) {
-      resp.scope = st.scope;
-      resp.scope_note = SCOPE_NOTE[st.scope];
-      resp.depth_note = st.depth === "quick" ? "快速检索" : "深度检索";
+      const live = stateOf(exec);            // 询问可能在等待期间写入，这里重新取一次
+      resp.scope = live.scope;
+      resp.scope_note = SCOPE_NOTE[live.scope];
+      resp.depth_note = live.depth === "quick" ? "快速检索" : "深度检索";
       resp.strict = strict === true;
       if (strict === true) resp.strict_note = STRICT_NOTE;
       return resp;

@@ -95,8 +95,34 @@
 - 新增 `tools/sync-host-guidance.mjs`：动态插件半边（`plugin/host.js`）的提示文本由 `lib/guidance.js` **生成**（`--check` 可检测漂移），根治"两半手抄必然漂移"。
 - 提示层结果规则限定到检索类工具（`kb_ingest` / `kb_zotero` 也带 `embedding_error`，但那里的文案由 `renderIngest` 自己给；用检索口径会说成"本次检索已退化"，误导）。
 
-### 未做 / 待验证（诚实记录）
+### 修复：缓存一致性审计（提前退出与"缓存永不失效"专项）
 
+一次针对性复查（"乱七八糟的提前退出 + 缓存永远无法命中/失效"），共 6 处：
+
+- **内存语料缓存看不到"只改元数据"的写入**（本次新增缓存引入）：`metadata_only` 刷新后
+  `title/authors/year/doi` 变了，但 `MAX(chunks.id)`/`COUNT(docs)`/`MAX(indexed_at)` 全都没变 →
+  同一守护进程里的检索继续返回旧元数据（而 `kb_stats` 走另一条查询显示的是新值，"一半新一半旧"）。
+  修法两层：① 写库命令（`ingest`/`zotero`/`dedup`/`clear`）结束后显式 `_invalidate_caches()`；
+  ② 语料缓存 key 增加**库文件指纹**（主库 + WAL 的 mtime/大小）与 `MAX(indexed_at)` ——
+  覆盖跨进程写入（另一个 CLI/后台子进程写同一个库时，进程内钩子根本不会被调用）。
+- **缓存条数没有上限**（本次新增缓存引入）：key 含过滤条件，每条又是整库分块副本 ——
+  多试几种 filters 就能把守护进程撑到几百 MB。新增 `KB_CORPUS_CACHE_ENTRIES`（默认 2）按插入顺序淘汰；
+  BM25 缓存同样受约束。
+- **查询响应缓存表无上界**：每个不同查询一行、只在入库/元数据变化时整体清空。新增
+  `KB_QUERY_CACHE_MAX`（默认 3000，每 200 次写入修剪一次，保留最近 N 条）。
+- **`_REL_CENTROID`（关联文献的文档质心）只在部分写路径清理**：补进 `_invalidate_caches()`，
+  所有写库命令走同一条失效路径。
+- **`_ingest_file` 的 `duplicate` 分支同样不补向量**：与 `skipped` 分支同理——内容已在别处入库
+  不代表那篇的向量是齐的（模型不可用时入的库同样是 0 向量）。现在也补一次，并把数量计入 `totals.vectors`。
+- **`cmd_clear` 的 docstring 写在语句之后**（等于没有 docstring）；插件侧
+  **`askScopeOnce` 与持久化默认值的读取竞态**：进程重启后的第一次检索会在 `persisted` 还是空对象时
+  就判断"没记住偏好"，把已经答过的范围又问一遍 —— 现在先 `await` 读取再决定是否询问。
+- 另外给插件的按会话表加了条数上限（100），避免 GUI 长跑后 `sessionStates`/节流表无限增长。
+
+验证：新增 `_test_cache_staleness.py`（同进程写入 + **跨进程**写入两个场景都必须读到新值，且
+`scan.corpus_cached` 如实反映是否重读）与 `_test_corpus_cache.py` 的条数上限断言；全量回归 12 组通过。
+
+### 未做 / 待验证（诚实记录）
 - **客户端半边需在真实 Web GUI 里确认**：官方没有给出第三方包手写该 bundle 的公开规范（是否接受手写、`require("react")` 的外部化规则）。加载失败不影响核心功能（工具与 markdown 来源链接由宿主渲染）。
 - **十万块级的索引化改造未做**：`_search_core` 仍是 O(库规模) 扫描（已加 `scan` 观测与提示）；方案（FTS5 / 倒排 + 向量分级）记在 `docs/BACKLOG.md`。
 - **动态插件半边的会话级状态未对齐**：`/kb`、三档关闭、深挖模式目前只在静态插件（npm 包）实现；动态半边已同步提示文本与结果层规则。
