@@ -220,10 +220,20 @@ def _promote_abstract(sectioned):
 
 
 _REF_HEAD_RE = re.compile(r"(?m)^\s*(references|bibliography|参考文献|引用文献)\b", re.I)
+# 条目编号：允许字母前缀（补充材料常用 "S1." / "[S1]"，实测某篇整张文献表都是这种编号）
+_REF_NUM = r"[A-Za-z]?\d{1,3}"
+
+
+def _ref_num_key(raw):
+    """编号串 → 整数键：'S12' → 12，'12' → 12；取不到数字返回 None。"""
+    m = re.search(r"\d+", raw or "")
+    return int(m.group(0)) if m else None
+
+
 # 参考文献条目风格：'1. Author' / '1 Author' / '[1] Author'（Wiley） / '1Author'（紧贴式）
-_REF_ENTRY_BRACKET_RE = re.compile(r"(?m)^\s*\[\s*(\d{1,3})\s*\]\s+(?=\S)")
+_REF_ENTRY_BRACKET_RE = re.compile(r"(?m)^\s*\[\s*(" + _REF_NUM + r")\s*\]\s+(?=\S)")
 # 引文链条目行（stage-3 链式检测用）：'[N] ...' / 'N.\t...' / 'N.' 独占行 / 'N. Author...'
-_REF_CHAIN_ENTRY_RE = re.compile(r"^\s*(?:\[\s*(\d{1,3})\s*\]|(\d{1,3})\.)(?:\s|\t|$)")
+_REF_CHAIN_ENTRY_RE = re.compile(r"^\s*(?:\[\s*(" + _REF_NUM + r")\s*\]|(" + _REF_NUM + r")\.)(?:\s|\t|$)")
 # 引文链尾部的"停止行"：链末条内容到这些行截止（Acknowledgements / © / 图注 / Methods 等）
 _REF_STOP_RE = re.compile(
     r"^(?:©|Letter\b|RESEARCH\b|ARTICLE\b|Article\b|Extended\s+Data\b|"
@@ -302,6 +312,68 @@ def _ref_entry_strong(seg):
     return _ref_entry_like(seg) or _ref_entry_evidence(seg) >= 0.35
 
 
+# 任意位置的"编号 + 大写/汉字起始"：用于识别**被抽成一大段**的文献表（条目不在行首）。
+# 三种编号都要认：[N] / N. / N) / 紧贴式 '1J. Valasek'、'1Smith'（后者用 (?=[A-Z](?:\.|[a-z])) 限定，
+# 这样 '2D materials' / '3D printing' / '4H-SiC' 仍被排除）。
+_REF_INLINE_ENTRY_RE = re.compile(
+    r"(?:^|[\s\n])(?:\[\s*(" + _REF_NUM + r")\s*\]|(" + _REF_NUM + r")[.)]|("
+    + _REF_NUM + r")(?=[A-Z](?:\.|[a-z])))\s*(?=[A-Z\u4e00-\u9fff])")
+
+
+def _ref_para_is_list(para):
+    """整段是不是**文献表**（巨段版式专用，不要求编号严格递增）。
+
+    实测有文档的文献表被抽成一两个巨段，且双栏排版让编号在抽取顺序上交叉（1,4,2,5…），
+    递增链检测天然失效 —— 某篇 59 条、另一篇 54 条因此整表丢失。这里改用**密度 + 条目样比例**：
+      ① 任意位置的"编号 + 大写起始"出现 ≥5 次，且每千字符密度 ≥3；
+      ② 其中过半（至少 3 条）通过 _ref_entry_strong（人名在首位/年份/期刊卷页 DOI）。
+    正文段落几乎不可能同时满足这两条（正文里编号条目稀疏、后面也不跟文献信息）。"""
+    t = (para or "").strip()
+    if len(t) < 400:
+        return False
+    ms = list(_REF_INLINE_ENTRY_RE.finditer(t))
+    if len(ms) < 5:
+        return False
+    if len(ms) / max(0.001, len(t) / 1000.0) < 3.0:
+        return False
+    hits = 0
+    for i, m in enumerate(ms):
+        nxt = ms[i + 1].start() if i + 1 < len(ms) else min(m.end() + 250, len(t))
+        if _ref_entry_strong(t[m.end():nxt]):
+            hits += 1
+    return hits >= max(3, int(len(ms) * 0.5))
+
+
+def _inline_ref_spans(text, min_run=5, max_gap=1200):
+    """识别**巨段版式**的文献表：在任意位置找"编号递增 + 条目像文献"的序列。
+
+    实测有文档的整张文献表被 PDF 抽成 1–2 个巨段（条目不在行首、还会在词中间换行），
+    行首锚定的链检测完全看不到 —— 某篇 190 条、另一篇 54 条因此整表丢失、引文关联失效。
+    返回 [(起点字符位, 终点字符位)]。"""
+    entries = [(m.start(0), _ref_num_of(m))
+               for m in _REF_INLINE_ENTRY_RE.finditer(text or "")]
+    runs, cur = [], []
+    for pos, num in entries:
+        if cur and num == cur[-1][1] + 1 and pos - cur[-1][0] < max_gap:
+            cur.append((pos, num))
+        else:
+            if len(cur) >= min_run:
+                runs.append(cur)
+            cur = [(pos, num)]
+    if len(cur) >= min_run:
+        runs.append(cur)
+    spans = []
+    for ch in runs:
+        hits = 0
+        for k, (pos, _num) in enumerate(ch):
+            nxt = ch[k + 1][0] if k + 1 < len(ch) else len(text)
+            if _ref_entry_strong(text[pos:min(nxt, pos + 250)]):
+                hits += 1
+        if hits >= max(3, int(len(ch) * 0.5)):
+            spans.append((ch[0][0], min(len(text), ch[-1][0] + 400)))
+    return spans
+
+
 def _refs_text_like(text, min_score=0.45):
     """整块"像参考文献列表"的**密度**判据 —— 对"流式条目"版式有效。
 
@@ -357,7 +429,7 @@ def _ascending_ref_spans(text, min_chain=6, max_gap=900):
     for (pos, line) in lines:
         m = _REF_CHAIN_ENTRY_RE.match(line)
         if m:
-            num = int(m.group(1) or m.group(2))
+            num = _ref_num_of(m)
             entries.append((pos, num))
     chains, cur = [], []
     for (pos, num) in entries:
@@ -544,20 +616,42 @@ def _find_ref_index(paragraphs, pages=None):
         out_p, ref_paras, out_g = _apply_ref_spans(paragraphs, pages, spans)
         if ref_paras:
             return out_p, ref_paras, out_g
+    # 阶段 3b：巨段版式的文献表（条目不在行首，行首链检测看不到）
+    joined = "\n\n".join(paragraphs)
+    spans = _inline_ref_spans(joined)
+    if spans:
+        out_p, ref_paras, out_g = _apply_ref_spans(paragraphs, pages, spans)
+        if ref_paras:
+            return out_p, ref_paras, out_g
+    # 阶段 3c：巨段 + **编号不严格递增**（双栏抽取交叉）——按段判定"这段就是文献表"
+    hits = [i for i, p in enumerate(paragraphs) if _ref_para_is_list(p)]
+    if hits:
+        return paragraphs, set(hits), pages
     return paragraphs, set(), pages
 
 
-# 参考文献最多占全文**字符**的比例。超过就判定过宽并放弃 References 判定（见 chunk_document）。
-# 为什么按字符而不是段落数：很多 PDF 把每条参考文献单独成段，于是"段落占比"会在**真参考文献**
-# 上飙到 60%（实测 id=302：60% 段但只有 29% 字符），而"吞掉整篇"的病例是 66%–100% 字符。
-# 实测对照组（真参考文献、判得对）：字符占比 28%–41%。
-REF_MAX_CHAR_SHARE = 0.6
 # 位置口径：一律按**字符**占比，不用段落序号（正文段长、文献条目段短，两种口径能差一倍）。
 # 实测：同一批文档里，标题的段落位置 26%–57% 对应字符位置 34%–74%。
 REF_HEAD_MIN_CHAR_POS = 0.5     # 有标题的 References 不会出现在前半段
 REF_CHAIN_MIN_CHAR_POS = 0.3    # 无标题的递增引文链起点门槛（Nature 系正文 refs 可能较早）
 # 整篇不可检索时的兜底：写回哪一节的下限（太短的段落救出来也只是噪声）。
 RESCUE_MIN_CHARS = 800
+#
+# 两条**试过并被实测否掉**的路线（留档，别再走一遍）：
+#   ① REF_MAX_CHAR_SHARE（"参考文献超过 60% 字符就整段作废"）：综述类大文献表（某篇 190 条、
+#      某篇 237 条）被一起丢掉，引文关联整表失效；
+#   ② 逐段"散文退回"（把 References 区里明显散文的段落退回正文）：依赖"这段没检出条目"，
+#      而条目样式认不全（`(1)`、`【1】`、作者-年份式都不认）→ 真文献表被误退。
+# 三条路线的全库实测（316 篇，见 _cites_compare.py）：
+#   有上限 + 无散文退回：命中率 79.2%，改后失效 11 篇
+#   去上限 + 巨段通道 + 紧贴式修复：**81.6%**，失效 5 篇 ← 现在采用的组合
+#   再去上限 + 开启散文退回：79.8%，失效 13 篇
+# 正文被吞的代价由 RESCUE_MIN_CHARS 那条兜底承担：任何文档都不会从检索里消失。
+
+
+def _ref_num_of(m):
+    """从 _REF_INLINE_ENTRY_RE 的匹配里取编号（三个可选分组任一）。"""
+    return _ref_num_key(m.group(1) or m.group(2) or m.group(3))
 
 
 def chunk_document(full_text, paras=None):
@@ -574,19 +668,14 @@ def chunk_document(full_text, paras=None):
         pages = [pg for pg, _ in paras]
         paragraphs = [t for _, t in paras]
     paragraphs, ref_paras, pages = _find_ref_index(paragraphs, pages)
-    # 总量上限：按**字符占比**判断"这次判定是不是把整篇都算成参考文献了"。
-    # 超限时**宁可少判**：退回"没有 References"，让整篇按正文索引 —— 判错的代价
-    # （正文查不到）远大于少判（引文关联少一点数据源）。
-    total_chars = sum(len(p) for p in paragraphs) or 1
-    ref_chars = sum(len(paragraphs[i]) for i in ref_paras if i < len(paragraphs))
-    if ref_chars > REF_MAX_CHAR_SHARE * total_chars:
-        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
-        if paras is not None:
-            pages = [pg for pg, _ in paras]
-            paragraphs = [t for _, t in paras]
-        else:
-            pages = None
-        ref_paras = set()
+    # 注：这里曾有一道"把 References 区里明显是散文的段落退回正文"的工序（配合删除的
+    # REF_MAX_CHAR_SHARE 上限），目的是让判定跑偏时正文还能被检索。**实测撤掉了**：
+    #   状态①（有占比上限）：命中率 79.2%（引文关联），失效 11 篇
+    #   状态②（去上限 + 巨段通道 + 紧贴式修复）：命中率 **82.0%**，失效 4 篇 ← 最优
+    #   状态③（再开启散文退回）：命中率 79.8%，失效 13 篇
+    # 原因是"散文"判据依赖"这段没检出条目"，而条目样式认不全（`(1)`、`【1】`、作者-年份式都不认），
+    # 真文献表被误退 → 引文关联整表失效。正文被吞的代价由"整篇不可检索兜底"（见下）承担，
+    # 那条兜底保证任何文档都不会从检索里消失。
 
     def _pg_of(pno):
         """段落序号 -> PDF 页码（无页信息返回 None）。"""
@@ -2340,12 +2429,14 @@ def rrf_fuse(kw_ranked, v_ranked):
 _FIGREF_RE = re.compile(r"(?:fig(?:ure|s)?\.?\s*|图\s*)(\d+)([a-zA-Z])?(?!\d)", re.I)
 _CAPTION_NUM_RE = re.compile(r"\d+")
 _INCITE_RE = re.compile(
-    r"\[(\d{1,3}(?:\s*[–\-]\s*\d{1,3})?(?:\s*,\s*\d{1,3}(?:\s*[–\-]\s*\d{1,3})?)*)\]")
-_REF_ENTRY_RE = re.compile(r"(?m)^\s*(\d{1,3})\s*(?:[\.\)]\s+|\s+)(?=\S)")
-# 紧贴式条目（'1Smith J., Nature…'）：数字后**紧跟一个"大写+小写"的词**才算条目。
-# 旧写法是 (?=[A-Z])，于是正文里的 '2D materials' / '3D printing' / '4H-SiC' / '3C-SiC'
-# 也被当成条目编号 —— 这是 References 误判吞正文的一个真实来源。
-_REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(\d{1,3})(?=[A-Z][a-z])")
+    r"\[(\s*[A-Za-z]?\d{1,3}(?:\s*[–\-]\s*[A-Za-z]?\d{1,3})?"
+    r"(?:\s*,\s*[A-Za-z]?\d{1,3}(?:\s*[–\-]\s*[A-Za-z]?\d{1,3})?)*)\]")
+_REF_ENTRY_RE = re.compile(r"(?m)^\s*(" + _REF_NUM + r")\s*(?:[\.\)]\s+|\s+)(?=\S)")
+# 紧贴式条目：数字后紧跟「大写字母 +（点 或 小写字母）」：
+#   '1J. Valasek, Phys. Rev. …'（Wiley 式）✓   '1Smith J., Nature…' ✓
+#   '2D materials' / '3D printing' / '4H-SiC' / '3C-SiC'（大写后是空格或连字符）✗
+# 上一版写成 (?=[A-Z][a-z]) 把 Wiley 的 '1J. …' 也排除了，实测某篇综述 237 条只剩 5 条。
+_REF_ENTRY_TIGHT_RE = re.compile(r"(?m)^\s*(" + _REF_NUM + r")(?=[A-Z](?:\.|[a-z]))")
 _CITE_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s,;\"'<>\)\]]+", re.I)
 _CITE_YEAR_RE = re.compile(r"\((\d{4})\)\s*[.\s]*$")
 
@@ -2354,7 +2445,8 @@ def _expand_incite_nums(group, cap=60):
     """"1", "1-3", "1,2,5", "1–3,7" -> 引文编号展开列表。"""
     nums = []
     for part in group.split(","):
-        m = re.match(r"\s*(\d{1,3})(?:\s*[–\-]\s*(\d{1,3}))?\s*$", part)
+        # 允许字母前缀（补充材料里的 [S1]/[S1–S3]）；展开结果只保留数字部分
+        m = re.match(r"\s*[A-Za-z]?(\d{1,3})(?:\s*[–\-]\s*[A-Za-z]?(\d{1,3}))?\s*$", part)
         if not m:
             continue
         a = int(m.group(1))
@@ -2399,7 +2491,9 @@ def _parse_references(text, cap=400):
             body = text[m.end():end].strip()
             body = re.sub(r"\s+", " ", body)
             if body:
-                refs[int(m.group(1))] = body[:cap]
+                key = _ref_num_key(m.group(1))
+                if key is not None:
+                    refs[key] = body[:cap]
         if not refs:
             continue
         keys = set(refs)
