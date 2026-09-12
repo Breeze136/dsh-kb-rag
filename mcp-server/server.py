@@ -153,9 +153,13 @@ async def kb_clear(kb_root: str = "", confirm: bool = False) -> str:
 
 
 @mcp.tool()
-async def kb_fetch(identifiers: list[str], target_dir: str = "") -> str:
+async def kb_fetch(identifiers: list[str], target_dir: str = "", ingest: bool = False,
+                   kb_root: str = "") -> str:
     """按 DOI / arXiv ID 把论文 PDF 下载到本地目录（默认 ~/.kb-rag/downloads，可用 target_dir 覆盖）。按标准元标签与公开 API 解析地址，顺序为：arXiv 直连 → 出版商正式版（落地页 citation_pdf_url；在校园网/机构订阅网络下可直接取得订阅版 PDF，无需额外配置）→ 落地页内常见 pdf 链接 → 开放获取兜底（Unpaywall / Crossref）。只做常规抓取，不绕过付费墙、不访问 Sci-Hub、不伪造凭据。下载后不会自动进 Zotero——需用户手动在 Zotero 里「文件→添加文件」或拖入该目录 PDF 入库。"""
-    return render_fetch(await engine.call("fetch", {"identifiers": identifiers, "target_dir": target_dir or None}))
+    return render_fetch(await engine.call("fetch", {
+        "identifiers": identifiers, "target_dir": target_dir or None,
+        "ingest": bool(ingest), "kb_root": kb_root or None,
+    }))
 
 
 if __name__ == "__main__":

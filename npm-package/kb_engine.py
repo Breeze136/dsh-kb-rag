@@ -2246,26 +2246,38 @@ def make_snippet(text, term, width):
     return pre + text[start:end].strip() + post
 
 
-def keyword_ranking(rows, query):
-    """BM25 x section weight over candidate chunks; returns ranked (index, score)."""
+def keyword_ranking(rows, query, ckey=None):
+    """BM25 x section weight over candidate chunks; returns ranked (index, score).
+
+    R9：`lowered` / `avgdl` 是 O(语料) 的重复计算（实测 20k 块里 BM25 是热查询最大的
+    非模型开销，302 ms）。这里按语料签名缓存小写文本与平均长度，并把"df 一遍 + tf 一遍"
+    合并成一遍 —— **打分公式与结果完全不变**（`count(term) > 0` 等价于 `term in text`），
+    只是不再每个查询重算。`ckey=None` 时不缓存（保持旧调用方行为）。"""
     terms = extract_terms(query)
     if not terms:
         return [], "无法从 query 解析出可检索的关键词"
-    texts = [r["text"] for r in rows]
-    lowered = [t.lower() for t in texts]
     n = len(rows)
-    avgdl = sum(len(t) for t in texts) / max(1, n)
+    ent = _BM25_CACHE.get(ckey) if ckey is not None else None
+    if ent is not None and ent["n"] == n:
+        lowered, avgdl = ent["lowered"], ent["avgdl"]
+    else:
+        texts = [r["text"] for r in rows]
+        lowered = [t.lower() for t in texts]
+        avgdl = sum(len(t) for t in texts) / max(1, n)
+        if ckey is not None and n <= KB_CORPUS_CACHE_MAX:
+            _BM25_CACHE[ckey] = {"lowered": lowered, "avgdl": avgdl, "n": n}
+    texts = [r["text"] for r in rows]
     k1, b = 1.2, 0.75
     scores = [0.0] * n
     best_term = [None] * n
     best_idf = [0.0] * n
     for term, _kind, tw in terms:
-        df = sum(1 for lt in lowered if term in lt)
+        counts = [lt.count(term) for lt in lowered]        # 一遍同时拿到 df 与 tf
+        df = sum(1 for c in counts if c > 0)
         if df == 0:
             continue
         idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
-        for i, lt in enumerate(lowered):
-            tf = lt.count(term)
+        for i, tf in enumerate(counts):
             if tf == 0:
                 continue
             denom = tf + k1 * (1 - b + b * len(texts[i]) / avgdl)
@@ -2625,6 +2637,8 @@ KB_SCAN_WARN_CHUNKS = int(_env_float("KB_SCAN_WARN_CHUNKS", 100000))
 KB_CORPUS_CACHE_MAX = int(_env_float("KB_CORPUS_CACHE_MAX", 60000))
 KV_CORPUS_CACHE_ON = os.environ.get("KB_CORPUS_CACHE", "1").strip().lower() not in ("0", "false", "off", "no")
 _CORPUS_CACHE = {}
+# BM25 的小写文本 / 平均长度缓存（同一语料签名；见 keyword_ranking）
+_BM25_CACHE = {}
 # 缓存 key 里用**配置名**而不是运行时的 _RERANK_NAME：后者在模型加载前是 None、加载后变成
 # 模型名，于是"某进程第一次 deep 检索"写下的缓存行永远命中不了（key 已经变了）。
 RERANK_KEY_NAME = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
@@ -2736,7 +2750,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     best_term = None
 
     if mode_used in ("keyword", "hybrid"):
-        kw_ranked, best_term, _err = keyword_ranking(rows, query)
+        kw_ranked, best_term, _err = keyword_ranking(rows, query, ckey)
         if mode_used == "keyword":
             ranked = kw_ranked
         else:
@@ -2773,13 +2787,13 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             ranked, _err2 = vector_ranking(rows, qvec, k=max(20, top_k * 5))
             if _err2:
                 mode_used = "keyword"
-                ranked, best_term, _ = keyword_ranking(rows, query)
+                ranked, best_term, _ = keyword_ranking(rows, query, ckey)
                 note += _err2 + "，降级为纯关键词；"
             else:
                 ranked = [(i, s, s) for i, s in v_ranked]     # 纯向量路：裸分 = 余弦
         except Exception as e:
             mode_used = "keyword"
-            ranked, best_term, _ = keyword_ranking(rows, query)
+            ranked, best_term, _ = keyword_ranking(rows, query, ckey)
             note += f"向量检索失败({str(e)[:120]})，降级为纯关键词；"
     else:
         return {"ok": False, "error": f"unknown mode: {mode_used}"}
