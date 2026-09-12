@@ -32,6 +32,71 @@
 - `kb_engine.py`（及 `npm-package/kb_engine.py` 副本）中说明"PDF `/Author` 可能是排版/制作人员"的三处注释、`CHANGELOG.md` 的实测案例、`docs/BACKLOG.md` §2.8 与 §2.11 的实测记录里含**真实姓名与真实期刊名**（来自实测 PDF 的生产元数据与 Zotero 记录）。按 `AGENTS.md` 的发布约定统一换成中性占位（`Smith, John`、`Author A`、`Carbon`），具体无关命中文献名改为"三篇不同主题的文档"。
 - 引擎文件因此哈希变化（`fde65ed6` → `ae1da639`），但**只动了注释**：功能与行为不变，`kb_engine.py` 与 `npm-package/kb_engine.py` 仍逐字节一致。
 
+### 修复：References 判定重做 —— 消除"整篇不可检索"（PARSER_REV 4 → 5）
+
+- **问题**：重灌后 3290 块（13.9%）被判 weight=0，其中 **2 篇文档整篇没有任何可检索分块**（用户既搜不到、也没有任何提示），4 篇 >50% 被吞。根因是"像不像条目编号"这条判据太松：作者单位行（`1,2,3,*`）、正文编号列表、末页图注数字都能触发。
+- **条目判据改为按参考文献的版式特征**：① 编号在条目首位且全文递增（`1` / `1.` / `[1]`）② 通常落在文末 ③ **人名一定在首位**（`姓, 首字母` / `首字母. 姓` / 拼音姓名 / `姓 et al.`），其后依次是期刊缩写、年份、卷页。正文编号列表（`1. Introduction…`）在这一条上直接出局。中文文献等非英文版式回落到"逐条证据分"（DOI/卷页/年份）兜底 —— 只用人名判据会丢掉约 250 个引用块的标注。
+- **位置口径统一为字符占比**（原为段落序号）：同一篇里两种口径能差一倍，实测 11 篇真参考文献因此被整条漏掉。标题门 0.5、无标题引文链门 0.3。
+- **总量上限改为字符占比**（0.6）：段落占比会把"每条参考文献单独成段"的 PDF 误伤（实测 60% 段但仅 29% 字符）。超限即放弃判定，整篇按正文索引。
+- **新增整篇兜底**：分块后若没有任何 weight>0 的分块，把最后一节（≥800 字符）按 weight 1.0 写回，section 标记 `<原节> (rescued)` —— 保证"任何文档都不会从检索里消失"。
+- **可观测**：`kb_stats` 的 health 新增 `docs_without_retrievable_chunks` + `blind_sample`；插件渲染「⚠ N 篇文档没有任何可检索分块」。升级提示分型：新增 `stale_kind`（chunk / meta）与 `CHUNK_AFFECTING_REVS`，`stale_kind=chunk` 时**不再提供**"只刷新元数据"这个无效选项。
+- **实测**（316 篇真实 PDF 逐篇对比）：整篇不可检索 2 → 0；被吞 >50% 的文档 4 → 0；weight=0 占比 13.91% → 13.81%（召回不变）；无新增 blind。
+
+### 修复：相关性地板 —— 库外问题不再返回 Top-3 垃圾
+
+- **实测标定**（316 篇真实库，12 个库内问题 vs 8 个库外问题）：裸精排分 库内 min 0.685 / 中位 0.996，库外 max 0.072 / 中位 0.020（空隙极大）；**最高余弦 库内 min 0.691 vs 库外 max 0.688（基本重叠）**。
+- 因此：`verdict`（相关/弱相关/无关）+ `no_hit` + `max_score` + `floor` + `closest`（无命中时给"最接近的 5 篇"）。`KB_MIN_RERANK` 默认 0.10、`KB_MIN_RERANK_WEAK` 默认 0.35；**纯向量/纯关键词路不做"无关"判定**（余弦不可分离，硬判就是在刀尖上赌）。
+- 候选从二元组改成三元组 `(下标, 加权分, 裸分)`：地板只能按裸分判（加权分被章节权重乘过 1.0–1.5，量纲会错位）。
+- 插件两侧渲染：无命中给出理由与"库内最接近的 N 篇"，并明确要求如实说明、不要换词穷举。
+
+### 修复：无命中/弱命中不入缓存 + 缓存 key 稳定性
+
+- 缓存写入门槛去掉 `and results`：负结果同样入缓存（索引/元数据变化时 `cmd_ingest` 会清缓存，key 含解析器 token，不会陈旧）。
+- 修掉一个真 bug：缓存 key 里原先是运行时的 `_RERANK_NAME`，模型加载前是 `None`、加载后变成模型名 → **某进程第一次 deep 检索写下的缓存行永远命中不了**。改用配置名 `RERANK_KEY_NAME`。
+- 地板/精排参数并入 cache key：改了阈值不会复用旧结论。
+
+### 新增：会话级状态 + `/kb` 命令 + 三档关闭 + 深挖模式
+
+- `scope/depth/strict/enabled/diligence` 改为**按会话隔离**（会话键取 `exec.agent.id`，即 SessionId）。旧实现是插件闭包里的单份变量：第二个会话起不再询问、某会话改动污染全 app。
+- 状态落 `kb_scope` / `/kb`；工作区默认值存 `<工作区>/.kb-rag/state.json`（引擎新增 `state` 命令代读写，插件不直接碰文件系统）。`/kb save` 才持久化（第一版实现直接持久化，`/kb both` 会污染之后所有新会话）。
+- `/kb` 命令（direct UI handler，不进模型）：`status` / `kb|both|web` / `quick|deep` / `strict on|off` / `thorough|normal` / `off [hard|search]` / `on` / `save` / `policy`。
+- 三档关闭：**软关闭**（工具在，调用即返回 `kb_rag_disabled`，不拉守护进程）/ **硬关闭**（运行时撤掉 10 个工具注册，无需重启）/ **半关闭**（只撤检索，保留入库与统计）。
+- **深挖模式**：用户明确要求"仔细找/慢慢来/别省时间/把相关文献都找齐"时用 `kb_scope(diligence="thorough")` 或 `/kb thorough` —— 解除"≤3 次调用、无命中即停"的省成本纪律，改为「反复检索 → `kb_fetch(ingest=true)` 补库 → 引文关联 → 增量入库 → 再查」的循环；结果层的"叫停类"规则在该模式下自动让位给"下一步补库"的动作指令。配套：`kb_fetch` 新增 `ingest=true`（下载即入库），citations 条目新增 `doi` 字段（可直接据此补库）。
+- `userQuestions` 改为**调用时**惰性读取（apply 期一次性捕获会在服务未注册时静默跳过所有询问）；**不写进 `inject`** —— 可选服务未注册会让插件永远 park。
+
+### 修复：filters 归一化
+
+- `title/authors/journal` 两侧同时归一（连字符/下划线/连续空格 → 单空格、小写）。实测现场：`Electric-field control of local ferromagnetism` 用空格写法查过 3 遍（含 2 次零命中）。
+- `authors` 改为**分词 AND**：`Smith J` 命中 `Smith, J. A.; Jones, B.`（整串子串匹配在标点/顺序不同时必然零命中，这是 agent 穷举 author filter 的直接原因之一）。
+
+### 修复：GPU 兜底做成硬保证
+
+- **加载期**就撞 CUDA（驱动/内核不匹配、cuDNN/cuBLAS、加载期显存不足）时退回 CPU 再加载一次，并把本进程 GPU 标记为不可用（sticky）—— 旧实现会在同一条路上连撞三次（本地缓存 → 下载 → 镜像）全部失败，最终把模型判成不可用，而 CPU 明明能跑。
+- 设备探测每进程最多一次（含失败结果）；CUDA 不可用或已判定不可用时 `device_kwargs` 直接给 `device="cpu"`，不给上游自动选择再去碰 GPU 的机会。
+- 运行期兜底从"仅 OOM"扩到整类 CUDA 错（内核不匹配 / device-side assert / 设备丢失）：清缓存缩批 → 移到 CPU → 再失败才抛。非设备故障照常上抛，不被兜底掩盖。
+- `KB_DEVICE` 现在对**精排**同样生效（此前精排三处构造都没传 device）；`_move_model_to_cpu()` 兼容 `CrossEncoder`（本身不一定有 `.to()`，退到 `model.model.to()`）；设备说明按链路记账、正常加载成功时清除。
+- `device_report()` 新增 `gpu_usable` / `gpu_disabled_reason`（torch 未加载时不主动 import，保持 `kb_stats` 便宜）。
+
+### 新增：npm 包补上客户端半边
+
+- `npm-package/lib/client.js`（按 DSH 客户端 bundle 的 lazy-CJS 形态：`window.__ModuleLoader__.load({ id, factory })`，导出 `apply` / `inject`）+ `package.json` 的 `exports["./client"]` 与 `dsh.client`。
+- 内容：`kb_search` / `kb_rag` 的**来源卡片**（可点击 DOI、作者/年份/章节、弱相关提示、无命中时显示理由与最接近的几篇）与会话标题栏指示条。
+- 宿主侧配套：`output.presentationMeta` 投影结构化 sources/verdict/closest（`ContentBlockMap` 只有 text/reasoning/image/tool-call/tool-result，没有可自造的通知块类型）。
+- 修掉一个真 bug（两个客户端半边都有）：退回路径的正则按「`[1] [标题](链接)`」写，而宿主渲染的是「`1. [标题](链接)`」→ 永远匹配不上、没有 meta 时卡片恒显示"无命中"。
+
+### 变更：精排成本可配、扫描可观测、提示镜像生成
+
+- `KB_RERANK_CHARS`（默认 1800，截到 512 约 3× 快）、`KB_RERANK_POOL`（候选池下限，默认 20）。
+- 检索响应新增 `scan`（参与检索的分块数、读取耗时、是否加载了向量、超阈值提示）：库变大时这是第一个瓶颈，以前完全不可见。纯关键词路不再 JOIN `vecs`（省掉全部向量 BLOB）。
+- 新增 `tools/sync-host-guidance.mjs`：动态插件半边（`plugin/host.js`）的提示文本由 `lib/guidance.js` **生成**（`--check` 可检测漂移），根治"两半手抄必然漂移"。
+- 提示层结果规则限定到检索类工具（`kb_ingest` / `kb_zotero` 也带 `embedding_error`，但那里的文案由 `renderIngest` 自己给；用检索口径会说成"本次检索已退化"，误导）。
+
+### 未做 / 待验证（诚实记录）
+
+- **客户端半边需在真实 Web GUI 里确认**：官方没有给出第三方包手写该 bundle 的公开规范（是否接受手写、`require("react")` 的外部化规则）。加载失败不影响核心功能（工具与 markdown 来源链接由宿主渲染）。
+- **十万块级的索引化改造未做**：`_search_core` 仍是 O(库规模) 扫描（已加 `scan` 观测与提示）；方案（FTS5 / 倒排 + 向量分级）记在 `docs/BACKLOG.md`。
+- **动态插件半边的会话级状态未对齐**：`/kb`、三档关闭、深挖模式目前只在静态插件（npm 包）实现；动态半边已同步提示文本与结果层规则。
+
 ## [1.6.6] - 元数据刷新通道 + 陈旧数据检测 + 入库进度可见 + 检索语言归 AI 层
 
 ### 新增：元数据刷新通道（`kb_ingest`）
