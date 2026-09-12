@@ -2354,7 +2354,9 @@ def keyword_ranking(rows, query, ckey=None):
     只是不再每个查询重算。`ckey=None` 时不缓存（保持旧调用方行为）。"""
     terms = extract_terms(query)
     if not terms:
-        return [], "无法从 query 解析出可检索的关键词"
+        # 返回三元组（与正常路径一致）：原先这里返回二元组，而 _search_core 按三元组解包，
+        # 于是一个"只有停用词"的查询（如 'the of and'）会抛 ValueError、整次检索返回错误响应。
+        return [], "无法从 query 解析出可检索的关键词", None
     n = len(rows)
     ent = _BM25_CACHE.get(ckey) if ckey is not None else None
     if ent is not None and ent["n"] == n:
