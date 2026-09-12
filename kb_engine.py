@@ -2616,6 +2616,15 @@ KB_MIN_RERANK = _env_float("KB_MIN_RERANK", 0.10)        # 裸精排分地板
 KB_MIN_RERANK_WEAK = _env_float("KB_MIN_RERANK_WEAK", 0.35)   # 低于此值算"弱相关"
 KB_RERANK_POOL = int(_env_float("KB_RERANK_POOL", 20))   # 精排候选池下限（top_k*5 取大）
 KB_RERANK_CHARS = int(_env_float("KB_RERANK_CHARS", 1800))    # 每条候选喂给精排的字符数
+# 单次查询扫描到多少块时给出"该做索引化了"的提示（只提示，不改行为）
+KB_SCAN_WARN_CHUNKS = int(_env_float("KB_SCAN_WARN_CHUNKS", 100000))
+# 语料缓存（R9 的实用部分）：一次查询要把参与检索的分块（文本 + 向量）读进内存，
+# 同一会话里反复查同一个库时这是纯重复劳动。缓存按 (库路径, 规模签名, 是否要向量, WHERE)
+# 记账，签名变化（入库/清库/过滤条件变）即失效 —— 不改变任何排序结果，只省掉重复读取。
+# 超过 KB_CORPUS_CACHE_MAX 块时不缓存（避免守护进程常驻几百 MB）。
+KB_CORPUS_CACHE_MAX = int(_env_float("KB_CORPUS_CACHE_MAX", 60000))
+KV_CORPUS_CACHE_ON = os.environ.get("KB_CORPUS_CACHE", "1").strip().lower() not in ("0", "false", "off", "no")
+_CORPUS_CACHE = {}
 # 缓存 key 里用**配置名**而不是运行时的 _RERANK_NAME：后者在模型加载前是 None、加载后变成
 # 模型名，于是"某进程第一次 deep 检索"写下的缓存行永远命中不了（key 已经变了）。
 RERANK_KEY_NAME = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
@@ -2655,12 +2664,45 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     where, args = build_where(filters)
     # References（weight 0）只作引文关联数据源，不参与检索
     where = (where + " AND c.weight > 0") if where else " WHERE c.weight > 0"
-    rows = db.execute(
-        "SELECT c.id AS cid, c.doc_id, c.text, c.section, c.weight, "
-        "c.para_start, c.para_end, c.page_start, c.page_end, d.title, d.authors, "
-        "d.year, d.journal, d.doi, d.path, d.kind, d.zotero_key, v.vec "
-        "FROM chunks c JOIN docs d ON d.id = c.doc_id "
-        "LEFT JOIN vecs v ON v.chunk_id = c.id" + where, args).fetchall()
+    # R9：每次查询要把参与检索的分块读进内存（BM25 需要文本、向量路需要向量），
+    # 属于 O(库规模) 的设计。这里先做两件**零风险**的事：
+    #   ① 纯关键词路不 JOIN vecs（省掉全部向量 BLOB）；
+    #   ② 把扫描规模与读取耗时作为 scan 字段返回 —— 以前完全看不出来瓶颈在哪。
+    # 十万块级需要真正的索引化（FTS5 / 倒排 + 向量分级），见 docs/BACKLOG.md。
+    need_vec = (mode or "hybrid") != "keyword"
+    vec_join = " LEFT JOIN vecs v ON v.chunk_id = c.id" if need_vec else ""
+    cols = ("c.id AS cid, c.doc_id, c.text, c.section, c.weight, "
+            "c.para_start, c.para_end, c.page_start, c.page_end, d.title, d.authors, "
+            "d.year, d.journal, d.doi, d.path, d.kind, d.zotero_key" + (", v.vec" if need_vec else ""))
+    t_load = time.time()
+    corpus_hit = False
+    rows = None
+    try:
+        db_path = str(db.execute("PRAGMA database_list").fetchall()[0][2] or "kb")
+    except Exception:
+        db_path = "kb"
+    ckey = None
+    if KV_CORPUS_CACHE_ON:
+        try:
+            # 签名要便宜又要可靠：MAX(chunks.id) 走主键、O(1)，任何"重灌/新增文档"都会抬升它；
+            # COUNT(docs) 只扫 docs（几百行），清库/去重会改变它。
+            # （不用 PRAGMA data_version：实测它只在同一连接内有效，新连接看不到他连接提交后的变化。）
+            sig = db.execute("SELECT (SELECT COALESCE(MAX(id), 0) FROM chunks) AS mx, "
+                             "(SELECT COUNT(*) FROM docs) AS dc").fetchone()
+            ckey = (db_path, need_vec, int(sig["mx"]), int(sig["dc"]), where, tuple(str(a) for a in args))
+            cached = _CORPUS_CACHE.get(ckey)
+            if cached is not None:
+                rows = cached
+                corpus_hit = True
+        except Exception:
+            ckey = None
+    if rows is None:
+        rows = db.execute(
+            "SELECT " + cols + " FROM chunks c JOIN docs d ON d.id = c.doc_id" + vec_join + where,
+            args).fetchall()
+        if ckey is not None and len(rows) <= KB_CORPUS_CACHE_MAX:
+            _CORPUS_CACHE[ckey] = rows
+    load_ms = round((time.time() - t_load) * 1000)
 
     if not rows:
         return {"query": query, "scored": 0, "results": [],
@@ -2700,7 +2742,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
         else:
             if not kw_ranked:
                 note += "关键词无命中；"
-            vecs_present = any(r["vec"] is not None for r in rows)
+            vecs_present = any(r["vec"] is not None for r in rows) if need_vec else False
             if not vecs_present:
                 mode_used = "keyword"
                 ranked = kw_ranked
@@ -2852,6 +2894,12 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "verdict": verdict, "no_hit": no_hit, "max_score": round(raw_best, 4) if raw_best is not None else None,
             "floor": floor, "floor_weak": KB_MIN_RERANK_WEAK if floor is not None else None,
             "closest": closest,
+            # 扫描规模与内存读取耗时：库变大时这是第一个瓶颈，以前完全不可见（R9）
+            "scan": {"chunks": len(rows), "load_ms": load_ms, "need_vec": need_vec,
+                     "corpus_cached": corpus_hit,
+                     "warn": ("库内可检索分块 %d 块，单次查询已需 O(库规模) 扫描；"
+                              "十万块级建议等索引化改造（见 docs/BACKLOG.md）" % len(rows))
+                             if len(rows) > KB_SCAN_WARN_CHUNKS else None},
             "note": (note + f"命中 {len(ranked)} 块，返回 Top-{len(results)}") if len(ranked) else (note or "无命中"),
             "cached": False,
             "ms": round((time.time() - t0) * 1000)}
