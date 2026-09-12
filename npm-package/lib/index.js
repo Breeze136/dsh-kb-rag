@@ -1265,6 +1265,7 @@ function apply(ctx) {
   // 三档关闭语义：软关闭（enabled=false，工具在但调用即返回"已关闭"，不拉守护进程，默认）/
   // 硬关闭（撤掉工具注册，运行时生效、无需重启）/ 半关闭（只关检索，保留入库与统计）。
   const SEARCH_TOOLS = ["kb_search", "kb_rag"];
+  const TOTAL_TOOLS = 10;
   function disposeTools(pred) {
     const kept = [];
     toolDisposers.forEach(function (d) {
@@ -1311,11 +1312,19 @@ function apply(ctx) {
             st.diligence = "normal";
             lines.push("已回到默认纪律：一次提问最多 3 次检索、无命中即停。" + persistHint);
             break;
-          case "on":
+          case "on": {
+            // 判据不能只看"工具数为 0"：半关闭（撤掉检索、留着入库/统计）之后 count 是 8，
+            // 旧写法会认为"已经开着"而不重新注册，kb_search/kb_rag 就永远回不来了（实测抓到）。
+            const needRepair = st.enabled === false || toolsRegistered() < TOTAL_TOOLS;
             st.enabled = true;
-            if (toolsRegistered() === 0) registerAllTools();
-            lines.push("kb-rag 已开启（软关闭解除；硬关闭过的工具已重新注册）。");
+            if (needRepair) {
+              disposeTools(function () { return true; });   // 先全撤，避免重复注册
+              registerAllTools();
+            }
+            lines.push("kb-rag 已开启" + (needRepair ? "（工具已重新注册齐全，" + toolsRegistered() + "/10）"
+                                                     : "（本来就是开着的）") + "。");
             break;
+          }
           case "off":
             if (arg === "hard") {
               st.enabled = false;
