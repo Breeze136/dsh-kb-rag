@@ -1,6 +1,50 @@
 // kb-rag DSH dynamic plugin — Host half (v1.6.7)
 // 用法：把本文件内容作为 cordis_define 的 code.host（纯函数体，直接粘贴）。
 // 依赖：工作区根目录存在 kb_engine.py；Python 环境装有 PyMuPDF/faiss-cpu/sentence-transformers。
+    // >>> kb-guidance-mirror（由 tools/sync-host-guidance.mjs 生成，勿手改）
+    // 源：npm-package/lib/guidance.js（唯一事实来源）。改提示请改那边，再跑 sync 脚本。
+    const KB_GUIDANCE = {
+      "discipline": "调用纪律（重要，违反会显著拖慢回答）：\n1. 一次提问最多调用本工具 3 次，每次必须换实质策略（中文→英文术语 / 放宽 filters / 换同义术语），不要反复改写同一句话。\n2. 返回 verdict=无关（或结果分数低于阈值）时：库内确实没有 → 如实说明\"库内无资料\"，并按 scope 设置转 web_search；不要再换词连试。\n3. 返回 verdict=弱相关时：最多升一次 depth=deep；仍弱则按第 2 条处理。\n4. 用户说\"先联网/快点/不用查库\"→ 用 scope=web 或直接 web_search；用户说\"库里有没有/只查库\"→ scope=kb，只查一次。\n5. 中文提问先转写成英文术语再检索（库内正文以英文为主，BM25 对中文空转）；转写一次即可。",
+      "thorough": "**深挖模式已开启**（用户明确要求彻底查找；调用次数不设上限，优先把事情查透）：\n1. 逐术语、逐角度检索：同一问题可以换多组英文术语、放宽或更换 filters，直到覆盖主题各个侧面。\n2. 库内只有一两篇相关文献时，**不要把\"就这么点\"当成结论**：从结果的 citations 里取 DOI，\n   用 kb_fetch({ identifiers: [doi], ingest: true }) 下载并**直接入库**，再对新增文献继续检索。\n3. 循引文与 related 横向展开：新入库的文献再查一次引文关联，把它们的参考文献也纳入候选。\n4. 每轮把「新增了什么 / 还缺什么」简短告诉用户，直到收敛（没有新文献、没有新结论）或用户喊停。\n5. 增量入库按 sha256 自动跳过已入库文件，重复调用安全；大批量会自动转后台，用 kb_status 轮询。\n6. 只有在**确实把所有角度都检索完**之后，才可以说\"库内无相关资料\"。",
+      "defaults": "默认：深度=quick（亚秒级）。需要跨文献综合/精排时显式传 depth=deep（每次多约 1.9 s）。",
+      "floor": 0.1,
+      "maxCalls": 3
+    }
+    // 检索纪律（描述层）：默认档给调用上限，深挖档给补库循环。
+    function kbDisciplineText(diligence) {
+      const pointer = '注：用户明确要求彻底查找时（\'仔细找/慢慢来/别省时间/把相关文献都找齐\'），'
+        + '先 kb_scope({ diligence: "thorough" })（或用 /kb thorough）——该模式下调用上限解除，'
+        + '改为「反复检索 → kb_fetch(ingest=true) 补库 → 引文关联 → 增量入库 → 再查」的循环。'
+      return diligence === 'thorough'
+        ? (KB_GUIDANCE.thorough + '\n' + KB_GUIDANCE.defaults)
+        : (KB_GUIDANCE.discipline + '\n' + KB_GUIDANCE.defaults + '\n' + pointer)
+    }
+    // 结果层：无命中 / 弱相关 / 向量降级三种情形（深挖档把"叫停"换成"继续补库"）。
+    function kbResultNotes(value, diligence) {
+      const out = []
+      const list = (value && (value.results || value.evidence)) || []
+      const maxScore = list.length > 0
+        ? Math.max.apply(null, list.map(function (r) { return Number(r && r.score) || 0 })) : null
+      const thorough = diligence === 'thorough'
+      const noHit = Boolean(value && (value.no_hit === true || value.verdict === '无关'
+        || (list.length === 0 && value.ok === true)))
+      if (noHit) {
+        out.push(thorough
+          ? '深挖模式：本轮没命中，**不要收尾**。① 换术语或放宽 filters 再检索；② 从已命中结果的 citations 取 DOI，用 kb_fetch({ identifiers: [doi], ingest: true }) 补库后重查；③ 用 related 列表横向扩展。'
+          : ('⚠ 库内无相关资料' + (maxScore !== null ? '（最高分 ' + maxScore.toFixed(2) + '，低于阈值 ' + KB_GUIDANCE.floor + '）' : '') + '：不要再换词重试；如实说明库内没有，并按 scope 转 web_search。'))
+      } else if (value && value.verdict === '弱相关' && !thorough) {
+        out.push('提示：本次结果相关性偏弱（最高分 ' + (maxScore === null ? '?' : maxScore.toFixed(2)) + '）。最多再升一次 depth=deep；仍弱就按「库内无资料」处理。')
+      }
+      if (value && (value.mode_used === 'keyword' || value.embedding_error || value.vectors_missing > 0)) {
+        out.push('注意：向量链路当前不可用' + (value.embedding_error ? '（' + String(value.embedding_error).slice(0, 120) + '）' : '')
+          + '，本次检索已退化为纯关键词。请在回答中说明，并提示用户重跑 kb_ingest 可补齐缺失向量。')
+      }
+      if (value && value.kb_rag_disabled === true) {
+        out.push('kb-rag 当前处于关闭状态，本次调用未检索。请直接使用 web_search，或提示用户用 /kb on 开启。')
+      }
+      return out
+    }
+    // <<< kb-guidance-mirror
 return {
   name: 'kb-rag',
   // subprocess 必须声明在 inject 里：动态插件沙箱的 ctx.get(name) 是"可选查询"，服务还没注册时
@@ -736,6 +780,14 @@ return {
           lines.push('- ' + t + (meta.length > 0 ? ' — ' + meta : '') + '（' + String(r.reason || '内容相关') + '）')
         })
       }
+      // 结果层提示（镜像块，源：npm-package/lib/guidance.js）：
+      // 无命中 / 弱相关 / 向量降级 / 已关闭 —— 静态插件那一半由 withNotes() 注入，
+      // 这里手写调用同一个生成块，避免两半漂移。
+      const notes = kbResultNotes(value, (value && value.__diligence) || 'normal')
+      if (notes.length > 0) {
+        lines.push('')
+        notes.forEach(function (n) { lines.push(n) })
+      }
       return [{ type: 'text', text: lines.join('\n') }]
     }
 
@@ -779,7 +831,15 @@ return {
       },
     })
 
-    const kbSearch = harness.defineTool({
+    // 描述层纪律（镜像块生成）：与静态插件侧 guidedDescription 等价 —— host.js 不能 import
+    // npm 包的模块，所以文本由 tools/sync-host-guidance.mjs 从 guidance.js 生成。
+    function withDiscipline(spec) {
+      return Object.assign({}, spec, {
+        description: String(spec.description || '') + '\n\n' + kbDisciplineText('normal'),
+      })
+    }
+
+    const kbSearch = harness.defineTool(withDiscipline({
       name: 'kb_search',
       description: '在知识库中做混合检索（关键词 BM25 + 向量余弦，RRF 融合，×章节权重），返回最相关片段及精确来源（文件/标题/作者/年份/期刊/DOI/章节）。想在已入库文档中查找事实、数据或术语时优先于直接读文件（更省 token）。depth 双模式：quick（默认）=快速检索，混合召回直出、跳过精排与引文扩展，亚秒级响应，适合事实性查询；工具返回后立即作答，不展开背景与延伸分析；deep=深度检索，bge-reranker 精排 + 引文链 + 关联文献（适合领域调研与综述性问题）。query 用**英文术语串**——库内正文以英文为主，中文问句会让 BM25 关键词路空转、只靠向量侧跨语言匹配，命中明显更差；写法为 3–12 个词，结构「材料/体系 + 方法/工艺 + 性质/表征」（如 "graphene CVD copper single crystal nucleation suppression"），不要用整句问句，年份/期刊/作者请放 filters，需要中文文献时用用户原话另发一条中文查询；引擎按原样检索，不会替你翻译；mode 可选 keyword/vector/hybrid（默认 hybrid）；filters 支持 authors/year/section/title/journal/kind 元数据预过滤（year 可用 ">=2020" 形式）；其中 journal 目前只由 Zotero 迁移填充，kb_ingest 入库的文档该字段为 NULL，用它过滤通常零命中。查询范围由会话开始时的范围询问或 kb_scope 工具控制；返回的 scope/scope_note 指明当前范围。strict 可选（true=严格模式：答案仅基于本次结果，禁止库外知识/常识外延；默认继承 kb_scope 设置）。回答用户时必须标注来源：引用要写成 markdown 链接格式 [作者, 年份, 期刊](https://doi.org/DOI)（用来源字段里的 doi，保证用户能点击打开）；若该来源无 DOI，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。无命中时先检查是否已入库（kb_stats）。相同查询命中缓存，零重计算。',
       parameters: {
@@ -810,9 +870,9 @@ return {
         }, exec)
         return scopeWrapped(exec, call, strict, kbRootOf(args, exec))
       },
-    })
+    }))
 
-    const kbRag = harness.defineTool({
+    const kbRag = harness.defineTool(withDiscipline({
       name: 'kb_rag',
       description: '在知识库中检索证据片段供当前模型直接作答：基于 evidence 回答问题，每个事实后标注引用编号 [n]（对应 evidence 下标）。引用一定要写成可点击的 markdown 链接：[作者, 年份, 期刊](https://doi.org/DOI)（用 evidence 条目的 doi 字段）；若 doi 为 null，引用写成 [作者, 年份, 文件名]（方括号内只放 PDF 文件名，不要使用任何 HTML 标签；文件名过长时可截断到约 60 字符）。depth 双模式：deep（默认）=深度检索，重排序 + 引文关联 + 相关文献全链路，回答可综合多篇展开论述（适合领域调研）；quick=快速检索，仅基于少量证据直接作答，不展开论述。strict 可选（true=严格模式：仅基于 evidence 作答，禁止补充库外知识/常识外延或未出现在 evidence 中的文献数据，证据不足直接说明无法回答；默认继承 kb_scope 设置，当前默认 false）。资料不足时明确回答"根据现有资料无法回答"；多源冲突时分别列出并说明来源。答案末尾的补充建议按来源分三列（哪列为空就整列省略）：①「库内可查（循引文找到）」——citations 里标 [库内] 的文献，必须写出关系链"《被引文献》(作者, 年份) 被 [证据编号] 的引文 Ref n 引用，已在库内可直接提问"；②「建议补库（循引文发现）」——citations 未命中库内的条目，注明被 Ref n 引用、尚不在库内，可用 Ref 编号定位下载；③「相关文献」——related 列表（同作者/同期刊/主题相似的库内文献，元数据相似）。每条推荐的理由必须写明属于哪种，引文关联的必须带关系链，不得混列；若库内缺少关键资料，明确指出应补充哪些文献/主题（用户重视此提示）。这是知识库 RAG 问答的唯一入口；查询范围由会话开始时的范围询问或 kb_scope 工具控制。',
       parameters: {
@@ -839,7 +899,7 @@ return {
         }, exec)
         return scopeWrapped(exec, call, strict, kbRootOf(args, exec))
       },
-    })
+    }))
 
     const kbZotero = harness.defineTool({
       name: 'kb_zotero',

@@ -112,6 +112,7 @@ export const POLICIES = [
   {
     id: 'no-hit',
     seat: 'result',
+    tools: ['kb_search', 'kb_rag'],
     stopRule: true,          // 深挖模式下不适用（用户要求"查透"，不该在这里叫停）
     when: (resp) => isEmptyResult(resp),
     text: (resp) => {
@@ -127,6 +128,7 @@ export const POLICIES = [
   {
     id: 'no-hit-thorough',
     seat: 'result',
+    tools: ['kb_search', 'kb_rag'],
     thoroughOnly: true,      // 只在深挖模式生效：把"没有"转成"下一步补库"
     when: (resp) => isEmptyResult(resp),
     text: (resp) => {
@@ -144,6 +146,7 @@ export const POLICIES = [
   {
     id: 'weak-hit',
     seat: 'result',
+    tools: ['kb_search', 'kb_rag'],
     stopRule: true,
     when: (resp) => isWeakResult(resp),
     text: () => '提示：本次结果相关性偏弱。最多再升一次 depth=deep；仍弱则按"库内无资料"处理，不要连环换词。',
@@ -153,6 +156,9 @@ export const POLICIES = [
   {
     id: 'degraded-vectors',
     seat: 'result',
+    // 只对检索类工具：kb_ingest / kb_zotero 也有 embedding_error 字段，但那里的文案由
+    // renderIngest 自己给（"未建向量（原因）…"），用检索的口径会说成"本次检索已退化"，误导。
+    tools: ['kb_search', 'kb_rag'],
     when: (resp) => Boolean(resp && (resp.embedding_error || resp.mode_used === 'keyword')) || (resp && resp.vectors_missing > 0),
     text: (resp) => {
       const why = resp.embedding_error ? '（' + String(resp.embedding_error).slice(0, 120) + '）' : '';
@@ -167,6 +173,7 @@ export const POLICIES = [
   {
     id: 'cjk-query',
     seat: 'result',
+    tools: ['kb_search', 'kb_rag'],
     when: (resp) => typeof (resp && resp.lang_note) === 'string' && resp.lang_note.length > 0,
     text: () => '中文查询在英文库上关键词路基本空转：请用英文术语重查一次；若仍不满意，按 scope 转联网。',
     throttle: { cooldownMs: 300000 },
@@ -175,6 +182,7 @@ export const POLICIES = [
   {
     id: 'slow-call',
     seat: 'result',
+    tools: ['kb_search', 'kb_rag'],
     when: (resp) => Number(resp && resp.ms) > 5000,
     text: (resp) => '本次检索耗时 ' + Math.round(resp.ms / 1000) + ' s（deep 会跑精排）。快速问答可用 depth=quick；只有需要综述时才用 deep。',
     throttle: { cooldownMs: 600000 },
