@@ -598,6 +598,24 @@ return {
     const renderSources = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : [])
+      // 相关性地板判为"无关"时：结果为空是**结论**而非故障 —— 必须把理由与"库内最接近的几篇"
+      // 一起说出来，否则 agent 会以为检索失败、换词穷举。
+      if (items.length === 0 && value.no_hit === true) {
+        const nlines = []
+        nlines.push('**库内无相关资料**（精排最高分 ' + (value.max_score === null || value.max_score === undefined ? '?' : value.max_score)
+          + ' < 地板 ' + (value.floor === null || value.floor === undefined ? '?' : value.floor) + '）')
+        nlines.push('请如实说明库里没有相关资料，并按 scope 设置转 web_search；不要换词反复重试。')
+        const close = Array.isArray(value.closest) ? value.closest : []
+        if (close.length > 0) {
+          nlines.push('')
+          nlines.push('库内最接近的 ' + close.length + ' 篇（供你判断是否真的无关，不要当答案引用）：')
+          close.forEach(function (c, i) {
+            nlines.push('  ' + (i + 1) + '. ' + String(c.title || '(无标题)') + (c.year ? ' · ' + c.year : '')
+              + (c.section ? ' · §' + c.section : ''))
+          })
+        }
+        return [{ type: 'text', text: nlines.join('\n') }]
+      }
       if (items.length === 0) return [{ type: 'text', text: JSON.stringify(value) }]
       const refRange = function (cs) {
         const ns = cs.map(function (c) { return c && c.n }).filter(function (n) { return n !== null && n !== undefined }).map(Number).sort(function (a, b) { return a - b })
@@ -626,6 +644,11 @@ return {
       // 引擎的降级原因（如"向量索引缺失，降级为纯关键词"）以前被丢弃，用户不知道检索为何变成关键词（issue #2）
       if (typeof value.note === 'string' && value.note.indexOf('降级') >= 0) {
         lines.push('提示：' + String(value.note).replace(/命中 \d+ 块，返回 Top-\d+/, '').trim())
+      }
+      // 弱相关：给一次明确的升级机会（深查），而不是让 agent 自由发挥式重试
+      if (value.verdict === '弱相关') {
+        lines.push('提示：本次结果相关性偏弱（精排最高分 ' + (value.max_score === undefined ? '?' : value.max_score)
+          + ' < ' + (value.floor_weak === undefined ? '0.35' : value.floor_weak) + '）。最多再升一次 depth=deep；仍弱就按「库内无资料」处理。')
       }
       items.forEach(function (r, i) {
         const title = String(r.title || r.file || '')

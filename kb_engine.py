@@ -1811,11 +1811,11 @@ def rerank(query, texts):
 
     def _run(bs):
         if cross:
-            pairs = [[query, t[:1800]] for t in texts]
+            pairs = [[query, t[:KB_RERANK_CHARS]] for t in texts]
             scores = model.predict(pairs, batch_size=bs, show_progress_bar=False)
             return np.asarray(scores, dtype="float32").flatten().tolist(), _RERANK_NAME
         q = model.encode([query], normalize_embeddings=True)
-        d = model.encode([t[:1800] for t in texts], normalize_embeddings=True)
+        d = model.encode([t[:KB_RERANK_CHARS] for t in texts], normalize_embeddings=True)
         return (d @ q.T).flatten().tolist(), _RERANK_NAME
 
     return _with_device_retry("rerank", model, _run)
@@ -2570,6 +2570,24 @@ def related_docs(db, kb_key, seed_doc_ids, related_k=5):
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _CJK_SHARE_CACHE = {}   # {db 路径: 中文占比}，按守护进程生命周期缓存
 
+# ---------------------------------------------------------------- 相关性地板
+#
+# 目的：库外问题不该返回 Top-3 垃圾（那会让模型"看起来有据可依"）。
+# 阈值来自**本机真实库实测**（316 篇、12 个库内问题 vs 8 个库外问题）：
+#   裸精排分：库内 min 0.685 / 中位 0.996 ｜ 库外 max 0.072 / 中位 0.020 → 空隙极大，
+#             0.05–0.35 之间的任何阈值在这批样本上都零误判；默认取 0.10（偏保守，
+#             宁可漏判"无关"也不误杀弱命中）。
+#   最高余弦：库内 min 0.691 ｜ 库外 max 0.688 → **基本重叠**。所以纯向量 / 纯关键词路
+#             **不做**"无关"判定（verdict=null）：拿余弦当地板只是在刀尖上赌。
+# 引擎返回 verdict（相关 / 弱相关 / 无关）+ no_hit + max_score + closest。
+KB_MIN_RERANK = _env_float("KB_MIN_RERANK", 0.10)        # 裸精排分地板
+KB_MIN_RERANK_WEAK = _env_float("KB_MIN_RERANK_WEAK", 0.35)   # 低于此值算"弱相关"
+KB_RERANK_POOL = int(_env_float("KB_RERANK_POOL", 20))   # 精排候选池下限（top_k*5 取大）
+KB_RERANK_CHARS = int(_env_float("KB_RERANK_CHARS", 1800))    # 每条候选喂给精排的字符数
+# 缓存 key 里用**配置名**而不是运行时的 _RERANK_NAME：后者在模型加载前是 None、加载后变成
+# 模型名，于是"某进程第一次 deep 检索"写下的缓存行永远命中不了（key 已经变了）。
+RERANK_KEY_NAME = os.environ.get("KB_RERANK_MODEL", "BAAI/bge-reranker-base")
+
 
 def _library_cjk_share(db):
     """库内正文的中文占比（抽样估算，按库缓存一次）。
@@ -2623,10 +2641,12 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     cache_key = None
     if use_cache:
         cache_key = hashlib.sha1(json.dumps(
-            [query, filters, top_k, snippet_w, mode, rerank_flag, _RERANK_NAME,
+            [query, filters, top_k, snippet_w, mode, rerank_flag, RERANK_KEY_NAME,
              related_flag, related_k,
+             # 地板/精排参数会改变结论（verdict / 截断长度影响精排分），必须并入 key，
+             # 否则改了阈值仍会复用旧响应（与"device=null 的旧缓存"同一类坑）
+             KB_MIN_RERANK, KB_MIN_RERANK_WEAK, KB_RERANK_CHARS, KB_RERANK_POOL,
              # 把解析器/引擎版本并入 key：升级后旧的缓存响应不该继续被复用
-             # （实测：改了结果的折叠规则后，缓存仍在返回没有新字段的旧响应）
              PARSER_TOKEN],
             sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")).hexdigest()
         hit = db.execute("SELECT payload FROM cache WHERE key = ?", (cache_key,)).fetchone()
@@ -2664,7 +2684,9 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                         note += _err2 + "，降级为纯关键词；"
                     else:
                         fused = rrf_fuse(kw_ranked, v_ranked)
-                        ranked = [(i, s * rows[i]["weight"]) for i, s in fused]
+                        # 三元组 (候选下标, 加权分, **裸分**)：裸分必须一路带出来 ——
+                        # 相关性地板只能按裸分判（加权分被章节权重乘过 1.0–1.5，量纲会错位）
+                        ranked = [(i, s * rows[i]["weight"], s) for i, s in fused]
                 except Exception as e:
                     mode_used = "keyword"
                     ranked = kw_ranked
@@ -2679,6 +2701,8 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                 mode_used = "keyword"
                 ranked, best_term, _ = keyword_ranking(rows, query)
                 note += _err2 + "，降级为纯关键词；"
+            else:
+                ranked = [(i, s, s) for i, s in v_ranked]     # 纯向量路：裸分 = 余弦
         except Exception as e:
             mode_used = "keyword"
             ranked, best_term, _ = keyword_ranking(rows, query)
@@ -2686,18 +2710,47 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     else:
         return {"ok": False, "error": f"unknown mode: {mode_used}"}
 
+    # 统一成三元组 (候选下标, 加权分, 裸分)：纯关键词路（含各种降级）的分本身就是裸分，
+    # 三种路都必须带裸分，后面才能用同一条"相关性地板"判定。
+    ranked = [(t[0], t[1], t[1]) if len(t) == 2 else t for t in ranked]
+
     # stage 2: rerank the fused pool with a stronger local scorer
     reranker_used = None
     if rerank_flag and len(ranked) > top_k:
         try:
-            pool = ranked[:max(20, top_k * 5)]
-            cand_idx = [i for i, _s in pool]
+            pool = ranked[:max(KB_RERANK_POOL, top_k * 5)]
+            cand_idx = [t[0] for t in pool]
             texts = [rows[i]["text"] for i in cand_idx]
             rscores, reranker_used = rerank(query, texts)
             reranked = sorted(zip(cand_idx, rscores), key=lambda x: x[1], reverse=True)
-            ranked = [(i, s * rows[i]["weight"]) for i, s in reranked]
+            # 精排分是**裸分**（cross-encoder 输出），加权分照旧给排序/展示用
+            ranked = [(i, s * rows[i]["weight"], s) for i, s in reranked]
         except Exception as e:
             note += f"精排不可用({str(e)[:100]})；"
+
+    # ── 相关性地板（verdict）：只有精排分能干净分离库内/库外 ─────────────────────
+    # 实测（本机 316 篇真实库，12 个库内问题 vs 8 个库外问题）：
+    #   裸精排分：库内 min 0.685 / 中位 0.996 ｜ 库外 max 0.072 / 中位 0.020 → 空隙巨大
+    #   最高余弦：库内 min 0.691 ｜ 库外 max 0.688 → **基本重叠**，任何余弦阈值都在刀尖上，
+    #             所以纯向量/纯关键词路不做"无关"判定（verdict=null），只给分数让人判断。
+    raw_best = max((t[2] for t in ranked), default=None)
+    floor = KB_MIN_RERANK if reranker_used else None
+    verdict = None
+    no_hit = False
+    if floor is not None and raw_best is not None:
+        if raw_best < floor:
+            verdict, no_hit = "无关", True
+        elif raw_best < KB_MIN_RERANK_WEAK:
+            verdict = "弱相关"
+        else:
+            verdict = "相关"
+        note += "精排最高分 %.3f（地板 %.2f）；" % (raw_best, floor)
+    closest = [{"title": rows[t[0]]["title"], "year": rows[t[0]]["year"],
+                "section": rows[t[0]]["section"], "score": round(t[1], 4)}
+               for t in ranked[:5]] if ranked else []
+    if no_hit:
+        # 无命中时给"最接近的 5 篇"：把"没有"变成可转述的信息，避免 agent 换词穷举
+        note += "库内无相关资料；"
 
     results = []
     seed_doc_ids = []
@@ -2705,7 +2758,7 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
     seen_docs = set()
     seen_dois = set()      # 同一论文的不同 PDF 版本（内容不同 → sha256 去重不合并）
     dup_collapsed = 0
-    for i, score in ranked:
+    for i, score, _raw in ([] if no_hit else ranked):
         r = rows[i]
         if r["doc_id"] in seen_docs:
             continue  # 结果层去重：同一篇只保留最高分的一块，避免 Top-K 被同一篇占据
@@ -2762,6 +2815,11 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
             "device": device_report(),
             # 折叠掉的同论文副本数（渲染层可提示，便于用户知道库里存在多份副本）
             "dup_collapsed": dup_collapsed,
+            # 相关性地板与结论：verdict='无关' + no_hit=true 时 results 为空、closest 给出
+            # "最接近的 5 篇"。让"库里没有"成为不可误读的信号，而不是返回 Top-3 垃圾。
+            "verdict": verdict, "no_hit": no_hit, "max_score": round(raw_best, 4) if raw_best is not None else None,
+            "floor": floor, "floor_weak": KB_MIN_RERANK_WEAK if floor is not None else None,
+            "closest": closest,
             "note": (note + f"命中 {len(ranked)} 块，返回 Top-{len(results)}") if len(ranked) else (note or "无命中"),
             "cached": False,
             "ms": round((time.time() - t0) * 1000)}
@@ -2781,7 +2839,10 @@ def _search_core(db, query, top_k, snippet_w, filters, mode, use_cache, rerank_f
                 "库内正文以英文为主（抽样中文占比约 %.1f%%），本次已按原样检索：BM25 关键词路"
                 "基本空转，命中主要由向量侧跨语言匹配决定。建议改用英文术语重查，"
                 "或用 depth=deep 深查。" % (share * 100))
-    if use_cache and cache_key is not None and results:
+    # 无命中/弱命中也入缓存：否则 agent 换词重试时每次都要重跑一遍同样的空结果。
+    # 索引或元数据变化时 cmd_ingest 会 DELETE FROM cache，key 又含解析器/引擎 token，
+    # 所以"负结果"不会陈旧。
+    if use_cache and cache_key is not None:
         try:
             db.execute("INSERT OR REPLACE INTO cache(key, payload, created) VALUES(?,?,?)",
                        (cache_key, json.dumps(resp, ensure_ascii=True), time.time()))
