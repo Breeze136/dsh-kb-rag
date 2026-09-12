@@ -69,6 +69,32 @@ export const DEFAULTS_NOTE = [
   '默认：深度=quick（亚秒级）。需要跨文献综合/精排时显式传 depth=deep（每次多约 1.9 s）。',
 ].join('\n');
 
+/** 深挖模式（用户明确要求"彻底查"时）：解除调用上限，改成"补库 → 再查"的循环。
+ *  触发方式：用户明说"仔细找/慢慢来/别省时间/把相关文献都找齐/穷尽"，或用 /kb thorough /
+ *  kb_scope(diligence="thorough")。这一块的目的是：**不要为了省一次调用，把困难问题答成
+ *  "库里没有"**。 */
+export const THOROUGH_LOOP = [
+  '**深挖模式已开启**（用户明确要求彻底查找；调用次数不设上限，优先把事情查透）：',
+  '1. 逐术语、逐角度检索：同一问题可以换多组英文术语、放宽或更换 filters，直到覆盖主题各个侧面。',
+  '2. 库内只有一两篇相关文献时，**不要把"就这么点"当成结论**：从结果的 citations 里取 DOI，',
+  '   用 kb_fetch({ identifiers: [doi], ingest: true }) 下载并**直接入库**，再对新增文献继续检索。',
+  '3. 循引文与 related 横向展开：新入库的文献再查一次引文关联，把它们的参考文献也纳入候选。',
+  '4. 每轮把「新增了什么 / 还缺什么」简短告诉用户，直到收敛（没有新文献、没有新结论）或用户喊停。',
+  '5. 增量入库按 sha256 自动跳过已入库文件，重复调用安全；大批量会自动转后台，用 kb_status 轮询。',
+  '6. 只有在**确实把所有角度都检索完**之后，才可以说"库内无相关资料"。',
+].join('\n');
+
+/** 描述层文本按纪律分派：默认档给纪律，深挖档给循环。
+ *  注意：工具描述是**注册时定死**的（不随会话变化），所以两种档都要在描述里交代清楚，
+ *  否则深挖模式下的描述还在说"最多 3 次"，与运行期行为自相矛盾。 */
+export function disciplineText(diligence) {
+  const pointer = '注：用户明确要求彻底查找时（"仔细找/慢慢来/别省时间/把相关文献都找齐"），'
+    + '先 kb_scope({ diligence: "thorough" })（或让用户用 /kb thorough）——该模式下上述调用上限解除，'
+    + '改为「反复检索 → kb_fetch(ingest=true) 补库 → 引文关联 → 增量入库 → 再查」的循环。';
+  if (diligence === 'thorough') return THOROUGH_LOOP + '\n' + DEFAULTS_NOTE;
+  return SEARCH_DISCIPLINE + '\n' + DEFAULTS_NOTE + '\n' + pointer;
+}
+
 // ---------------------------------------------------------------- 规则表
 
 export const POLICIES = [
@@ -78,14 +104,15 @@ export const POLICIES = [
     seat: 'description',
     tools: ['kb_search', 'kb_rag'],
     when: () => true,
-    text: () => SEARCH_DISCIPLINE + '\n' + DEFAULTS_NOTE,
-    doc: '限制 agent 的检索轮次并教它按用户意图选范围/深度（治"来回找"）',
+    text: (_resp, ctx) => disciplineText(ctx && ctx.diligence),
+    doc: '限制 agent 的检索轮次并教它按用户意图选范围/深度（治"来回找"）；深挖模式换成补库循环',
   },
 
   // —— ② 结果层：条件触发，其中 tellUser 的那些要能被用户看到
   {
     id: 'no-hit',
     seat: 'result',
+    stopRule: true,          // 深挖模式下不适用（用户要求"查透"，不该在这里叫停）
     when: (resp) => isEmptyResult(resp),
     text: (resp) => {
       const s = maxScore(resp);
@@ -95,15 +122,33 @@ export const POLICIES = [
     tellUser: true,
     userText: () => '库内没有找到相关资料 —— 你可以用 /kb both 开启联网兜底，或 /kb web 直接联网快答。',
     throttle: { maxPerSession: 2 },
-    doc: '把"没有"变成不可误读的信号，并给用户一条可执行的出口（当前靠分数阈值近似，引擎 verdict 落地后自动更准）',
+    doc: '把"没有"变成不可误读的信号，并给用户一条可执行的出口（引擎 verdict=无关 时最准）',
+  },
+  {
+    id: 'no-hit-thorough',
+    seat: 'result',
+    thoroughOnly: true,      // 只在深挖模式生效：把"没有"转成"下一步补库"
+    when: (resp) => isEmptyResult(resp),
+    text: (resp) => {
+      const close = Array.isArray(resp && resp.closest) ? resp.closest : [];
+      const hint = close.length > 0
+        ? '库内最接近的是「' + String(close[0].title || '').slice(0, 40) + '」，可据其主题/作者再试一组术语。'
+        : '';
+      return '深挖模式：本轮没命中，**不要收尾**。下一步按顺序做：① 换术语或放宽 filters 再检索；'
+        + '② 从已命中结果的 citations 里取 DOI，用 kb_fetch({ identifiers: [doi], ingest: true }) 补库后重查；'
+        + '③ 用 related 列表横向扩展。' + hint;
+    },
+    throttle: { maxPerSession: 3 },
+    doc: '深挖模式下把"无命中"变成"继续补库"的动作指令（用户明确要求查透时用）',
   },
   {
     id: 'weak-hit',
     seat: 'result',
+    stopRule: true,
     when: (resp) => isWeakResult(resp),
     text: () => '提示：本次结果相关性偏弱。最多再升一次 depth=deep；仍弱则按"库内无资料"处理，不要连环换词。',
     throttle: { maxPerSession: 2 },
-    doc: '弱命中时给一次明确的升级机会，避免 agent 自由发挥式重试',
+    doc: '弱命中时给一次明确的升级机会，避免 agent 自由发挥式重试（深挖模式不设限）',
   },
   {
     id: 'degraded-vectors',
@@ -186,16 +231,21 @@ export function guidedDescription(toolName, description) {
  * @param {object} [state] 节流状态适配器（见 makeThrottle）
  * @returns {{lines: string[], userHints: string[], fired: string[]}}
  */
-export function resultNotes(toolName, resp, state) {
+export function resultNotes(toolName, resp, state, ctx) {
   const lines = [];
   const userHints = [];
   const fired = [];
+  const thorough = Boolean(ctx && ctx.diligence === 'thorough');
   for (const p of POLICIES) {
     if (p.seat !== 'result') continue;
     if (p.tools && p.tools.indexOf(toolName) < 0) continue;
+    // 纪律分档：深挖模式下**不适用**"叫停类"规则（用户明确要求查透），
+    // 只保留 thoroughOnly 的补库指引；默认档反之（不出现深挖指引，避免无谓地催着补库）。
+    if (thorough && p.stopRule) continue;
+    if (!thorough && p.thoroughOnly) continue;
     let hit = false;
     try {
-      hit = typeof p.when === 'function' ? p.when(resp, { tool: toolName }) === true : false;
+      hit = typeof p.when === 'function' ? p.when(resp, { tool: toolName, diligence: thorough ? 'thorough' : 'normal' }) === true : false;
     } catch (e) {
       hit = false;   // 规则本身出错绝不能影响检索结果
     }
