@@ -64,6 +64,16 @@
 - **深挖模式**：用户明确要求"仔细找/慢慢来/别省时间/把相关文献都找齐"时用 `kb_scope(diligence="thorough")` 或 `/kb thorough` —— 解除"≤3 次调用、无命中即停"的省成本纪律，改为「反复检索 → `kb_fetch(ingest=true)` 补库 → 引文关联 → 增量入库 → 再查」的循环；结果层的"叫停类"规则在该模式下自动让位给"下一步补库"的动作指令。配套：`kb_fetch` 新增 `ingest=true`（下载即入库），citations 条目新增 `doi` 字段（可直接据此补库）。
 - `userQuestions` 改为**调用时**惰性读取（apply 期一次性捕获会在服务未注册时静默跳过所有询问）；**不写进 `inject`** —— 可选服务未注册会让插件永远 park。
 
+### 修复：动态插件半边（`plugin/host.js`）与静态半边对齐
+
+- 上一节的会话级状态 / `/kb` 命令 / 三档关闭 / 深挖模式此前**只落在 npm 包那一半**：动态插件侧仍是闭包里的单份 `scopePref/scopeDepth/scopeStrict`（第二会话起不再询问、改动污染全 app），没有 `/kb`，也没有 `diligence`。本次把两者对齐：会话级状态（含 `askedAt`/`netAsked`）、工作区默认值 `state.json` 读写、`/kb`（`status`/`kb|both|web`/`quick|deep`/`strict on|off`/`thorough|normal`/`off [hard|search]`/`on`/`save`/`policy`）、软/硬/半关闭与 `/kb on` 重新注册、`kb_scope` 的 `diligence`/`save`、`kb_fetch` 的 `ingest=true`、`presentationMeta`（来源卡片元数据）与 `presentCall`。
+- 描述层与结果层改用镜像块：`plugin/host.js` 现在通过内嵌的 `KBG`（`tools/sync-host-guidance.mjs` 从 `npm-package/lib/guidance.js` 生成，`--check` 防漂移）调用 `guidedDescription` 与 `resultNotes`，删掉了宿主侧手写的 `kbResultNotes` 分支。两个半边的 10 个工具现在**逐字段一致**（描述、参数 JSON Schema、输出 schema、`timeoutMs`、呈现器）。
+- **修掉一个只在动态半边出现的真 bug**：沙箱对工具 `execute` 的返回值做 lossless-JSON 校验，`undefined` 字段会直接报错 —— `kb_scope` 返回 `strict_note: undefined`（strict 关闭时的默认路径）因此**每次调用都失败**（`Error: … strict_note must be lossless JSON data …`）。现在返回前剔除 `undefined` 字段。静态半边不受此约束，但响应形状保持一致。
+- **另一条沙箱约束（对齐时踩到、已加回归）**：动态半边的 `harness.registerTool` 只接受 `harness.defineTool` 返回的**同一个对象**（上面有个不可枚举的 Symbol 标记）—— 照搬静态半边那样 `Object.assign({}, spec, …)` 包一层 `execute` 会丢标记，注册时报 `dynamic tool registration must use a tool returned by harness.defineTool(...)`，后果是 10 个工具全不注册。动态半边改为**原地替换 `execute`**，并在包装函数上记住原始实现，`/kb on` 反复重注册也不会层层套娃。
+- 顺手修掉 `kb_rag` 描述里两处引号与静态半边不一致（`"…"` → `「…」`），这是两半唯一的描述差异。
+- 新增 node suite `host_half`：以函数体方式加载 `plugin/host.js`、harness 用真实 `sandboxDefineTool`（因此会真正校验 schema / 渲染块 / JSON 可克隆），覆盖 inject 不得含可选服务、10 个工具、描述与结果注入、`/kb` 三档关闭与会话隔离、深挖分档、`commands` 服务缺失兜底，并逐字段比对两半的工具定义。
+- **客户端半边同样对齐**：`plugin/client.js` 此前只有"解析结果文本里的链接"这一条路，既读不到宿主刚补上的 `presentationMeta`（结构化 sources/verdict/closest），也没有无命中理由、弱相关提示与会话栏指示条。现在两个客户端半边跑同一套渲染逻辑（结构化 meta 优先 + 文本退回、作者/年份/章节、无命中理由与最接近的几篇、`/kb` 指示条），并声明 `inject: ['slots']`；`client_half` 套件把同一组断言对两个半边各跑一遍，并逐条比对两半的中文文案集合。
+
 ### 修复：filters 归一化
 
 - `title/authors/journal` 两侧同时归一（连字符/下划线/连续空格 → 单空格、小写）。实测现场：`Electric-field control of local ferromagnetism` 用空格写法查过 3 遍（含 2 次零命中）。
@@ -157,9 +167,9 @@ References 判定重做后必须复核**引文关联**是否还准 —— 即"�
   命中率 **79.8%**、失效 13 篇。正文被吞的代价改由"整篇不可检索兜底"承担。
 
 ### 未做 / 待验证（诚实记录）
-- **客户端半边需在真实 Web GUI 里确认**：官方没有给出第三方包手写该 bundle 的公开规范（是否接受手写、`require("react")` 的外部化规则）。加载失败不影响核心功能（工具与 markdown 来源链接由宿主渲染）。
+- **客户端半边需在真实 Web GUI 里确认**：官方没有给出第三方包手写该 bundle 的公开规范（是否接受手写、`require("react")` 的外部化规则）。加载失败不影响核心功能（工具与 markdown 来源链接由宿主渲染）。两个半边（npm bundle 与动态插件函数体）现在都已覆盖同一组渲染断言，但"在 GUI 里真的被 materialize"仍需人工看一眼。
 - **十万块级的索引化改造未做**：`_search_core` 仍是 O(库规模) 扫描（已加 `scan` 观测与提示）；方案（FTS5 / 倒排 + 向量分级）记在 `docs/BACKLOG.md`。
-- **动态插件半边的会话级状态未对齐**：`/kb`、三档关闭、深挖模式目前只在静态插件（npm 包）实现；动态半边已同步提示文本与结果层规则。
+（"动态插件半边的会话级状态未对齐"已于本轮修复，见上面的"动态插件半边与静态半边对齐"。）
 
 ## [1.6.6] - 元数据刷新通道 + 陈旧数据检测 + 入库进度可见 + 检索语言归 AI 层
 

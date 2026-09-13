@@ -7,7 +7,7 @@
 //   2) 提供 stub ctx（tools/commands/effect/get/timeout）与 report()，把断言按约定格式输出。
 import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -47,24 +47,66 @@ export function preparePkg(sandbox) {
   return { dir: pkgDir, toolsMode: 'stub' };
 }
 
-/** stub ctx：记录注册的工具/命令，disposer 真正从注册表移除（重新注册要能恢复）。 */
-export function makeCtx() {
+/** stub ctx：记录注册的工具/命令，disposer 真正从注册表移除（重新注册要能恢复）。
+ *  commands 同时挂在 ctx.commands（静态半边读属性）与 ctx.get('commands')（动态半边走可选查询）；
+ *  opts.commands === false 时两处都没有（测"可选服务缺失"的兜底路径）。 */
+export function makeCtx(opts = {}) {
   const registered = [];
   const commands = [];
+  const registry = opts.commands === false ? undefined : { register(c) { commands.push(c); return () => {}; } };
   const services = {
     subprocess: { resolveExecutable: async () => 'python', spawn() { throw new Error('stub: no engine'); } },
     sandboxPolicy: {},
+    commands: registry,
   };
   const ctx = {
     get: (n) => services[n],
     timeout: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 5))),
     tools: { register(t) { registered.push(t); return () => { const i = registered.indexOf(t); if (i >= 0) registered.splice(i, 1); }; } },
-    commands: { register(c) { commands.push(c); return () => {}; } },
+    commands: registry,
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {}; },
     on() {},
     logger: console,
   };
   return { ctx, registered, commands };
+}
+
+const HOST_RUNNER_GUARD = [
+  process.env.DSH_HOST_RUNNER_GUARD,
+  join(process.env.APPDATA || '', 'npm/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-cordis-host-runner/lib/types/guard.js'),
+  join(process.env.APPDATA || '', 'dsh-desktop/harness/profiles/node_modules/@deepseek-ai/dsh-cordis-host-runner/lib/types/guard.js'),
+].filter(Boolean);
+
+/** 动态半边用的 harness：
+ *  能拿到 DSH 的 sandboxDefineTool / sandboxRegisterTool 就用真货（会真正校验 schema、
+ *  渲染块、execute 返回值的 JSON 可克隆性，以及"工具必须是 harness.defineTool 的返回值"），
+ *  否则退回"原样返回"的 stub —— 测试不依赖本机是否装了 DSH。
+ *  返回 { defineTool, registerTool, mode, tried }。 */
+export async function hostHarness() {
+  const tried = [];
+  for (const p of HOST_RUNNER_GUARD) {
+    if (!existsSync(p)) { tried.push(p + ' :: 不存在'); continue; }
+    try {
+      const m = await import(pathToFileURL(p).href);
+      if (typeof m.sandboxDefineTool === 'function' && typeof m.sandboxRegisterTool === 'function') {
+        return {
+          defineTool: (opts) => m.sandboxDefineTool(opts),
+          registerTool: (ctx, tool) => m.sandboxRegisterTool(ctx, tool),
+          mode: 'real:' + p,
+          tried,
+        };
+      }
+      tried.push(p + ' :: 未导出 sandboxDefineTool/sandboxRegisterTool');
+    } catch (e) { tried.push(p + ' :: 导入失败 ' + String((e && e.message) || e)); }
+  }
+  return { defineTool: (spec) => spec, registerTool: (ctx, tool) => ctx.tools.register(tool), mode: 'stub', tried };
+}
+
+/** 把 plugin/host.js 当函数体求值：沙箱里 harness 是全局注入的，这里用形参替代。
+ *  返回插件对象（{ name, inject, apply }）。 */
+export async function loadHostPlugin(harness) {
+  const body = readFileSync(join(REPO, 'plugin', 'host.js'), 'utf8');
+  return new Function('harness', body)(harness);
 }
 
 /** 收集断言并按约定输出结果行。 */
