@@ -54,8 +54,9 @@ python tests/run.py --json out.json
 | `engine_loop` | 模型 | 入库 → 删向量 → `skipped` 回填 → `duplicate` 也回填 → stats/health → `reload` → `metadata_only` → `state` 读写与非法键 → `clear` 需 confirm |
 | `search` | 模型 | filters 归一化（连字符/空格/大小写/作者分词 AND/年份）、相关性地板（库内 verdict=相关 / 库外 no_hit+closest / quick 不硬判）、负结果入缓存、语料缓存命中与**条数上限**、元数据改写后不得返回旧值、**跨进程写入**必须失效 |
 | `plugin_harness` | node | stub ctx 加载插件：inject、10 个工具、描述注入、四个渲染器、`/kb` 状态卡与会话隔离、软/硬/半关闭与重新注册、深挖模式分档 |
+| `host_half` | node | **动态半边**（`plugin/host.js` 按函数体求值，harness 用真实 `sandboxDefineTool`，会校验 schema/渲染块/JSON 可克隆）：inject 不得含可选服务、10 个工具、镜像描述注入、`withNotes` 结果注入（no-hit/降级/已关闭/深挖分档）、`/kb` 三档关闭与会话隔离、`commands` 缺失兜底，以及**两半 10 个工具逐字段一致**（描述/参数/输出 schema/timeoutMs/呈现器） |
 | `guidance` | node | 9 条规则 × 7 种响应形状、深挖分档、节流（每会话 2 次）、会话一次性提示、描述注入、规则都要限定工具 |
-| `client_half` | node | npm 客户端半边：bundle 协议、插槽注册、结构化 meta 与文本退回两条渲染路径、无命中文案、运行中/出错/空 props |
+| `client_half` | node | 两个客户端半边（npm bundle 与动态插件函数体）**各跑同一组断言**：bundle 协议、插槽注册、结构化 meta 与文本退回两条渲染路径、无命中理由/弱相关/指示条、空 props，并比对两半的实现片段与中文文案集合 |
 | `refs_real`（slow） | 真实库 | 全库重新切块：整篇不可检索必须 0、weight=0 占比与"被吞 >50%"不超基线 |
 | `cites_real`（slow） | 真实库 | 引文关联命中率不低于基线 −0.5pp、条目总数 ≥ 基线 97%、解析不出条目的文档数不增加、相对基线实现有提升 |
 

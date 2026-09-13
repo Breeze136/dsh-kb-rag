@@ -112,18 +112,23 @@ query → filters SQL 预过滤（authors/title/journal/kind/section/year）+ �
 
 ## 9. 插件架构（DSH 双端）
 
-### Host 半（plugin/host.js）
+两个半边（npm 静态包 `lib/index.js`、动态插件 `plugin/host.js`）**功能对齐**：同一套会话级状态、同一套提示规则（描述层/结果层由 `lib/guidance.js` 生成，动态半边用镜像块内嵌并由 `tools/sync-host-guidance.mjs --check` 防漂移）、10 个工具定义逐字段一致，`tests/suites/s_host_half.mjs` 对此做回归。
+
+### Host 半（plugin/host.js、npm-package/lib/index.js）
 
 - **守护进程**：`kb_engine.py serve`，JSON 行协议（`{id,command,payload}` → `{id,ok,response|error}`），stdin pipe + stdout collect(offset 读取)，串行请求队列，崩溃自愈，工作区切换自动重启，插件停止 terminate
 - **工具**：10 个（`kb_ingest` / `kb_status` / `kb_zotero` / `kb_search` / `kb_rag` / `kb_scope` / `kb_dedup` / `kb_clear` / `kb_stats` / `kb_fetch`，见 README），长任务（ingest/zotero）超时 30min，支持 exec.signal 取消
 - **后台任务与陈旧数据**：`kb_status` 轮询后台入库任务（running 返回进度，done 返回 totals 与最近文件）；`kb_stats` 返回 `stale_docs > 0` 时，插件在该会话首次检索时询问一次处理方式（暂不处理 / 仅刷新元数据 / 全量重灌）
-- **范围/深度/严格模式**：内存偏好（scope：kb/both/web；depth：quick/deep；strict），首次检索经 userQuestions.ask 弹出范围与检索深度两个问题（120s 竞速，默认 kb / deep）
-- **RPC**：`kb-open-file` — Client 打开原文回退通道（系统默认程序打开）
-- **输出渲染**：来源列表 Markdown（DOI 链接内联、`§章节 · p.N` 页码锚点、`[Ref n]` 引文行与「关联文献」区块；无 DOI 显示文件名），卡片兼容解析
+- **会话级状态**：`scope / depth / strict / enabled / diligence` 按会话隔离（会话键取 `exec.agent.id`），首次检索经 `userQuestions.ask` 询问范围/深度（120s 竞速，默认 kb / deep）；工作区默认值存 `<工作区>/.kb-rag/state.json`（引擎 `state` 命令代读写），只有 `/kb save` 或 `kb_scope(save=true)` 才落盘
+- **`/kb` 命令**（direct UI handler，不进模型）：`status` / `kb|both|web` / `quick|deep` / `strict on|off` / `thorough|normal` / `off [soft|hard|search]` / `on` / `save` / `policy`；三档关闭 = 软关闭（工具在、调用即返回 `kb_rag_disabled`）/ 硬关闭（运行时撤销注册）/ 半关闭（只撤 `kb_search`+`kb_rag`）
+- **输出渲染**：来源列表 Markdown（DOI 链接内联、`§章节 · p.N` 页码锚点、`[Ref n]` 引文行与「关联文献」区块；无 DOI 显示文件名）；结果层提示（无命中 / 弱相关 / 向量降级 / 已关闭 / 深挖补库指引）由 `withNotes` 追加，`undefined` 字段在动态半边返回前剔除（沙箱要求 lossless JSON）
+- **结构化元数据**：`output.presentationMeta` 投影 `sources / verdict / closest` 供客户端卡片使用；`presentCall` 给调用卡片一个标题
 
-### Client 半（plugin/client.js）
+### Client 半（plugin/client.js、npm-package/lib/client.js）
 
-- 注册 `tool.call.toolview`（key=kb_rag/kb_search）来源卡片；不渲染的界面自动降级为 Host 输出的 markdown 文本
+- 注册 `tool.call.toolview`（key=kb_rag/kb_search）来源卡片，优先读宿主的 `presentationMeta`（结构化来源、无命中理由与"最接近的几篇"、弱相关提示），没有就退回解析结果文本里的 markdown 链接；另注册会话栏指示条（`conversation.session.header.actions`）
+- 两个半边的实现一致，差别只在模块形态：npm 侧是 lazy-CJS bundle（`window.__ModuleLoader__.load`），动态侧是函数体（`React` 由沙箱作为闭包符号注入，`inject: ['slots']`）
+- 不渲染卡片视图的界面自动降级为 Host 输出的 markdown 文本（核心可点击来源始终由宿主渲染）
 
 ## 10. 引擎进程协议（kb_engine.py）
 
