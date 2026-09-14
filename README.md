@@ -225,8 +225,22 @@ kb_engine.py -- resident `serve` daemon (models load once)
 | Query latency | 0.4–1.3 s warm at 20k chunks including reranking; **~16 ms** in `quick` mode |
 | Library size | 209 documents, 19,832 chunks, 19,832 vectors in a single SQLite file |
 | Citation parsing | Across 11 publisher PDFs: a Wiley review 0 to 399 entries, a Nature letter 8 to 37, a Science paper 0 to 29 — strictly additive |
+| Full re-index (GPU) | 316 PDFs / 23.5k chunks / 20.1k vectors rebuilt in **219 s** on an 8 GB consumer GPU, zero errors |
+| Embedding throughput | **164 chunks/s on GPU** vs **37 chunks/s on CPU** (~4.4×); flat from batch 32 to 256, so CPU-side tokenisation — not the GPU — is the limiting factor |
 
-Measured on Windows with CPU inference. Methodology and design rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
+Measured on Windows; the first four rows were taken with CPU inference. Methodology and design rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
+
+### Device handling (GPU / CPU)
+
+Ingestion and search share one embedding model, and a CUDA build of torch is picked up automatically — no configuration needed (`KB_DEVICE=auto`, the default):
+
+- **The device is probed before the first model load** with a tiny matmul. A driver that merely *reports* a GPU is not enough — version mismatches, containers and exclusive-compute mode all fail at the first kernel — so the probe catches them up front and falls back to CPU with a readable reason instead of failing later during model loading. `KB_GPU_PROBE=0` skips the probe.
+- **Device failures during a call degrade instead of aborting it**: the batch is halved, then cut to 4, then the model moves to CPU and the call still finishes. The batch size that worked is remembered for the rest of the process. Non-device errors (a missing file, a bad model directory) are raised unchanged — the fallback never hides a real problem.
+- **`reload` re-arms the GPU**: after fixing a driver or installing a CUDA build of torch, `reload` resets the device verdict, and `drop_models=true` reloads the models onto the GPU — no need to restart the host.
+- **Batch sizes follow the device and the free VRAM** (tiered below 8 GB); raising them does not speed up small models. `KB_EMBED_BATCH` / `KB_RERANK_BATCH` override the defaults.
+- **CPU-only is about 4× slower on the embedding step.** PDF text extraction (PyMuPDF), chunking, reference judging and BM25 are CPU-bound either way, so a faster CPU also shortens ingestion.
+
+`kb_stats` reports the outcome — `device: {requested: auto, probe: ok, cuda_available: true, gpu: …, vram_gb: 8.0, embed_device: cuda:0, rerank_device: cuda:0, batch: {…}}` — plus `gpu_disabled_reason` and `note` whenever a fallback happened.
 
 ## Documentation
 

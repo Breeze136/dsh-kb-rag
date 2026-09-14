@@ -225,8 +225,22 @@ kb_engine.py -- resident `serve` daemon (models load once)
 | 查询延迟 | 2 万 chunk 规模下暖态含重排为 0.4–1.3 s；`quick` 模式为 **~16 ms** |
 | 文库规模 | 单个 SQLite 文件中的 209 篇文档、19,832 个 chunk、19,832 个向量 |
 | 引用解析 | 11 份出版商 PDF：一份 Wiley 综述从 0 到 399 条，一封 Nature 快报从 8 到 37 条，一篇 Science 论文从 0 到 29 条——严格递增 |
+| 全量重灌（GPU） | 316 篇 PDF / 2.35 万 chunk / 2.01 万向量，**219 秒**重建完成（8 GB 消费级显卡），0 错误 |
+| 嵌入吞吐 | **GPU 164 块/秒** vs **CPU 37 块/秒**（约 4.4×）；批大小 32–256 之间持平，可见瓶颈在 CPU 侧分词而非 GPU |
 
-以上数据在 Windows 上使用 CPU 推理测得。测量方法与设计依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。
+以上数据在 Windows 上测得，前四行为 CPU 推理下的数字。测量方法与设计依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。
+
+### 设备处理（GPU / CPU）
+
+入库与检索共用同一个嵌入模型，装了 CUDA 版 torch 即自动使用 GPU —— 无需任何配置（`KB_DEVICE=auto`，默认值）：
+
+- **首次加载模型前会先探测设备**（一个 8×8 矩阵乘）。驱动"报告有卡"并不等于能用 —— 版本不匹配、容器、独占计算模式都会在第一个内核上失败 —— 探测能提前发现并带着可读原因退回 CPU，而不是拖到加载模型时才失败。`KB_GPU_PROBE=0` 可跳过探测。
+- **调用中的设备故障是降级而非中断**：批大小折半 → 再缩到 4 → 最后把模型移到 CPU，该次调用照样跑完；跑通的批大小会被记住。**非设备故障**（文件缺失、模型目录不对）原样上抛 —— 兜底绝不掩盖真问题。
+- **`reload` 可重新启用 GPU**：修好驱动或装上 CUDA 版 torch 后，`reload` 会重置设备判定，`drop_models=true` 会把模型重新加载到 GPU —— 不必重启宿主。
+- **批大小跟着设备与可用显存走**（低于 8 GB 自动分档）；小模型上加大批大小没有收益。`KB_EMBED_BATCH` / `KB_RERANK_BATCH` 可覆盖默认值。
+- **纯 CPU 环境下嵌入约慢 4 倍**。PDF 文本抽取（PyMuPDF）、分块、References 判定与 BM25 都是 CPU 密集，所以更快的 CPU 同样能缩短入库时间。
+
+`kb_stats` 会如实报告结果：`device: {requested: auto, probe: ok, cuda_available: true, gpu: …, vram_gb: 8.0, embed_device: cuda:0, rerank_device: cuda:0, batch: {…}}`；一旦发生任何回退，还会带上 `gpu_disabled_reason` 与 `note`。
 
 ## 文档
 
