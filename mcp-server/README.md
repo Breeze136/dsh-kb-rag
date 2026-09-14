@@ -4,7 +4,9 @@
 
 与 DSH 插件共用同一个 `kb_engine.py` 引擎（常驻 serve daemon + JSON-lines 逐行协议；异步 job、schema v3 页码锚点、quick/deep 深度模式、引文关联等能力也都在引擎内实现）；MCP 侧只提供 `server.py` + `engine_client.py` 这一层 stdio 封装，模型也只下载/加载一份。
 
-**9 个工具**：`kb_ingest`（支持 async 后台）/ `kb_status`（后台任务轮询）/ `kb_zotero`（支持 `async_mode=true`）/ `kb_search`（默认 `depth=quick`）/ `kb_rag`（默认 `depth=deep`）/ `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch`。
+**10 个工具**：`kb_ingest`（支持 async 后台）/ `kb_status`（后台任务轮询）/ `kb_zotero`（支持 `async_mode=true`）/ `kb_search`（默认 `depth=quick`）/ `kb_rag`（默认 `depth=deep`）/ `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch` / `kb_mcp_status`（能力与隔离状态自检）。
+
+**功能隔离**：MCP 协议内没有承载面的能力（会话级范围、严格模式、联网兜底、GUI 卡片等）不注册工具、也不提供空壳参数；本机缺依赖/缺 Zotero/声明离线时对应工具**不注册**。被隔离的名字与原因由 `kb_mcp_status` 报告，可用 `KB_MCP_TOOLS` / `KB_MCP_EXCLUDE` 显式收窄。详见下面「功能隔离」一节。
 
 ## 与 DSH 插件的工具对照
 
@@ -14,7 +16,37 @@
 | `kb_status` | `kb_status` | 两侧同名同义：轮询后台任务（`running` 返回进度，`done` 返回 totals 与最近文件），配合 `kb_ingest` 的自动转后台与 `kb_zotero(async_mode=true)` |
 | 其余 8 个 | 同左 | 同一引擎、同一行为（`kb_ingest` / `kb_zotero` / `kb_search` / `kb_rag` / `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch`）|
 
-DSH 插件共 10 个工具（上表 8 个 + `kb_scope` + `kb_status`），MCP 版共 9 个：`kb_status` 两侧都有，只有 `kb_scope` 是 DSH 独有。
+DSH 插件共 10 个工具（上表 8 个 + `kb_scope` + `kb_status`），MCP 版共 10 个（上表 9 个 + `kb_mcp_status` 自检）：`kb_status` 两侧都有，`kb_scope` 是 DSH 独有，`kb_mcp_status` 是 MCP 独有。
+
+## 功能隔离（哪些能力在 MCP 侧不可用）
+
+隔离分两类，判定都在**注册期**完成：不可用的工具**根本不注册**，因此调用方看到的是"没有这个工具"，而不是一个必然报错的空壳。被隔离的名字与原因由 `kb_mcp_status` 列出。
+
+**① 结构性不可用** —— 与部署环境无关，MCP 协议内没有承载面（清单同时由 `availability.STRUCTURAL_GAPS` 维护，两侧不会漂移）：
+
+| 能力 | DSH 侧靠什么实现 | MCP 侧为什么给不了 |
+|---|---|---|
+| `kb_scope`（scope/depth/strict/diligence/save） | 工具 + 会话级状态 | MCP 无会话概念，一次调用即一次独立请求 |
+| `strict` 严格模式 | 宿主把约束注入模型提示 | MCP 只返回字符串，无法约束调用方模型的作答范围 |
+| `scope=both` / `web` 联网兜底 | 宿主编排 kb 检索与 web_search | MCP 服务不能调用宿主的 web 检索工具 |
+| `diligence=thorough` 深挖循环 | 宿主解除调用预算并引导多轮 | 循环由调用方决定，服务侧无法强制 |
+| 会话开场范围询问 / `state.json` 默认值 | 会话生命周期事件 + 状态文件 | 无会话事件，也无约定的状态文件位置 |
+| 三档关闭 + `/kb` 命令 | `commands` 服务注册的用户命令 | MCP 无人类命令通道；关停改用 `KB_MCP_EXCLUDE` |
+| 结果层提示规则 / 节流记账 | 按规则改写结果并记账 | MCP 结果只有一份文本，没有分层提示面 |
+| 来源卡片 / 会话指示条 | 客户端半边注册插槽 | MCP 无 UI |
+| 旧解析器数据询问 / 自动刷新 | 会话内检测分块版本并询问 | 只能由调用方显式传 `metadata_only` / `rebuild` |
+
+**② 环境性不可用** —— 本机能力不足时自动隔离，缺什么就隔离什么：
+
+| 缺失 | 被隔离的工具 | 修复 |
+|---|---|---|
+| 引擎文件（`kb_engine.py`）不存在 | 除 `kb_mcp_status` 外全部 | 确认 `mcp-server/` 与 `kb_engine.py` 的相对位置 |
+| 缺 PyMuPDF | `kb_ingest`、`kb_zotero` | `pip install 'PyMuPDF>=1.24'` |
+| 找不到 `zotero.sqlite` 且未设 `KB_MCP_ZOTERO_DB` | `kb_zotero` | 设 `KB_MCP_ZOTERO_DB`，或调用时传 `zotero_db` |
+| 声明离线（`KB_RAG_OFFLINE=1`） | `kb_fetch` | 取消该变量 |
+
+缺 `faiss` / `sentence-transformers` / `node` **不隔离工具**（引擎会退化：关键词检索、无向量、Python 下载通道），但会在 `kb_mcp_status` 的「能力缺口」里列出来。`KB_MCP_NO_PROBE=1` 可关闭环境探测，只按显式列表决定（引擎文件缺失除外——那是绝对条件）。
+
 
 ## 安装依赖
 
@@ -62,9 +94,15 @@ python "<本仓库路径>/mcp-server/server.py"
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `KB_RAG_ROOT` | `~/.kb-rag` | 知识库默认目录（各工具可用 `kb_root` 参数覆盖）|
+| `KB_RAG_ROOT` | `~/.kb-rag` | 知识库默认目录（各工具可用 `kb_root` 参数覆盖）。**注意**：DSH 插件半边的默认库在**工作区 `.kb/`**，两边默认并不是同一个库；共用同一个库请显式对齐 |
 | `KB_RAG_PYTHON` | 当前解释器 `sys.executable` | 引擎所用 Python 解释器（默认用拉起本服务的解释器；显式设置可指向装有依赖的其它环境）|
 | `KB_ASYNC_THRESHOLD` | `25` | `kb_ingest` 待处理文件数超过即自动转后台的阈值 |
+| `KB_MCP_TOOLS` | 无 | 工具**白名单**（逗号或空格分隔）：只注册列出的工具，其余隔离 |
+| `KB_MCP_EXCLUDE` | 无 | 工具**黑名单**：列出的工具不注册（MCP 侧取代 DSH 的 `/kb off`）|
+| `KB_MCP_NO_PROBE` | 无 | `=1` 时跳过环境能力探测，只按上面两个列表决定（引擎文件缺失仍会隔离）|
+| `KB_MCP_ZOTERO_DB` | 无 | 显式指定 `zotero.sqlite` 路径；未设时自动探测常见位置，探测不到即隔离 `kb_zotero` |
+| `KB_RAG_OFFLINE` | 无 | `=1` 声明离线：隔离 `kb_fetch` |
+| `KB_RAG_NET_ENV` | 无 | 网络环境声明（如 `campus` / `home`），随 `kb_fetch` 传给引擎；未设即 `unknown` |
 | `HF_ENDPOINT` | 无 | 模型镜像（如 `https://hf-mirror.com`）；直连下载失败时引擎自动切 `https://hf-mirror.com` 重试 |
 | `UNPAYWALL_EMAIL` | 内置占位值 | `kb_fetch` 走到 Unpaywall 开放获取兜底时使用的联系邮箱 |
 
@@ -79,9 +117,9 @@ python "<本仓库路径>/mcp-server/server.py"
 ## 入库模式（`metadata_only` / `rebuild` / 陈旧数据）
 
 - **`metadata_only=true`**：只重新抽取标题/作者/年份/期刊/DOI 并写回 `docs` 的元数据字段，**不重切块、不重嵌入**（无需模型，实测约 90 ms/篇，312 篇约 30 s）。存在的理由：增量入库按 sha256 跳过未变更文件，所以引擎改进元数据抽取后老库不会自愈——这是那条秒级、可反复执行的刷新通道。文件内容已变的条目不动（标 `changed`），因为元数据必须与已入库的正文一致。
-- **`rebuild=true`**：按**库内自己记录的路径**原地重新解析全部已入库文档（`paths` 可省略，引擎直接取库内现有路径）。这是安全的全量重灌方式：传目录会因 `force` 跳过 duplicate 判定而把内容重复的文件重复入库。`paths` 省略时不触发自动转后台判定，会同步跑完整个库。
+- **`rebuild=true`**：按**库内自己记录的路径**原地重新解析全部已入库文档（`paths` 可省略，引擎直接取库内现有路径）。这是安全的全量重灌方式：传目录会因 `force` 跳过 duplicate 判定而把内容重复的文件重复入库。`paths` 已改为**可选**参数；`rebuild=true` 时本服务**强制后台执行**并立即返回 `job_id`（全量重灌必然超过宿主单次调用超时），用 `kb_status` 轮询到 `done`。
 - **陈旧数据**：每条文档记录入库时所用的解析器版本（`docs.indexed_with`，schema v4）；`kb_stats` 返回 `stale_docs` / `stale_sample` / `parser_rev` / `indexed_with`。`stale_docs > 0` 表示库内仍有旧解析器写入的文档，增量入库不会自愈，用上面的 `metadata_only` 或 `rebuild` 处理（DSH 插件会在该会话首次检索时询问一次处理方式）。
-- **批量阈值**：本服务按待处理文件数（只按扩展名统计）决定是否转后台，超过 `KB_ASYNC_THRESHOLD`（默认 25）时连同 `metadata_only` 刷新一起转后台并返回 `job_id`，用 `kb_status` 轮询；`rebuild=true` 通常不传 `paths`（路径取自库内），计数为 0，因此同步跑完。
+- **批量阈值**：本服务按待处理文件数（只按扩展名统计）决定是否转后台，超过 `KB_ASYNC_THRESHOLD`（默认 25）时连同 `metadata_only` 刷新一起转后台并返回 `job_id`，用 `kb_status` 轮询；`rebuild=true` 不参与阈值判定——它一律走后台。
 
 ## 用法
 
@@ -94,7 +132,8 @@ python "<本仓库路径>/mcp-server/server.py"
 ## 注意
 
 - MCP 无 UI，工具返回即纯文本（检索结果渲染成 markdown：来源 + `§章节 · p.N` 页码锚点 + DOI 链接；`deep` 模式另有 `↳ 引文补充` 的 `[Ref n]` 行与「关联文献」列表）
-- `kb_scope`（DSH 里的查询范围/严格模式）是 DSH 会话概念，MCP 版不含；严格性由调用方按来源自行把握
+- `kb_scope`（DSH 里的查询范围/严格模式）是 DSH 会话概念，MCP 版不含（见上面「功能隔离」）；严格性由调用方按来源自行把握。工具"不见了"先调 `kb_mcp_status` 看隔离原因
+- **默认库不是同一个库**：MCP 默认 `~/.kb-rag`，DSH 半边默认在工作区 `.kb/`。在 DSH 侧入库过的语料，MCP 侧要用 `kb_root` 指过去（或设 `KB_RAG_ROOT`）才看得见。`kb_mcp_status` 会报出**默认库的文档数**，并在检测到"当前工作目录下还有另一个库"时明确警告 —— 两个库都非空的情况最容易被忽略：读到的不是空结果，而是**另一批文献**
 - **深度模式由调用方传参**：引擎侧 `kb_search` 默认 `quick`（不精排、不渲染引文关联与关联文献）、`kb_rag` 默认 `deep`（全链路）；未传的 `top_k` / `snippet` / `rerank` / `related` 按 depth 取模式化缺省，显式传参永远优先
 - 并发：引擎是单守护进程，`engine_client` 用 `asyncio.Lock` 把引擎请求串行化（一次仅一个在途），宿主并发触发的工具调用会在锁上排队，不会并发冲击引擎
 - MCP 与 DSH 插件并行维护：共用引擎与文档，本目录单独演进
