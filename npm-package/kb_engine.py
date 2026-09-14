@@ -1564,8 +1564,8 @@ def _gpu_probe():
     实测能遇到的坑：驱动与 CUDA runtime 版本不匹配、容器/WSL 里设备可见但初始化失败、
     显卡被独占计算模式占用、cuDNN/cuBLAS 缺库。这些在 `is_available()==True` 时照样发生，
     若不先探，失败点会被推到"加载模型时"——代价更大、报错更难懂（三级加载链还会在 GPU 上
-    连撞几次）。这里用一个 8×8 矩阵乘 + synchronize 做最小可用性验证，失败即粘性关闭 GPU
-    并把原因写进报告。`KB_GPU_PROBE=0` 可跳过探测（极端环境下想强行试 GPU 时用）。
+    连撞几次）。这里用一个 8×8 矩阵乘 + `.item()`（会隐式同步）做最小可用性验证，失败即粘性
+    关闭 GPU 并把原因写进报告。`KB_GPU_PROBE=0` 可跳过探测（极端环境下想强行试 GPU 时用）。
 
     注意：探测本身会初始化 CUDA context（约 0.3–1 s），但这一步在"模型要上 GPU"时本来
     也要付；不加载模型、只体检（kb_stats）的路径不会碰它（见 device_report 的 torch 判断）。"""
@@ -1788,8 +1788,9 @@ def _set_device_note(tag, text):
 
 
 def _device_note_text():
+    # "probe" 也要带上：加载期回退与探测失败是两条不同的路径，用户看 note 时两条都该可见
     return "；".join("%s: %s" % (t, _DEVICE_NOTE[t])
-                     for t in ("embed", "rerank") if t in _DEVICE_NOTE) or None
+                     for t in ("probe", "embed", "rerank") if t in _DEVICE_NOTE) or None
 
 
 def _move_model_to_cpu(model):
