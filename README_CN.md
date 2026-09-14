@@ -249,6 +249,11 @@ kb_engine.py -- resident `serve` daemon (models load once)
 |---|---|---|---|
 | `KB_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 引擎 | 向量化模型；首次使用时下载到 Hugging Face 缓存 |
 | `KB_RERANK_MODEL` | `BAAI/bge-reranker-base` | 引擎 | 重排模型 |
+| `KB_DEVICE` | `auto` | 引擎 | `auto` = 只要 CUDA 版 torch 找得到可用设备就用 GPU；`cpu` / `cuda` / `cuda:1` / `mps` 可强制指定。任何设备故障都会自动回退 CPU |
+| `KB_GPU_PROBE` | `1` | 引擎 | `0` 跳过"这台设备到底能不能算"的一次性探测（一个 8×8 矩阵乘），直接进模型加载 —— 特殊环境下的逃生口 |
+| `KB_EMBED_BATCH` | GPU 128 / CPU 32（显存 <8 GB 自动分档） | 引擎 | 入库与检索的嵌入批大小。小模型上加大**没有收益** —— 实测 32–256 吞吐持平 |
+| `KB_RERANK_BATCH` | GPU 64 / CPU 16（显存 <8 GB 自动分档） | 引擎 | 精排批大小 |
+| `KB_MODEL_RETRY_SECS` | `120` | 引擎 | 模型加载失败后多久允许重试（`0` = 每次调用都重试，负数 = 不重试） |
 | `HF_ENDPOINT` | 无 | 引擎 | 在受限网络中设为 `https://hf-mirror.com` |
 | `KB_AUTO_PIP` | `0` | npm 包 | 设为 `1` 时在启动阶段安装缺失的 Python 依赖（固定 argv；默认仅打印命令）。动态插件宿主只报告，不安装 |
 | `KB_RAG_ROOT` | DSH：会话工作区 `.kb`；MCP：`~/.kb-rag` | MCP | 知识库目录；可用 `kb_root` 按次调用覆盖 |

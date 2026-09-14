@@ -171,6 +171,8 @@ pip install pymupdf faiss-cpu sentence-transformers
 ```
 
 The plugin **auto-checks these Python dependencies at startup** and reports the complete missing list.
+
+**GPU or CPU?** Both retrieval and ingestion use the same embedding model, and a CUDA build of torch is used automatically whenever a working GPU is present (`KB_DEVICE=auto`, the default — no configuration needed). On first use the engine runs a tiny probe on the device; if the device cannot actually compute, everything falls back to CPU and the reason is reported in `kb_stats.device`. Batch sizes follow the device and available VRAM (`KB_EMBED_BATCH` / `KB_RERANK_BATCH` override them), but raising them does **not** speed up small models — measured throughput is flat from 32 to 256. Expect CPU-only machines to be roughly 4× slower on the embedding step; PDF parsing is CPU-bound either way.
 By default it prints the module and the corresponding `pip install` command to the host log (it does
 not auto-install and does not block plugin loading). Set `KB_AUTO_PIP=1` to let it pip-install the
 missing packages itself (fixed argv, PyPI — or `PIP_INDEX_URL` if configured); if deps are missing
