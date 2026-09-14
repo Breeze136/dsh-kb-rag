@@ -6,16 +6,23 @@ real kb_engine.py without the `mcp` SDK installed. It spawns the engine's
 `serve` daemon and forwards tool calls over its JSON-lines protocol.
 """
 import asyncio
+import collections
 import json
 import os
 import sys
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent.parent / "kb_engine.py"
+#: 与 ENGINE 同一个对象，供调用方（server.py 的能力探测）表达"引擎是否存在"。
+ENGINE_PATH = ENGINE
 DEFAULT_KB_ROOT = os.environ.get("KB_RAG_ROOT", str(Path.home() / ".kb-rag"))
 # 默认用当前解释器（MCP 服务由哪个 Python 拉起就用哪个），避免裸 "python" 命中错误解释器；
 # 可用 KB_RAG_PYTHON 显式覆盖。
 PYTHON = os.environ.get("KB_RAG_PYTHON") or sys.executable
+
+#: stderr 尾部保留的块数与单次读取字节数：8×4KB 上限，足够容纳一个 traceback 的结尾。
+_STDERR_CHUNK = 4096
+_STDERR_KEEP = 8
 
 
 class EngineClient:
@@ -28,6 +35,28 @@ class EngineClient:
         self.lock = asyncio.Lock()
         self.seq = 0
         self._buf = b""
+        # 引擎 stderr 的尾部。之前是 DEVNULL —— 缺依赖时引擎会在启动瞬间死掉，
+        # 调用方只看到"exited unexpectedly"，没有任何可自诊断的信息。
+        self._stderr_tail = collections.deque(maxlen=_STDERR_KEEP)
+        self._stderr_task = None
+
+    async def _drain_stderr(self, proc):
+        """持续读走子进程 stderr（必须读，否则管道写满会把引擎阻塞住），只留尾部。"""
+        try:
+            while True:
+                chunk = await proc.stderr.read(_STDERR_CHUNK)
+                if not chunk:
+                    return
+                self._stderr_tail.append(chunk)
+        except Exception:                                         # noqa: BLE001
+            return
+
+    def stderr_tail(self, limit=2000):
+        """stderr 尾部的可读文本（最多 limit 字符）；没有内容时返回空串。"""
+        data = b"".join(self._stderr_tail)
+        if not data:
+            return ""
+        return data.decode("utf-8", errors="replace").strip()[-limit:]
 
     async def ensure(self):
         if self.proc is not None and self.proc.returncode is None:
@@ -36,10 +65,22 @@ class EngineClient:
             self.python, self.engine_path, "serve",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
+        self._stderr_tail.clear()
+        self._stderr_task = asyncio.ensure_future(self._drain_stderr(self.proc))
+
+    def _death_reason(self):
+        """引擎异常退出时的原因串：附 stderr 尾部，缺依赖这类问题能直接看出来。"""
+        tail = self.stderr_tail()
+        if not tail:
+            return ""
+        return "；引擎 stderr 尾部：%s" % tail
 
     async def _restart(self):
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            self._stderr_task = None
         if self.proc is not None:
             try:
                 self.proc.kill()
@@ -79,11 +120,13 @@ class EngineClient:
                 try:
                     line = await self._readline()
                 except Exception as e:
+                    reason = self._death_reason()
                     await self._restart()
-                    raise RuntimeError("kb engine daemon read failed: %s" % e) from e
+                    raise RuntimeError("kb engine daemon read failed: %s%s" % (e, reason)) from e
                 if not line:
+                    reason = self._death_reason()
                     await self._restart()
-                    raise RuntimeError("kb engine daemon exited unexpectedly")
+                    raise RuntimeError("kb engine daemon exited unexpectedly" + reason)
                 try:
                     msg = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError:
@@ -215,6 +258,16 @@ def render_fetch(resp):
     if resp.get("note"):
         lines.append("")
         lines.append(str(resp["note"]))
+    # ingest=true 时引擎会回传入库结果；旧版本只读 downloaded/target/files/note，
+    # 入库到底成了几篇完全不可见 —— 调用方以为只是下载，实际库已经变了。
+    ing = resp.get("ingest")
+    if isinstance(ing, dict):
+        lines.append("")
+        lines.append("**下载后已入库**")
+        lines.append(render_ingest(ing))
+    elif ing:
+        lines.append("")
+        lines.append("**下载后入库结果**：%s" % str(ing)[:500])
     return "\n".join(lines)
 
 
