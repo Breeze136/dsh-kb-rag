@@ -37,19 +37,34 @@ function maxScore(resp) {
   return scores.length ? Math.max(...scores) : null;
 }
 
+/**
+ * 这一轮检索到底跑没跑精排。
+ *
+ * **必须用真值判断，不能判 `!== undefined`**：引擎在没有精排时返回的是 `reranker: null`
+ * （键在、值是 null），而 quick 模式就是这样。判 `!== undefined` 会让守卫失效，于是拿
+ * RRF 融合分（无量纲，实测 0.03–0.05）去比**为精排分标定**的阈值 0.10（精排库外 0.004–0.038、
+ * 库内 0.65–1.37），把一个高相关命中误判成"库内无相关资料"，还会叫 agent 不要再换词重试。
+ * 渲染层（host 的 score 显示）用的就是真值判断，这里与它对齐。
+ */
+function hasReranker(resp) {
+  return !!resp && typeof resp.reranker === 'string' && resp.reranker.length > 0;
+}
+
 function isEmptyResult(resp) {
   if (!resp || resp.ok !== true) return false;
   if (resp.no_hit === true || resp.verdict === '无关') return true;
   const list = resp.results || resp.evidence;
   if (Array.isArray(list) && list.length === 0) return true;
+  // 引擎已经落地了地板：有 verdict 时以引擎为准（引擎在 quick 下返回 verdict=null）
+  if (resp.verdict !== undefined && resp.verdict !== null) return false;
   const s = maxScore(resp);
-  return s !== null && s < RELEVANCE_FLOOR.rerank && resp.reranker !== undefined;
+  return s !== null && s < RELEVANCE_FLOOR.rerank && hasReranker(resp);
 }
 
 function isWeakResult(resp) {
   if (resp && resp.verdict === '弱相关') return true;
   const s = maxScore(resp);
-  return s !== null && resp && resp.reranker !== undefined && s >= RELEVANCE_FLOOR.rerank && s < 0.35;
+  return s !== null && hasReranker(resp) && s >= RELEVANCE_FLOOR.rerank && s < 0.35;
 }
 
 // ---------------------------------------------------------------- 静态描述块
@@ -58,7 +73,7 @@ function isWeakResult(resp) {
 export const SEARCH_DISCIPLINE = [
   '调用纪律（重要，违反会显著拖慢回答）：',
   `1. 一次提问最多调用本工具 ${MAX_SEARCH_CALLS_PER_QUESTION} 次，每次必须换实质策略（中文→英文术语 / 放宽 filters / 换同义术语），不要反复改写同一句话。`,
-  '2. 返回 verdict=无关（或结果分数低于阈值）时：库内确实没有 → 如实说明"库内无资料"，并按 scope 设置转 web_search；不要再换词连试。',
+  '2. 返回 verdict=无关（或结果分数低于阈值）时：库内确实没有 → 如实说明"库内无资料"，并按 scope 设置转 web_search；不要再反复连试。',
   '3. 返回 verdict=弱相关时：最多升一次 depth=deep；仍弱则按第 2 条处理。',
   '4. 用户说"先联网/快点/不用查库"→ 用 scope=web 或直接 web_search；用户说"库里有没有/只查库"→ scope=kb，只查一次。',
   '5. 中文提问先转写成英文术语再检索（库内正文以英文为主，BM25 对中文空转）；转写一次即可。',
@@ -118,7 +133,7 @@ export const POLICIES = [
     text: (resp) => {
       const s = maxScore(resp);
       return '⚠ 库内无相关资料' + (s !== null ? '（最高相似度 ' + s.toFixed(2) + '，低于阈值 ' + RELEVANCE_FLOOR.rerank + '）' : '')
-        + '：不要再换词重试。请如实说明库内无资料，并按 scope 设置转 web_search。';
+        + '：不要再反复重试。请如实说明库内无资料，并按 scope 设置转 web_search。';
     },
     tellUser: true,
     userText: () => '库内没有找到相关资料 —— 你可以用 /kb both 开启联网兜底，或 /kb web 直接联网快答。',

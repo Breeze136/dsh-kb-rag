@@ -713,6 +713,12 @@ function apply(ctx) {
 
   const renderStats = (_args, value) => {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
+    // 软关闭时 wrapper 只回 {ok, kb_rag_disabled, scope, note}，没有 docs/chunks/vectors。
+    // 以前直接落到统计行，渲染成"0 文档 / 0 块 / 0 向量"——把"已关闭"谎报成"空库"，最误导的一种输出。
+    if (value.kb_rag_disabled === true) {
+      return [{ type: "text", text: "**kb-rag 已关闭**" + (value.scope ? "（范围 " + String(value.scope) + "）" : "")
+        + " —— " + String(value.note || "库内检索与统计均已停用，用 `/kb on` 开启。") }];
+    }
     const lines = [];
     lines.push("**知识库统计** · " + (value.docs || 0) + " 文档 / " + (value.chunks || 0) + " 块 / " + (value.vectors || 0) + " 向量");
     if (value.db) lines.push("数据库：" + value.db);
@@ -867,6 +873,20 @@ function apply(ctx) {
     };
   };
 
+  // 范围 / 严格提示：`scopeWrapped` 一直把 `scope_note`、`strict_note` 挂在响应上，但渲染器
+  // 此前只打印了 `strict` 这个布尔值（渲染成"· 严格模式"四个字），**note 文本全被丢掉** ——
+  // 后果是 scope=both（库+全网兜底）时模型不知道还要去调 web_search、scope=web 时也不知道
+  // 该以网络结果为准，两档范围等于没生效。工具描述明确承诺"返回的 scope/scope_note 指明当前范围"，
+  // 这里把它兑现。**无命中分支（提前 return）与正常分支都要加**，否则恰恰是库外查询看不到范围提示。
+  const scopeHintLines = (value) => {
+    const out = [];
+    if (typeof value.scope_note === "string" && value.scope_note.length > 0) out.push(value.scope_note);
+    if (value.strict === true && typeof value.strict_note === "string" && value.strict_note.length > 0) {
+      out.push(value.strict_note);
+    }
+    return out;
+  };
+
   const renderSources = (_args, value) => {
     if (value === null || typeof value !== "object") return [{ type: "text", text: String(value) }];
     const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : []);
@@ -876,7 +896,16 @@ function apply(ctx) {
       const lines = [];
       lines.push("**库内无相关资料**（精排最高分 " + (value.max_score === null || value.max_score === undefined ? "?" : value.max_score)
         + " < 地板 " + (value.floor === null || value.floor === undefined ? "?" : value.floor) + "）");
-      lines.push("请如实说明库里没有相关资料，并按 scope 设置转 web_search；不要换词反复重试。");
+      // 纪律分档必须在这里也生效：规则层在深挖档会跳过 stopRule，把"无命中"换成补库循环（见 guidance.js
+      // 的 no-hit-thorough）；但这段渲染两种档位都会跑，曾经无条件写"不要换词反复重试"——与深挖指引对撞。
+      if (value.__diligence === "thorough") {
+        lines.push("深挖模式：这一轮没命中，**不要收尾**。下一步按顺序做：① 换术语或放宽 filters 再检索；"
+          + "② 从已命中结果的 citations 里取 DOI，用 kb_fetch({ identifiers: [doi], ingest: true }) 补库后重查；"
+          + "③ 用 related 列表横向扩展。");
+      } else {
+        lines.push("请如实说明库里没有相关资料，并按 scope 设置转 web_search；不要反复改写同一句话重试。");
+      }
+      scopeHintLines(value).forEach(function (t) { lines.push(t); });
       const close = Array.isArray(value.closest) ? value.closest : [];
       if (close.length > 0) {
         lines.push("");
@@ -909,6 +938,8 @@ function apply(ctx) {
     // 实际使用的检索路径（引擎会因 mode 参数或向量不可用而降级）：写死"混合检索"会误导
     const MODE_LABEL = { hybrid: "混合检索", keyword: "关键词检索", vector: "向量检索" };
     lines.push((MODE_LABEL[value.mode_used] || "混合检索") + (value.reranker ? " · 精排 " + value.reranker.split(" ")[0] : "") + (value.cached === true ? " · 缓存命中" : "") + (typeof value.ms === "number" ? " · " + value.ms + "ms" : "") + (value.strict === true ? " · 严格模式" : "") + (value.dup_collapsed > 0 ? " · 已折叠 " + value.dup_collapsed + " 份同论文副本" : ""));
+    // 范围/严格提示放在来源之前：模型自上而下读，先看到"当前范围是什么、还要不要联网"
+    scopeHintLines(value).forEach(function (t) { lines.push(t); });
     // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
     if (typeof value.lang_note === "string" && value.lang_note.length > 0) {
       lines.push("提示：" + value.lang_note);
@@ -981,9 +1012,8 @@ function apply(ctx) {
           lines.push("↳ 搜索串（Scholar 可复制）: " + String(r.search).slice(0, 200));
         }
       }
-      if (typeof r.path === "string" && r.path.length > 0) {
-        lines.push(r.path);
-      }
+      // 这里曾经无条件再推一行 r.path：上一行已经印了"文件：<基名>"，绝对路径纯属重复，
+      // 还每篇来源泄露一次本机目录结构。定位文件用基名 + 库根即可（kb_stats 里有库路径）。
       if (typeof r.zotero_key === "string" && r.zotero_key.length > 0) {
         lines.push("[在 Zotero 中打开 PDF](zotero://open-pdf/library/items/" + r.zotero_key + ")");
       }
@@ -1225,7 +1255,7 @@ function apply(ctx) {
         strict_note: st.strict ? STRICT_NOTE : undefined,
         diligence_note: st.diligence === "thorough"
           ? "深挖模式：不设检索调用上限；库内不足时按「kb_fetch 补库（ingest=true 可直接入库）→ 引文关联 → 增量入库 → 再查」循环，并把每轮新增/仍缺什么告诉用户。"
-          : "默认纪律：一次提问最多 3 次检索，每次换实质策略；无命中就如实说明，不要换词穷举。",
+          : "默认纪律：一次提问最多 3 次检索，每次换实质策略；无命中就如实说明，不要反复重试。",
       });
     },
   }));
@@ -1277,8 +1307,12 @@ function apply(ctx) {
   }
   function toolsRegistered() { return toolDisposers.length; }
 
-  if (ctx.commands !== undefined && typeof ctx.commands.register === "function") {
-    ctx.commands.register({
+  // commands 是**可选**服务：只能用 ctx.get 做可选查询，不能写成 ctx.commands ——
+  // Cordis 的 Guard 规定属性访问 ctx.commands 必须先声明 inject: ['commands']，而声明成
+  // 硬依赖又会让本插件在缺少该服务时永远 park。写法与 plugin/host.js 的动态半边保持一致。
+  const commands = ctx.get("commands");
+  if (commands !== undefined && typeof commands.register === "function") {
+    commands.register({
       name: "kb",
       description: "kb-rag 状态与控制：on / off / status / kb / both / web / quick / deep / strict / thorough / normal / save / policy",
       input: { hint: "status | on | off | soft | hard | kb | both | web | quick | deep | strict on|off | thorough | normal | save | policy" },
@@ -1359,9 +1393,18 @@ function apply(ctx) {
         }
         lines.push("");
         lines.push("**kb-rag 状态**（会话 " + sessionKey(exec) + "）");
+        // 开关有四个档位（on / soft / search / hard，见 setEnabledState），以前只判 enabled 布尔
+        // → 四种状态塌成两种标签，`/kb off hard` 卸掉全部工具后仍写"关（软关闭）"。
+        // 不新增持久化字段：档位可以由 enabled + 实际注册的工具数**无损推出**（旧 state.json 同样适用）。
+        const reg = toolsRegistered();
+        const switchText = st.enabled === false
+          ? (reg === 0
+            ? "关（硬关闭：工具已卸载，仅 `/kb on` 可恢复）"
+            : "关（软关闭：工具仍在注册表里，调用会返回\"已关闭\"）")
+          : (reg < TOTAL_TOOLS ? "开（仅检索工具：写库类已卸载）" : "开");
         lines.push("- 范围 " + st.scope + " · 深度 " + st.depth + " · 严格 " + (st.strict ? "开" : "关")
           + " · 纪律 " + (st.diligence === "thorough" ? "深挖" : "默认")
-          + " · 开关 " + (st.enabled === false ? "关（软关闭）" : "开"));
+          + " · 开关 " + switchText);
         lines.push("- 工具注册数：" + toolsRegistered() + " / 10");
         lines.push("- 状态文件：" + root + "/.kb-rag/state.json（`/kb save` 写入当前设置）");
         lines.push("- 可用：`/kb kb|both|web` 范围 · `/kb quick|deep` 深度 · `/kb strict on|off` · "
@@ -1373,7 +1416,7 @@ function apply(ctx) {
     console.error("[kb-rag] commands 服务不可用：/kb 命令未注册（工具与检索不受影响）");
   }
 
-  console.log("[kb-rag] ready (v1.6.7): 10 tools + /kb command" + (ctx.commands === undefined ? "" : ""));
+  console.log("[kb-rag] ready (v1.6.7): 10 tools + " + (commands === undefined ? "no /kb command" : "/kb command"));
 }
 
 export { apply, inject, name };

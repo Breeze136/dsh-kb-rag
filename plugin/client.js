@@ -126,13 +126,84 @@ return {
         children)
     }
 
-    // 会话标题栏指示条：发现 /kb 命令（客户端读宿主实时状态需要额外通道，暂不臆造）
-    function KbChip() {
+    // 会话标题栏指示条：显示本会话的**实时**状态（范围/深度/工具数）。
+    //
+    // 数据走 Package 私有通道 host.call ⇄ 宿主 harness.handle('kb-state')。
+    // 该通道**只存在于动态沙箱**（harness 是沙箱全局）：npm 静态半边没有它，所以这里必须
+    // 做能力检测并退化为静态 "kb" —— 同一份源码在两种形态下都能跑。
+    // 退化时的字面量刻意做了区分，便于一眼看出卡在哪一步：
+    //   "kb"                       通道不存在（静态半边，或宿主没注册 handler）
+    //   "kb !"                     调用了但失败
+    //   "kb · ?"                   通道通了但拿不到 sessionId（指示条没收到 props）
+    //   "kb · kb · deep · 10/10"   正常
+    function KbChip(props) {
+      const sid = (props !== null && props !== undefined && typeof props.sessionId === 'string')
+        ? props.sessionId : ''
+      const [st, setSt] = React.useState(null)
+      const [bad, setBad] = React.useState(false)
+      const [busy, setBusy] = React.useState(false)
+      const hasChannel = (typeof host !== 'undefined' && host !== null && typeof host.call === 'function')
+      // 点击 → 唤起宿主侧与"会话开场"同一套询问（范围/深度/陈旧数据），
+      // 返回值就是询问后的新状态，直接拿来刷新胶囊，不需要再拉一次。
+      const onClick = function () {
+        if (!hasChannel || busy === true) return
+        setBusy(true)
+        Promise.resolve(host.call('kb-menu', { sessionId: sid })).then(function (v) {
+          if (v !== null && typeof v === 'object') { setSt(v); setBad(false) }
+          setBusy(false)
+        }, function () { setBad(true); setBusy(false) })
+      }
+      React.useEffect(function () {
+        let alive = true
+        if (!hasChannel) return function () { alive = false }
+        Promise.resolve(host.call('kb-state', { sessionId: sid })).then(function (v) {
+          if (!alive) return
+          if (v !== null && typeof v === 'object') setSt(v)
+          else setBad(true)
+        }, function () { if (alive) setBad(true) })
+        return function () { alive = false }
+      }, [sid])
+
+      let label = 'kb-rag'
+      let detail = '（状态通道不可用）'
+      if (bad) {
+        label = 'kb-rag !'
+        detail = '（取状态失败）'
+      } else if (st !== null) {
+        const tools = (typeof st.tools === 'number' ? st.tools : '?') + '/10'
+        if (st.enabled === false) {
+          // 关闭态必须仍然是"可点的入口"：文案直接写出动作，颜色也区分开
+          label = 'kb-rag 已关闭 · 点击开启'
+          detail = '已关闭（不检索、也不拉引擎）。点这个胶囊即可重新开启'
+        } else if (sid === '') {
+          label = 'kb-rag ?'
+          detail = '（拿不到 sessionId，显示的是默认值）'
+        } else {
+          // 范围只在**非默认**时出现：默认的 kb 与产品名 kb-rag 语义重复，
+          // 并列显示会让人以为"kb"是另一层东西（旧写法 `kb · kb · deep` 就是这么被误读的）。
+          const scopePart = (st.scope === 'kb') ? '' : (String(st.scope) + ' ')
+          label = 'kb-rag ' + scopePart + st.depth + ' ' + tools
+          detail = '范围 ' + st.scope + ' · 深度 ' + st.depth + ' · 纪律 ' + st.diligence + ' · 工具 ' + tools
+        }
+      }
+      const clickable = hasChannel
+      // 关闭态用警示色，让"这里可以点回来"一眼可见
+      const closed = (bad !== true && st !== null && st.enabled === false)
+      const closedColor = 'var(--ds-color-danger, #c33)'
+      const chipStyle = clickable
+        ? { fontSize: 11, padding: '2px 6px', borderRadius: 999,
+            border: '1px solid ' + (closed ? closedColor : border),
+            color: closed ? closedColor : muted,
+            cursor: 'pointer' }
+        : styles.chip
       return React.createElement('div', {
-        style: styles.chip,
-        title: 'kb-rag 已启用。命令：/kb status · /kb kb|both|web · /kb quick|deep · '
+        style: chipStyle,
+        onClick: clickable ? onClick : undefined,
+        title: 'kb-rag ' + detail
+          + (clickable ? '。**点击可改范围/深度**' : '')
+          + '。命令：/kb status · /kb kb|both|web · /kb quick|deep · '
           + '/kb thorough|normal · /kb off [hard|search] · /kb on · /kb policy',
-      }, 'kb')
+      }, busy === true ? label + ' …' : label)
     }
 
     slots.inject('tool.call.toolview', () => slots.register(
@@ -145,7 +216,7 @@ return {
     ))
     slots.inject('conversation.session.header.actions', () => slots.register(
       { name: 'conversation.session.header.actions', id: 'kb-rag-chip', order: 90, label: 'kb' },
-      () => React.createElement(KbChip, null),
+      (props) => React.createElement(KbChip, props),
     ))
   },
 }
