@@ -43,19 +43,34 @@
       return scores.length ? Math.max(...scores) : null;
     }
 
+    /**
+     * 这一轮检索到底跑没跑精排。
+     *
+     * **必须用真值判断，不能判 `!== undefined`**：引擎在没有精排时返回的是 `reranker: null`
+     * （键在、值是 null），而 quick 模式就是这样。判 `!== undefined` 会让守卫失效，于是拿
+     * RRF 融合分（无量纲，实测 0.03–0.05）去比**为精排分标定**的阈值 0.10（精排库外 0.004–0.038、
+     * 库内 0.65–1.37），把一个高相关命中误判成"库内无相关资料"，还会叫 agent 不要再换词重试。
+     * 渲染层（host 的 score 显示）用的就是真值判断，这里与它对齐。
+     */
+    function hasReranker(resp) {
+      return !!resp && typeof resp.reranker === 'string' && resp.reranker.length > 0;
+    }
+
     function isEmptyResult(resp) {
       if (!resp || resp.ok !== true) return false;
       if (resp.no_hit === true || resp.verdict === '无关') return true;
       const list = resp.results || resp.evidence;
       if (Array.isArray(list) && list.length === 0) return true;
+      // 引擎已经落地了地板：有 verdict 时以引擎为准（引擎在 quick 下返回 verdict=null）
+      if (resp.verdict !== undefined && resp.verdict !== null) return false;
       const s = maxScore(resp);
-      return s !== null && s < RELEVANCE_FLOOR.rerank && resp.reranker !== undefined;
+      return s !== null && s < RELEVANCE_FLOOR.rerank && hasReranker(resp);
     }
 
     function isWeakResult(resp) {
       if (resp && resp.verdict === '弱相关') return true;
       const s = maxScore(resp);
-      return s !== null && resp && resp.reranker !== undefined && s >= RELEVANCE_FLOOR.rerank && s < 0.35;
+      return s !== null && hasReranker(resp) && s >= RELEVANCE_FLOOR.rerank && s < 0.35;
     }
 
     // ---------------------------------------------------------------- 静态描述块
@@ -64,7 +79,7 @@
     const SEARCH_DISCIPLINE = [
       '调用纪律（重要，违反会显著拖慢回答）：',
       `1. 一次提问最多调用本工具 ${MAX_SEARCH_CALLS_PER_QUESTION} 次，每次必须换实质策略（中文→英文术语 / 放宽 filters / 换同义术语），不要反复改写同一句话。`,
-      '2. 返回 verdict=无关（或结果分数低于阈值）时：库内确实没有 → 如实说明"库内无资料"，并按 scope 设置转 web_search；不要再换词连试。',
+      '2. 返回 verdict=无关（或结果分数低于阈值）时：库内确实没有 → 如实说明"库内无资料"，并按 scope 设置转 web_search；不要再反复连试。',
       '3. 返回 verdict=弱相关时：最多升一次 depth=deep；仍弱则按第 2 条处理。',
       '4. 用户说"先联网/快点/不用查库"→ 用 scope=web 或直接 web_search；用户说"库里有没有/只查库"→ scope=kb，只查一次。',
       '5. 中文提问先转写成英文术语再检索（库内正文以英文为主，BM25 对中文空转）；转写一次即可。',
@@ -124,7 +139,7 @@
         text: (resp) => {
           const s = maxScore(resp);
           return '⚠ 库内无相关资料' + (s !== null ? '（最高相似度 ' + s.toFixed(2) + '，低于阈值 ' + RELEVANCE_FLOOR.rerank + '）' : '')
-            + '：不要再换词重试。请如实说明库内无资料，并按 scope 设置转 web_search。';
+            + '：不要再反复重试。请如实说明库内无资料，并按 scope 设置转 web_search。';
         },
         tellUser: true,
         userText: () => '库内没有找到相关资料 —— 你可以用 /kb both 开启联网兜底，或 /kb web 直接联网快答。',
@@ -519,15 +534,113 @@ return {
       })
     }
 
-    function askScopeOnce(agent, exec, kbRoot) {
+    // ── 开/关的副作用：只此一处 ──────────────────────────────────────────────
+    // 四个档位（on / soft / search / hard）原来内联在 /kb 命令的 switch 里；对话框也要用，
+    // 所以抽出来，避免两份实现漂移（漂移正是今天 P0 崩溃的成因）。
+    // 返回 needRepair 仅对 'on' 有意义（是否真的重新注册了工具）。
+    function setEnabledState(st, mode) {
+      if (mode === 'on') {
+        // 判据不能只看"工具数为 0"：半关闭（撤掉检索、留着入库/统计）之后 count 是 8，
+        // 只看 0 会认为"已经开着"而不重新注册，kb_search/kb_rag 就永远回不来了（实测抓到）。
+        const needRepair = st.enabled === false || toolsRegistered() < TOTAL_TOOLS
+        st.enabled = true
+        if (needRepair) {
+          disposeTools(function () { return true })   // 先全撤，避免重复注册
+          registerAllTools()
+        }
+        return needRepair
+      }
+      if (mode === 'hard') {
+        st.enabled = false
+        disposeTools(function () { return true })
+        return false
+      }
+      if (mode === 'search') {
+        st.enabled = true
+        disposeTools(function (n) { return SEARCH_TOOLS.indexOf(n) >= 0 })
+        return false
+      }
+      st.enabled = false                                 // 'soft'
+      return false
+    }
+
+    // ── 范围/深度的选项与答案映射：只此一处 ────────────────────────────────────
+    // "会话开场询问"与"点击指示条弹出的询问"共用这两组选项；映射函数按**标签前缀**匹配，
+    // 所以选项文案与映射必须同源，复制一份就等着漂移。
+    const SCOPE_OPTIONS = [
+      { label: '仅封闭知识库（推荐）', description: '只检索本地文献库，结论只来自库内文献' },
+      { label: '知识库+全网', description: '库内检索为主，开放网络（web_search）补充' },
+      { label: '仅全网', description: '只用开放网络检索，不用知识库' },
+    ]
+    const DEPTH_OPTIONS = [
+      { label: '快速检索', description: '混合召回直出，跳过精排与引文扩展，亚秒级响应，适合事实性查询与单点数据检索' },
+      { label: '深度检索（推荐）', description: '重排序 + 引文关联 + 相关文献全链路，跨文献综合论述，适合领域调研与综述性问题' },
+    ]
+
+    function applyScopeAnswer(answer, st, root, exec) {
+      // 按 **question id** 匹配，不按数组下标 —— 下标一旦加问就会错位
+      // （AskUserQuestionAnswerItem 明确带 `id`："The answered question id"）。
+      const answerOf = function (id) {
+        const list = (answer && Array.isArray(answer.answers)) ? answer.answers : []
+        for (let i = 0; i < list.length; i++) {
+          if (list[i] !== null && list[i] !== undefined && list[i].id === id) {
+            const sel = list[i].selected
+            return (Array.isArray(sel) && sel.length > 0) ? sel[0] : undefined
+          }
+        }
+        return undefined
+      }
+      const picked = answerOf('kb-scope')
+      if (typeof picked === 'string' && picked.indexOf('仅封闭') === 0) st.scope = 'kb'
+      else if (typeof picked === 'string' && picked.indexOf('知识库+全网') === 0) st.scope = 'both'
+      else if (typeof picked === 'string' && picked.indexOf('仅全网') === 0) st.scope = 'web'
+      const pickedDepth = answerOf('kb-depth')
+      if (typeof pickedDepth === 'string') {
+        if (pickedDepth.indexOf('深度检索') === 0) st.depth = 'deep'
+        else if (pickedDepth.indexOf('快速检索') === 0) st.depth = 'quick'
+      }
+      const pickedStale = answerOf('kb-stale')
+      if (typeof pickedStale === 'string' && pickedStale.indexOf('只刷新元数据') === 0) refreshStale(root, exec, true)
+      else if (typeof pickedStale === 'string' && pickedStale.indexOf('全量重灌') === 0) refreshStale(root, exec, false)
+      else if (typeof pickedStale === 'string') console.log('[kb-rag] 旧数据暂不刷新（需要时用 kb_ingest 的 metadata_only / rebuild）')
+
+      // 开关：只在用户真的回答了这个问题时才动（会话开场那套不包含这一问）
+      const pickedEnabled = answerOf('kb-enabled')
+      let enabledAnswered = false
+      if (typeof pickedEnabled === 'string') {
+        enabledAnswered = true
+        if (pickedEnabled.indexOf('关闭') === 0) {
+          // "关闭" = 软关闭（本会话所有 kb 工具一律返回「已关闭」且不拉引擎）
+          //        + 撤掉检索工具（agent 立刻看不到 kb_search/kb_rag，也就不会调用）
+          setEnabledState(st, 'soft')
+          disposeTools(function (n) { return SEARCH_TOOLS.indexOf(n) >= 0 })
+          console.log('[kb-rag] 用户选择关闭 kb-rag：软关闭 + 撤掉检索工具')
+        } else {
+          setEnabledState(st, 'on')
+          console.log('[kb-rag] 用户选择保持开启 kb-rag')
+        }
+      }
+
+      const patch = { scope: st.scope, depth: st.depth }
+      // 回答了开关就一并记住 —— 这样"关闭"对以后的新会话也是默认值
+      if (enabledAnswered) patch.enabled = st.enabled
+      savePersistedDefaults(patch, root, exec)
+      console.log('[kb-rag] query scope:', st.scope, 'depth:', st.depth, '(已记住)')
+    }
+
+    // force=true 时绕过"每个会话只问一次 / 已记住就不再问"两道短路，供点击指示条主动唤起。
+    function askScopeOnce(agent, exec, kbRoot, force) {
       const st = stateOf(exec)
       const uq = userQuestionsNow()
-      if (st.askedAt || uq === undefined) return
-      st.askedAt = Date.now()
-      // 用户已经表达过偏好（上次会话选过，或用 /kb save 存过默认值）→ 不再重复询问
-      if (persisted.scope) {
-        console.log('[kb-rag] scope 已记住（state.json）：', persisted.scope, 'depth:', persisted.depth)
-        return
+      if (uq === undefined) return
+      if (force !== true) {
+        if (st.askedAt) return
+        st.askedAt = Date.now()
+        // 用户已经表达过偏好（上次会话选过，或用 /kb save 存过默认值）→ 不再重复询问
+        if (persisted.scope) {
+          console.log('[kb-rag] scope 已记住（state.json）：', persisted.scope, 'depth:', persisted.depth)
+          return
+        }
       }
       const root = typeof kbRoot === 'string' && kbRoot.length > 0 ? kbRoot : workspaceOf(exec) + '/.kb'
       staleCountOf(root, exec).then(function (staleInfo) {
@@ -538,19 +651,12 @@ return {
             id: 'kb-scope',
             header: '查询范围',
             question: '知识库查询的默认范围？',
-            options: [
-              { label: '仅封闭知识库（推荐）', description: '只检索本地文献库，结论只来自库内文献' },
-              { label: '知识库+全网', description: '库内检索为主，开放网络（web_search）补充' },
-              { label: '仅全网', description: '只用开放网络检索，不用知识库' },
-            ],
+            options: SCOPE_OPTIONS,
           }, {
             id: 'kb-depth',
             header: '检索深度',
             question: '检索与作答的深度？',
-            options: [
-              { label: '快速检索', description: '混合召回直出，跳过精排与引文扩展，亚秒级响应，适合事实性查询与单点数据检索' },
-              { label: '深度检索（推荐）', description: '重排序 + 引文关联 + 相关文献全链路，跨文献综合论述，适合领域调研与综述性问题' },
-            ],
+            options: DEPTH_OPTIONS,
           }],
         }
         if (stale > 0) {
@@ -577,23 +683,22 @@ return {
           })
         }
         if (agent !== undefined) request.agent = agent
+        // 开关问题**只出现在点击指示条唤起的面板里**（force=true）：
+        // 会话开场问"要不要关掉自己"没有意义，也会给开局多添一问、增加回归面。
+        if (force === true) {
+          request.questions.push({
+            id: 'kb-enabled',
+            header: 'kb-rag 开关',
+            question: 'kb-rag 是否参与检索？（关闭后 agent 不会再调用检索，可直接改用 web_search）',
+            options: [
+              { label: '保持开启（推荐）', description: 'kb_search / kb_rag 正常可用，按上面选的范围与深度检索' },
+              { label: '关闭 kb-rag', description: '软关闭并**记为默认**：撤掉 kb_search/kb_rag（agent 看不到就不会调用），其余 kb 工具也一律返回「已关闭」且不拉引擎；随时可用 /kb on 或再点一次指示条开回来' },
+            ],
+          })
+        }
         return Promise.race([
           uq.ask(request).then(function (answer) {
-            const picked = answer && answer.answers && answer.answers[0] && answer.answers[0].selected && answer.answers[0].selected[0]
-            if (typeof picked === 'string' && picked.indexOf('仅封闭') === 0) st.scope = 'kb'
-            else if (typeof picked === 'string' && picked.indexOf('知识库+全网') === 0) st.scope = 'both'
-            else if (typeof picked === 'string' && picked.indexOf('仅全网') === 0) st.scope = 'web'
-            const pickedDepth = answer && answer.answers && answer.answers[1] && answer.answers[1].selected && answer.answers[1].selected[0]
-            if (typeof pickedDepth === 'string') {
-              if (pickedDepth.indexOf('深度检索') === 0) st.depth = 'deep'
-              else if (pickedDepth.indexOf('快速检索') === 0) st.depth = 'quick'
-            }
-            const pickedStale = answer && answer.answers && answer.answers[2] && answer.answers[2].selected && answer.answers[2].selected[0]
-            if (typeof pickedStale === 'string' && pickedStale.indexOf('只刷新元数据') === 0) refreshStale(root, exec, true)
-            else if (typeof pickedStale === 'string' && pickedStale.indexOf('全量重灌') === 0) refreshStale(root, exec, false)
-            else if (typeof pickedStale === 'string') console.log('[kb-rag] 旧数据暂不刷新（需要时用 kb_ingest 的 metadata_only / rebuild）')
-            savePersistedDefaults({ scope: st.scope, depth: st.depth }, root, exec)
-            console.log('[kb-rag] query scope:', st.scope, 'depth:', st.depth, '(已记住)')
+            applyScopeAnswer(answer, st, root, exec)
           }).catch(function (e) {
             console.error('[kb-rag] scope question failed:', String(e))
           }),
@@ -893,6 +998,12 @@ return {
 
     const renderStats = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
+      // 软关闭时 wrapper 只回 {ok, kb_rag_disabled, scope, note}，没有 docs/chunks/vectors。
+      // 以前直接落到统计行，渲染成"0 文档 / 0 块 / 0 向量"——把"已关闭"谎报成"空库"，最误导的一种输出。
+      if (value.kb_rag_disabled === true) {
+        return [{ type: 'text', text: '**kb-rag 已关闭**' + (value.scope ? '（范围 ' + String(value.scope) + '）' : '')
+          + ' —— ' + String(value.note || '库内检索与统计均已停用，用 `/kb on` 开启。') }]
+      }
       const lines = []
       lines.push('**知识库统计** · ' + (value.docs || 0) + ' 文档 / ' + (value.chunks || 0) + ' 块 / ' + (value.vectors || 0) + ' 向量')
       if (value.db) lines.push('数据库：' + value.db)
@@ -1019,6 +1130,20 @@ return {
       return [{ type: 'text', text: lines.join('\n') }]
     }
 
+    // 范围 / 严格提示：`scopeWrapped` 一直把 `scope_note`、`strict_note` 挂在响应上，但渲染器
+    // 此前只打印了 `strict` 这个布尔值（渲染成"· 严格模式"四个字），**note 文本全被丢掉** ——
+    // 后果是 scope=both（库+全网兜底）时模型不知道还要去调 web_search、scope=web 时也不知道
+    // 该以网络结果为准，两档范围等于没生效。工具描述明确承诺"返回的 scope/scope_note 指明当前范围"，
+    // 这里把它兑现。**无命中分支（提前 return）与正常分支都要加**，否则恰恰是库外查询看不到范围提示。
+    const scopeHintLines = (value) => {
+      const out = []
+      if (typeof value.scope_note === 'string' && value.scope_note.length > 0) out.push(value.scope_note)
+      if (value.strict === true && typeof value.strict_note === 'string' && value.strict_note.length > 0) {
+        out.push(value.strict_note)
+      }
+      return out
+    }
+
     const renderSources = (_args, value) => {
       if (value === null || typeof value !== 'object') return [{ type: 'text', text: String(value) }]
       const items = Array.isArray(value.evidence) ? value.evidence : (Array.isArray(value.results) ? value.results : [])
@@ -1028,7 +1153,16 @@ return {
         const nlines = []
         nlines.push('**库内无相关资料**（精排最高分 ' + (value.max_score === null || value.max_score === undefined ? '?' : value.max_score)
           + ' < 地板 ' + (value.floor === null || value.floor === undefined ? '?' : value.floor) + '）')
-        nlines.push('请如实说明库里没有相关资料，并按 scope 设置转 web_search；不要换词反复重试。')
+        // 纪律分档必须在这里也生效：规则层在深挖档会跳过 stopRule（resultNotes:273），把"无命中"换成
+        // 补库循环；但这段渲染两种档位都会跑，曾经无条件写"不要换词反复重试"——与深挖指引正面对撞。
+        if (value.__diligence === 'thorough') {
+          nlines.push('深挖模式：这一轮没命中，**不要收尾**。下一步按顺序做：① 换术语或放宽 filters 再检索；'
+            + '② 从已命中结果的 citations 里取 DOI，用 kb_fetch({ identifiers: [doi], ingest: true }) 补库后重查；'
+            + '③ 用 related 列表横向扩展。')
+        } else {
+          nlines.push('请如实说明库里没有相关资料，并按 scope 设置转 web_search；不要反复改写同一句话重试。')
+        }
+        scopeHintLines(value).forEach(function (t) { nlines.push(t) })
         const close = Array.isArray(value.closest) ? value.closest : []
         if (close.length > 0) {
           nlines.push('')
@@ -1061,6 +1195,8 @@ return {
       // 实际使用的检索路径（引擎会因 mode 参数或向量不可用而降级）：写死"混合检索"会误导
       const MODE_LABEL = { hybrid: '混合检索', keyword: '关键词检索', vector: '向量检索' }
       lines.push((MODE_LABEL[value.mode_used] || '混合检索') + (value.reranker ? ' · 精排 ' + value.reranker.split(' ')[0] : '') + (value.cached === true ? ' · 缓存命中' : '') + (typeof value.ms === 'number' ? ' · ' + value.ms + 'ms' : '') + (value.strict === true ? ' · 严格模式' : '') + (value.dup_collapsed > 0 ? ' · 已折叠 ' + value.dup_collapsed + ' 份同论文副本' : ''))
+      // 范围/严格提示放在来源之前：模型自上而下读，先看到"当前范围是什么、还要不要联网"
+      scopeHintLines(value).forEach(function (t) { lines.push(t) })
       // 引擎的语言提示（中文查询 + 几乎全英文库）：原样转达，提醒用英文术语重查
       if (typeof value.lang_note === 'string' && value.lang_note.length > 0) {
         lines.push('提示：' + value.lang_note)
@@ -1132,9 +1268,8 @@ return {
             lines.push('↳ 搜索串（Scholar 可复制）: ' + String(r.search).slice(0, 200))
           }
         }
-        if (typeof r.path === 'string' && r.path.length > 0) {
-          lines.push(r.path)
-        }
+        // 这里曾经无条件再推一行 r.path：上一行已经印了"文件：<基名>"，绝对路径纯属重复，
+        // 还每篇来源泄露一次本机目录结构。定位文件用基名 + 库根即可（kb_stats 里有库路径）。
         if (typeof r.zotero_key === 'string' && r.zotero_key.length > 0) {
           lines.push('[在 Zotero 中打开 PDF](zotero://open-pdf/library/items/' + r.zotero_key + ')')
         }
@@ -1470,7 +1605,7 @@ return {
           strict_note: st.strict ? STRICT_NOTE : undefined,
           diligence_note: st.diligence === 'thorough'
             ? '深挖模式：不设检索调用上限；库内不足时按「kb_fetch 补库（ingest=true 可直接入库）→ 引文关联 → 增量入库 → 再查」循环，并把每轮新增/仍缺什么告诉用户。'
-            : '默认纪律：一次提问最多 3 次检索，每次换实质策略；无命中就如实说明，不要换词穷举。',
+            : '默认纪律：一次提问最多 3 次检索，每次换实质策略；无命中就如实说明，不要反复重试。',
         }
         // 动态半边在沙箱里跑：execute 的返回值要过 lossless-JSON 校验，**undefined 字段会直接报错**
         //（实测：strict 关闭时 kb_scope 每次都抛 "must be lossless JSON data"）。这里去掉 undefined
@@ -1582,29 +1717,20 @@ return {
               lines.push('已回到默认纪律：一次提问最多 3 次检索、无命中即停。' + persistHint)
               break
             case 'on': {
-              // 判据不能只看"工具数为 0"：半关闭（撤掉检索、留着入库/统计）之后 count 是 8，
-              // 旧写法会认为"已经开着"而不重新注册，kb_search/kb_rag 就永远回不来了（实测抓到）。
-              const needRepair = st.enabled === false || toolsRegistered() < TOTAL_TOOLS
-              st.enabled = true
-              if (needRepair) {
-                disposeTools(function () { return true })   // 先全撤，避免重复注册
-                registerAllTools()
-              }
+              const needRepair = setEnabledState(st, 'on')
               lines.push('kb-rag 已开启' + (needRepair ? '（工具已重新注册齐全，' + toolsRegistered() + '/10）'
-                                                       : '（本来就是开着的）') + '。')
+                                                        : '（本来就是开着的）') + '。')
               break
             }
             case 'off':
               if (arg === 'hard') {
-                st.enabled = false
-                disposeTools(function () { return true })
+                setEnabledState(st, 'hard')
                 lines.push('kb-rag 已**硬关闭**：10 个工具已从本会话撤销（/kb on 可恢复，无需重启）。')
               } else if (arg === 'search') {
-                st.enabled = true
-                disposeTools(function (n) { return SEARCH_TOOLS.indexOf(n) >= 0 })
+                setEnabledState(st, 'search')
                 lines.push('kb-rag 已**半关闭**：只撤掉 kb_search / kb_rag，入库与统计仍可用。')
               } else {
-                st.enabled = false
+                setEnabledState(st, 'soft')
                 lines.push('kb-rag 已**软关闭**：工具仍在，但调用会直接返回「已关闭」（不拉守护进程）。')
               }
               break
@@ -1628,9 +1754,18 @@ return {
           }
           lines.push('')
           lines.push('**kb-rag 状态**（会话 ' + sessionKey(exec) + '）')
+          // 开关有四个档位（on / soft / search / hard，见 setEnabledState），以前只判 enabled 布尔
+          // → 四种状态塌成两种标签，`/kb off hard` 卸掉全部工具后仍写"关（软关闭）"。
+          // 不新增持久化字段：档位可以由 enabled + 实际注册的工具数**无损推出**（旧 state.json 同样适用）。
+          const reg = toolsRegistered()
+          const switchText = st.enabled === false
+            ? (reg === 0
+              ? '关（硬关闭：工具已卸载，仅 `/kb on` 可恢复）'
+              : '关（软关闭：工具仍在注册表里，调用会返回"已关闭"）')
+            : (reg < TOTAL_TOOLS ? '开（仅检索工具：写库类已卸载）' : '开')
           lines.push('- 范围 ' + st.scope + ' · 深度 ' + st.depth + ' · 严格 ' + (st.strict ? '开' : '关')
             + ' · 纪律 ' + (st.diligence === 'thorough' ? '深挖' : '默认')
-            + ' · 开关 ' + (st.enabled === false ? '关（软关闭）' : '开'))
+            + ' · 开关 ' + switchText)
           lines.push('- 工具注册数：' + toolsRegistered() + ' / 10')
           lines.push('- 状态文件：' + root + '/.kb-rag/state.json（`/kb save` 写入当前设置）')
           lines.push('- 可用：`/kb kb|both|web` 范围 · `/kb quick|deep` 深度 · `/kb strict on|off` · '
@@ -1643,5 +1778,49 @@ return {
     }
 
     console.log('[kb-rag] ready (v1.6.7): 10 tools + /kb command')
+
+    // ── 客户端指示条的实时状态通道 ──────────────────────────────────────────
+    // harness.handle 的 handler **只收到 args、拿不到 agent**，所以由客户端把 sessionId 传上来
+    // （指示条本身是 session 作用域的，props.sessionId 就是当前会话）。
+    // 用 typeof 守卫：这样同一段代码搬到没有 harness 的形态（npm 静态半边）也不会炸，只是不生效。
+    if (typeof harness !== 'undefined' && harness !== null && typeof harness.handle === 'function') {
+      // 指示条要的状态负载：kb-state 与 kb-menu 共用同一份形状
+      const kbStatePayload = function (st) {
+        return {
+          scope: String(st.scope === undefined || st.scope === null ? 'kb' : st.scope),
+          depth: String(st.depth === undefined || st.depth === null ? 'deep' : st.depth),
+          diligence: String(st.diligence === undefined || st.diligence === null ? 'normal' : st.diligence),
+          strict: st.strict === true,
+          enabled: st.enabled !== false,
+          tools: toolsRegistered(),
+        }
+      }
+      const sessionExecOf = function (args) {
+        const sid = (args !== null && args !== undefined && typeof args.sessionId === 'string')
+          ? args.sessionId : ''
+        // 把 sessionId 换回真正的 Agent：用户问答请求需要 agent 才有正确的会话归属，
+        // 而 workspaceOf/runEngine 也依赖 exec.agent.session.header.cwd 解析工作区。
+        const agents = ctx.get('agents')
+        const agent = (agents !== undefined && typeof agents.get === 'function') ? agents.get(sid) : undefined
+        return { agent: agent }
+      }
+
+      harness.handle('kb-state', function (args) {
+        return kbStatePayload(stateOf(sessionExecOf(args)))
+      })
+
+      // 点击指示条 → 唤起与"会话开场"同一套询问（范围/深度/陈旧数据），复用 askScopeOnce，
+      // 不复制问题文案与答案映射（复制必漂移：映射是按标签前缀匹配的）。
+      harness.handle('kb-menu', function (args) {
+        const exec = sessionExecOf(args)
+        const st = stateOf(exec)
+        const root = workspaceOf(exec) + '/.kb'
+        return Promise.resolve(askScopeOnce(exec.agent, exec, root, true)).then(function () {
+          return kbStatePayload(st)
+        }, function () {
+          return kbStatePayload(st)
+        })
+      })
+    }
   },
 }
