@@ -1513,10 +1513,22 @@ KB_DEVICE = (os.environ.get("KB_DEVICE") or "auto").strip().lower()
 _CUDA = None        # torch.cuda.is_available() 的缓存（None = 还没问过）
 _GPU_OK = None      # None = 待定；False = 本进程已判定 GPU 不可用（sticky，不再尝试）
 _GPU_WHY = None     # 判定不可用的原因（进 device_report，便于排障）
+_PROBE = None       # 真实可用性探测结果：torch 说"有卡"不等于"能算"（None = 还没探过）
+_VRAM_GB = None     # 显存总量（GB，缓存；None = 查不到）
+_BATCH_EFFECTIVE = {}   # tag -> 实测能跑通的批大小（缩过一次就记住，后续调用不再重复撞）
 # 设备异常说明：{tag: 说明}，例如 {"embed": "GPU 不可用（…）→ 已改用 CPU"}，让 kb_stats/kb_ingest 看得到。
 # 用 dict 而不是单字符串：embed 与 rerank 各记各的，且**正常加载成功时能清掉**（否则一次瞬时故障
 # 会让"已回退 CPU"永远挂在报告里，用户以为现在还在 CPU 上跑）。
 _DEVICE_NOTE = {}
+
+
+def _probe_device():
+    """该在哪个设备上做可用性探测（与 _device_kwargs 的实际选择保持一致）。"""
+    if KB_DEVICE.startswith("cuda"):
+        return KB_DEVICE                      # 含 cuda:1 这类显式序号
+    if KB_DEVICE == "mps":
+        return "mps"
+    return "cuda"
 
 
 def _device_kwargs():
@@ -1545,15 +1557,75 @@ def _cuda_available():
     return _CUDA
 
 
-def _gpu_usable():
-    """本进程还能不能尝试 GPU。一旦判定不可用就永久返回 False（sticky）。"""
+def _gpu_probe():
+    """**真实算一次**再决定要不要用 GPU（每进程一次，结果缓存）。
+
+    为什么需要：`torch.cuda.is_available()` 只说明"驱动报告有设备"，不保证能跑内核。
+    实测能遇到的坑：驱动与 CUDA runtime 版本不匹配、容器/WSL 里设备可见但初始化失败、
+    显卡被独占计算模式占用、cuDNN/cuBLAS 缺库。这些在 `is_available()==True` 时照样发生，
+    若不先探，失败点会被推到"加载模型时"——代价更大、报错更难懂（三级加载链还会在 GPU 上
+    连撞几次）。这里用一个 8×8 矩阵乘 + synchronize 做最小可用性验证，失败即粘性关闭 GPU
+    并把原因写进报告。`KB_GPU_PROBE=0` 可跳过探测（极端环境下想强行试 GPU 时用）。
+
+    注意：探测本身会初始化 CUDA context（约 0.3–1 s），但这一步在"模型要上 GPU"时本来
+    也要付；不加载模型、只体检（kb_stats）的路径不会碰它（见 device_report 的 torch 判断）。"""
+    global _PROBE
+    if _PROBE is not None:
+        return _PROBE
+    raw = (os.environ.get("KB_GPU_PROBE") or "1").strip().lower()
+    if raw in ("0", "false", "off", "no"):
+        _PROBE = True                     # 跳过探测：交给模型加载期兜底（_load_with_cpu_fallback）
+        return _PROBE
+    target = _probe_device()
+    try:
+        import torch
+        if target.startswith("cuda") and not torch.cuda.is_available():
+            _PROBE = False
+            return _PROBE
+        t = torch.zeros(8, 8, device=target)
+        float((t @ t).sum().item())        # 真正下发一个内核并同步，光分配内存不算
+        _PROBE = True
+    except Exception as e:                 # noqa: BLE001 —— 设备侧任何异常都当"用不了"
+        _PROBE = False
+        _disable_gpu("probe", e)
+        return _PROBE
+    return _PROBE
+
+
+def _vram_gb():
+    """显存总量（GB）。查不到返回 None（不猜、不 import torch 副作用之外的任何东西）。"""
+    global _VRAM_GB
+    if _VRAM_GB is not None:
+        return _VRAM_GB
+    try:
+        import torch
+        if _cuda_available():
+            props = torch.cuda.get_device_properties(0)
+            total = getattr(props, "total_memory", None)
+            if total:
+                _VRAM_GB = round(float(total) / (1024 ** 3), 1)
+    except Exception:                                          # noqa: BLE001
+        _VRAM_GB = None
+    return _VRAM_GB
+
+
+def _gpu_usable(probe=True):
+    """本进程还能不能尝试 GPU。一旦判定不可用就永久返回 False（sticky；`cmd_reload` 可重置）。
+
+    与旧实现的关键差别：不再只信 `torch.cuda.is_available()`，而是**真算一次**（`_gpu_probe`）。
+    显式 `cuda*` / `mps` 同样先探 —— 探测失败比"加载模型时才撞墙"便宜得多，也更早给出可读原因。
+
+    `probe=False` 只回答"按当前已知信息能不能用"，**不触发探测**（也不因此关闭 GPU）：
+    只读体检（kb_stats / device_report）不该有副作用 —— 一次瞬时故障不该被一次查询体检固化下来。"""
     if _GPU_OK is False:
         return False
     if KB_DEVICE == "cpu":
         return False
     if KB_DEVICE in ("", "auto", "none"):
-        return _cuda_available()
-    return True                        # 显式 cuda/mps：先试一次，失败由 _disable_gpu 关掉
+        if not _cuda_available():
+            return False
+        return _gpu_probe() if probe else (_PROBE is not False)
+    return _gpu_probe() if probe else (_PROBE is not False)
 
 
 def _disable_gpu(tag, err):
@@ -1569,7 +1641,8 @@ def _disable_gpu(tag, err):
 # 不被兜底掩盖成"悄悄降级"。
 _CUDA_ERR_HINTS = ("out of memory", "cuda", "cudnn", "cublas", "cufft", "nccl",
                    "no kernel image", "device-side assert", "gpu", "nvml",
-                   "driver", "no available kernel", "not compiled with cuda")
+                   "driver", "no available kernel", "not compiled with cuda",
+                   "mps", "rocm")     # 只加"几乎不会出现在别处"的词；"hip"/"metal" 会误伤 "chip"/"metallurgy"
 
 
 def _is_cuda_error(err):
@@ -1610,6 +1683,37 @@ def _batch_size(env_name, cpu_default, gpu_default):
     return gpu_default if _gpu_usable() else cpu_default
 
 
+def _model_on_gpu(model):
+    """模型**实际**在哪。批大小默认值跟着它走，而不是跟着"策略上能不能用 GPU"：
+    运行期回退 CPU 之后策略位仍是 True，只有模型自己的 device 说了实话。"""
+    dev = str(getattr(model, "device", "") or "").lower()
+    if "cuda" in dev or dev == "mps":
+        return True
+    if dev:
+        return False                    # 明确的 cpu / cpu:0
+    return _gpu_usable()                # 某些包装类没有 device → 退回策略判定
+
+
+_BATCH_TIERS = {                        # 显存下限（GB） → 批大小；不在表内 = 用 gpu_default
+    # 阈值只用来**保护小显存**，不惩罚正常显卡：实测 8GB 卡跑 128 没问题（见 BACKLOG §5.1 的吞吐基准），
+    # 所以 8GB 及以上保持历史默认，只有 <8GB 才降级；<4GB（共享显存的轻薄本/MX 系）再降一档。
+    "embed": ((4.0, 16), (8.0, 64)),
+    "rerank": ((4.0, 8), (8.0, 32)),
+}
+
+
+def _gpu_batch(tag, gpu_default):
+    """按显存给 GPU 批大小：小显存从小批起步，避开"先 OOM 再缩批"这条又慢又吵的路径。
+    显存查不到时用历史默认（不改变未知环境的行为）。"""
+    vram = _vram_gb()
+    if vram is None:
+        return gpu_default
+    for limit, bs in _BATCH_TIERS.get(tag, ()):
+        if vram < limit:
+            return bs
+    return gpu_default
+
+
 def _free_cuda_cache():
     try:
         import torch
@@ -1622,28 +1726,53 @@ def _free_cuda_cache():
 _BATCH_DEFAULTS = {"embed": (32, 128), "rerank": (16, 64)}
 
 
+def _shrink_ladder(bs):
+    """缩批梯次：折半 → 下限 4。不像"一次掉到 4"那样白丢吞吐，也不做无谓的长链重试。"""
+    out = []
+    cand = max(4, bs // 2)
+    if cand < bs:
+        out.append(cand)
+    if 4 < bs and 4 not in out:
+        out.append(4)
+    return out
+
+
 def _with_device_retry(tag, model, run):
-    """run(batch_size) → 结果。设备侧故障逐级兜底：
-    ① 清 CUDA 缓存 + 缩批到 4 重试；② 仍失败 → 把模型移到 CPU 再试；③ 还不行才把异常抛出去。
+    """run(batch_size) → 结果。设备侧故障逐级兜底（每级都只对设备类故障生效）：
+    ① 清 CUDA 缓存后**折半**重试；② 折半仍不行 → 缩到 4 再试一次；
+    ③ 还不行 → 把模型移到 CPU、批大小回到 **CPU 默认**再试；④ 仍不行才把异常抛出去。
+    能跑通的批大小会被**记住**（同一进程后续调用直接从它开始，不再重复撞同一堵墙），
+    批大小的默认值跟着**模型实际所在设备**走（回退 CPU 后不会继续用 GPU 的 128）。
     覆盖的不只是 OOM，也包括运行中才暴露的 CUDA 错（内核不匹配、cuBLAS/cuDNN 报错、设备丢失）——
     否则一次瞬时故障就等于"这个会话再也用不了向量"（与 issue #2 的永久缓存同一个坑）。
     非设备故障（数据/格式问题）不兜底，原样上抛。"""
     cpu_default, gpu_default = _BATCH_DEFAULTS.get(tag, (16, 16))
-    bs = _batch_size("KB_%s_BATCH" % tag.upper(), cpu_default, gpu_default)
+    on_gpu = _model_on_gpu(model)
+    key = (tag, "gpu" if on_gpu else "cpu")
+    want = _gpu_batch(tag, gpu_default) if on_gpu else cpu_default
+    bs = _BATCH_EFFECTIVE.get(
+        key, _batch_size("KB_%s_BATCH" % tag.upper(), cpu_default, want))
     try:
-        return run(bs)
+        out = run(bs)
+        _BATCH_EFFECTIVE.setdefault(key, bs)
+        return out
     except Exception as e:
         if not _is_cuda_error(e):
             raise
         _free_cuda_cache()
-        try:
-            return run(min(4, bs))
-        except Exception as e2:
-            if not _is_cuda_error(e2):
-                raise
-            if not _fallback_cpu(model, tag):
-                raise
-            return run(min(4, bs))
+        for cand in _shrink_ladder(bs):
+            try:
+                out = run(cand)
+                _BATCH_EFFECTIVE[key] = cand          # 记住这次跑通的批大小
+                return out
+            except Exception as e2:
+                if not _is_cuda_error(e2):
+                    raise
+                _free_cuda_cache()
+        if not _fallback_cpu(model, tag):
+            raise
+        _BATCH_EFFECTIVE[(tag, "cpu")] = cpu_default
+        return run(cpu_default)
 
 
 # 旧名（补丁里叫 _with_oom_retry）：保留以免外部验证脚本失效
@@ -1702,6 +1831,22 @@ def _fallback_cpu(model, tag):
         return False
 
 
+def _batch_report():
+    """批大小是怎么定下来的：环境变量 > 实测记忆 > 显存分级 > 设备默认。"""
+    out = {}
+    for tag in ("embed", "rerank"):
+        cpu_d, gpu_d = _BATCH_DEFAULTS.get(tag, (16, 16))
+        item = {"cpu_default": cpu_d, "gpu_default": gpu_d,
+                "env": os.environ.get("KB_%s_BATCH" % tag.upper())}
+        if _cuda_available():
+            item["gpu_tier"] = _gpu_batch(tag, gpu_d)
+        eff = _BATCH_EFFECTIVE.get((tag, "gpu")) or _BATCH_EFFECTIVE.get((tag, "cpu"))
+        if eff:
+            item["effective"] = eff
+        out[tag] = item
+    return out
+
+
 def device_report():
     """现在实际跑在哪、为什么 —— 让"装了 GPU 却没吃上"、"GPU 用不了已退 CPU"、"OOM 已回退"都可见。
     torch 未加载时不主动 import（kb_stats 要保持便宜），只报已加载模型的实际 device。"""
@@ -1710,6 +1855,8 @@ def device_report():
         info["gpu_usable"] = False       # 已判定：不需要碰 torch 就能答
         if _GPU_WHY:
             info["gpu_disabled_reason"] = _GPU_WHY
+    if _PROBE is not None:
+        info["probe"] = "ok" if _PROBE else "failed"   # 真实算过一次的结果（不是 is_available）
     note = _device_note_text()
     if note:
         info["note"] = note
@@ -1722,12 +1869,16 @@ def device_report():
             import torch
             info["torch"] = torch.__version__
             info["cuda_available"] = bool(torch.cuda.is_available())
-            info.setdefault("gpu_usable", _gpu_usable())
+            info.setdefault("gpu_usable", _gpu_usable(probe=False))   # 体检不触发探测（无副作用）
             if info["cuda_available"]:
                 try:
                     info["gpu"] = torch.cuda.get_device_name(0)
                 except Exception:
                     pass
+                vram = _vram_gb()
+                if vram:
+                    info["vram_gb"] = vram
+            info["batch"] = _batch_report()
         except Exception as e:
             info["torch_error"] = "%s: %s" % (type(e).__name__, str(e)[:120])
     for tag, model in (("embed", _EMBEDDER), ("rerank", _RERANKER)):
@@ -3298,6 +3449,8 @@ def cmd_stats(req):
         # 向量链路状态：只反映本进程已有的加载结果，不主动加载模型（kb_stats 要便宜）。
         # missing_vecs / embedding_error 一起给出"检索为什么退化成纯关键词"的直接证据（issue #2）。
         "embedding": _EMBED_NAME if _EMBEDDER is not None else None,
+        # 精排模型名此前只在检索响应与 reload 响应里出现，kb_stats 看不到 —— 排障时得先跑一次检索
+        "reranker": _RERANK_NAME if _RERANKER is not None else None,
         "embedding_error": _EMBED_ERR,
         "vectors_missing": missing_vecs,
         "retry_secs": MODEL_RETRY_SECS,
@@ -3322,6 +3475,17 @@ def cmd_reload(req):
     精排模型（默认只探测嵌入模型：精排模型可能触发 GB 级下载，不该被一次 reload 带出来）。"""
     global _EMBEDDER, _EMBED_ERR, _EMBED_ERR_AT, _EMBED_NAME
     global _RERANKER, _RERANK_ERR, _RERANK_ERR_AT, _RERANK_NAME
+    global _CUDA, _GPU_OK, _GPU_WHY, _PROBE, _VRAM_GB
+    # 设备判定一并重置：用户可能刚装上 CUDA 版 torch 或修好驱动，reload 就该能重新尝试 GPU。
+    # 否则"GPU 不可用"是粘性的，修好了也得重启 DSH —— 与 issue #2 的模型失败永久缓存同一类体验问题。
+    # （模型若已在 CPU 上，要靠 drop_models=true 才会重新加载到 GPU；device_report 会如实显示。）
+    _CUDA = None
+    _GPU_OK = None
+    _GPU_WHY = None
+    _PROBE = None
+    _VRAM_GB = None
+    _BATCH_EFFECTIVE.clear()
+    _DEVICE_NOTE.clear()
     if req.get("drop_models"):
         _EMBEDDER = None
         _EMBED_NAME = None
@@ -3339,6 +3503,8 @@ def cmd_reload(req):
         "embedding_error": None if emb is not None else (_EMBED_ERR or "embedding model unavailable"),
         "reranker": _RERANK_NAME if rr is not None else None,
         "reranker_error": None if rr is not None else _RERANK_ERR,
+        # reload 之后设备落在哪、探测结果如何 —— 用户修环境后第一眼要看的就是这个
+        "device": device_report(),
         "retry_secs": MODEL_RETRY_SECS,
     }
 
