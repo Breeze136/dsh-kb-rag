@@ -25,6 +25,17 @@ const cases = {
          results: [{ score: 0.48 }] },
   slow: { ok: true, mode_used: 'hybrid', reranker: 'r', ms: 7400, results: [{ score: 0.9 }] },
   disabled: { ok: true, kb_rag_disabled: true, results: [] },
+  // 真实引擎在 quick 模式下的形态（实测抓下来的）：`reranker` 键**在**、值是 `null`，
+  // `verdict` 也是 `null`，分数是 RRF 融合分（无量纲，实测 0.03–0.05）。
+  // 判据曾经写成 `resp.reranker !== undefined`，null 通不过这个检查，于是拿融合分去比
+  // 为精排分标定的 0.10 阈值（精排：库外 0.004–0.038 / 库内 0.65–1.37），
+  // 把一个高相关命中误判成"库内无相关资料"，还叫 agent 不要再换词重试。
+  quickNullRerank: { ok: true, mode_used: 'hybrid', reranker: null, depth: 'quick', verdict: null,
+                     no_hit: false, floor: null, ms: 12596,
+                     results: [{ score: 0.048 }, { score: 0.0466 }] },
+  // 对照组：真跑了精排且分数确实低 —— 这种才该判 no-hit（证明规则没被改废）
+  rerankedLow: { ok: true, mode_used: 'hybrid', reranker: 'BAAI/bge-reranker-base', depth: 'deep',
+                 verdict: null, no_hit: false, max_score: 0.032, results: [{ score: 0.032 }] },
 };
 
 const fired = (resp, diligence = 'normal') =>
@@ -39,6 +50,20 @@ rep.check('向量降级 → degraded-vectors', fired(cases.degraded).includes('d
 rep.check('中文命中差 → cjk-query', fired(cases.cjk).includes('cjk-query'));
 rep.check('慢调用 → slow-call', fired(cases.slow).includes('slow-call'));
 rep.check('已关闭 → disabled', fired(cases.disabled).includes('disabled'));
+// quick 模式（reranker=null）不得用地板：分数不是一个量纲
+rep.check('quick（reranker=null）不误报 no-hit', !fired(cases.quickNullRerank).includes('no-hit'),
+          JSON.stringify(fired(cases.quickNullRerank)));
+rep.check('quick（reranker=null）不误报 weak-hit', !fired(cases.quickNullRerank).includes('weak-hit'),
+          JSON.stringify(fired(cases.quickNullRerank)));
+rep.check('quick（reranker=null）没有任何相关性类停损规则',
+          !['no-hit', 'no-hit-thorough', 'weak-hit'].some((id) => fired(cases.quickNullRerank).includes(id)),
+          JSON.stringify(fired(cases.quickNullRerank)));
+rep.check('quick（reranker=null）只可能因慢触发 slow-call（与相关性判定无关）',
+          fired(cases.quickNullRerank).every((id) => id === 'slow-call'),
+          JSON.stringify(fired(cases.quickNullRerank)));
+// 对照组：真跑了精排且分数低 → 仍然判 no-hit
+rep.check('精排后低分仍触发 no-hit（规则没被改废）', fired(cases.rerankedLow).includes('no-hit'),
+          JSON.stringify(fired(cases.rerankedLow)));
 rep.check('非检索工具不触发这些规则',
   g.resultNotes('kb_stats', cases.degraded, mkThrottle(), {}).fired.length === 0);
 rep.check('kb_ingest 不触发检索口径的降级文案（规则限定 tools）',
@@ -51,6 +76,13 @@ rep.check('深挖：触发补库指引 no-hit-thorough', thFired.includes('no-hi
 const thLines = g.resultNotes('kb_search', cases.offKb, mkThrottle(), { diligence: 'thorough' }).lines.join('\n');
 rep.check('深挖文案含 kb_fetch 动作', /kb_fetch/.test(thLines));
 rep.check('深挖文案不含"不要再换词"', !/不要再换词/.test(thLines));
+// 措辞自洽：调用纪律第 1 条要求"每次必须换实质策略（中文→英文术语 / 放宽 filters / 换同义术语）"，
+// 第 2 条却说"不要再换词连试" —— 同一个词在两行里一正一反，实测模型会在"换术语"和"别换词"之间空转。
+const nhDefaultLines = g.resultNotes('kb_search', cases.offKb, mkThrottle(), {}).lines.join('\n');
+rep.check('默认档 no-hit 用"不要再反复重试"而非"不要再换词重试"',
+  /不要再反复重试/.test(nhDefaultLines) && !/不要再换词/.test(nhDefaultLines), nhDefaultLines.slice(0, 160));
+rep.check('调用纪律不再出现"不要再换词"（与"必须换实质策略"矛盾）',
+  !/不要再换词/.test(g.disciplineText('normal')) && /不要再反复连试/.test(g.disciplineText('normal')));
 
 // 节流
 const store = new Map();

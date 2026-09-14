@@ -138,12 +138,25 @@ export function loadClientBundle(path) {
   return handoff;
 }
 
-/** 极简 React 桩：函数组件会被真正调用（等于一次迷你渲染）。 */
+/** 极简 React 桩：函数组件会被真正调用（等于一次迷你渲染）。
+ *
+ *  带 hooks 支持：客户端指示条要显示实时状态、要可点击，就必须用 useState/useEffect，
+ *  所以桩必须提供它们，否则组件一渲染就 TypeError、整个 suite 直接退出（没有结果标记）。
+ *  · useState：返回初值 + 空 setter —— 本桩没有重渲染，第二次渲染由测试自己再调一次组件模拟。
+ *  · useEffect：**真的执行一次**（这样被能力检测守卫的分支也能跑到），返回的清理函数丢弃。
+ */
 export const ReactStub = {
   createElement(type, props, ...children) {
     const p = Object.assign({}, props || {});
     if (children.length > 0) p.children = children.length === 1 ? children[0] : children;
     if (typeof type === 'function') return type(p);
     return { type, props: p, children };
+  },
+  useState(init) {
+    return [typeof init === 'function' ? init() : init, () => {}];
+  },
+  useEffect(fn) {
+    if (typeof fn === 'function') fn();
+    return undefined;
   },
 };
