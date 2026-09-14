@@ -101,6 +101,6 @@ npx dsh-kb-rag-install
 不想跑脚本/命令、或环境受限时：
 
 1. **环境**：Python 3.9+（建议 3.10+）＋ `pip install PyMuPDF faiss-cpu sentence-transformers numpy`；可选 `python-docx`（DOCX 原生解析，缺失时引擎自动回退 zip+regex 提取）
-2. **放引擎**：把 `kb_engine.py` 复制到你的 DSH 会话工作区根目录（插件按会话工作区自动定位）
+2. **放引擎**：把 `kb_engine.py` 复制到你的 DSH 会话工作区根目录（插件按会话工作区自动定位）；**再把 `tools/doi_pdf.mjs` 复制成 `<工作区>/scripts/doi_pdf.mjs`** —— 引擎只在**自己所在目录**旁找这个下载器（`scripts/` → `tools/` → 同级），漏了它不会报错，而是**静默退化**成内置的 Python 下载兜底：裸 arXiv ID 会直接下载失败、文件名也会丢掉标题
 3. **加载插件**：在 DSH 会话中 `cordis_define`：`code.host` ← `plugin/host.js` 内容、`code.client` ← `plugin/client.js` 内容，再 `cordis_run` 激活（客户端半首次需审批）；或直接说"加载 kb-rag 插件，代码在工作区 kb-rag/plugin/ 下"让模型代劳
 4. 然后照常走第 3、4 分钟的流程
