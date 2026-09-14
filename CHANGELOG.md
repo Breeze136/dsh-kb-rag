@@ -30,6 +30,18 @@
 - **OOM 不再是死路**：`encode()` / `rerank()` 捕获显存不足 → 清 CUDA 缓存 + 缩到 batch 4 重试；仍 OOM 则把模型回退 CPU 重试，并把"已回退 CPU"记进 `device.note`。否则一次瞬时 OOM 就会变成"整个会话再也用不了向量"（issue #2 的永久缓存坑）
 - 引擎 `VERSION` 3.1.0 → 3.2.0（`PARSER_REV` **4 → 5**，见下面「References 判定重做」一节 —— **升级后老库会被标记为分块陈旧，需 `kb_ingest(rebuild=true)` 重灌**，见文首升级须知）；搜索缓存 key 含引擎 token，升级后不会复用旧响应
 
+### 新增：GPU 自动配置与 CPU 兜底增强（探测 / 显存分级 / 折半梯次 / reload 可恢复）
+
+- **真实可用性探测**：`auto` 与显式 `cuda*` / `mps` 不再只信 `torch.cuda.is_available()`，而是先在目标设备上做一次 8×8 矩阵乘并同步（`_gpu_probe`）。原因：**驱动报告有卡 ≠ 能跑内核** —— 驱动与 CUDA runtime 版本不匹配、容器/WSL、显卡处于独占计算模式，这些在 `is_available()==True` 时照样失败；不探就会把失败推迟到模型加载期（代价更大、报错更难懂，三级加载链还会在 GPU 上连撞几次）。探测失败即粘性关闭 GPU 并把原因写进 `device.gpu_disabled_reason`。`KB_GPU_PROBE=0` 可跳过探测（保留"先试一次"的旧行为）。
+- **显存分级批大小**：显存 <4 GB → 嵌入 16 / 精排 8，<8 GB → 64 / 32，≥8 GB 保持 128 / 64；显存查不到则沿用历史默认。用于保护共享显存的轻薄本。实测本机 32–256 之间吞吐无差别（167.6 → 164.7 块/s，噪声级，瓶颈在 CPU 侧分词），所以**降批不牺牲速度**。`KB_EMBED_BATCH` / `KB_RERANK_BATCH` 仍然最优先。
+- **批大小跟着模型实际所在设备**：运行期回退 CPU 之后不再继续用 GPU 的 128，而是回到 CPU 默认（32 / 16）。
+- **折半梯次 + 记忆**：设备类错误不再"一步掉到 batch 4"，而是折半 → 再缩到 4 → 才回退 CPU；**能跑通的批大小会被记住**，同一进程后续调用直接从它开始（此前每次调用都要重新撞一遍 OOM）。
+- **体检无副作用**：`kb_stats` / `device_report` 只回答"按当前已知信息能不能用"，不触发探测、也不因此关闭 GPU —— 一次瞬时故障不该被一次只读查询固化下来。
+- **`reload` 可恢复**：`reload` 现在重置设备判定（`_CUDA` / `_GPU_OK` / 探测结果 / 显存缓存）、清空批大小记忆与设备说明，并在响应里返回 `device` —— 修好驱动或装上 CUDA 版 torch 后**不必重启 DSH**（与 issue #2"模型失败不再永久缓存"同源）。模型若已落在 CPU，需要 `drop_models=true` 才会重新加载到 GPU。
+- **报告补齐**：`device` 新增 `probe` / `vram_gb` / `batch`（含 `env` / `gpu_tier` / `effective` 与 CPU·GPU 默认值）；`kb_stats` 补上此前缺失的 `reranker` 字段（精排模型名过去只在检索响应与 `reload` 响应里可见）。
+- 设备类错误识别扩到 `mps` / `rocm` 特征串；刻意**不**加 `hip` / `metal`（会误伤 `chip` / `metallurgy` 这类普通错误文本），保持"非设备故障原样上抛、不被兜底掩盖"的不变量。
+- 回归：`tests/suites/s_gpu.py` 19 → **52 条断言**（探测失败/成功、`KB_GPU_PROBE=0`、显存分级、梯次与记忆、回退后批大小、体检无副作用、MPS/ROCm 识别、`reload` 重置）；全量 15 suite / **413 断言**。设备自动配置**不影响检索结果**：同库同查询 top1 与得分与改动前逐位一致。
+
 ### 文档：写明 `filters.journal` 的可用范围（BACKLOG §2.8 的 ④，纯文档，无行为变更）
 - **问题**：`extract_meta()` 从不给 `journal` 赋值，只有 Zotero 迁移会写入。因此 `kb_ingest` 建起来的库里该列恒为 `NULL`，`filters.journal` 必然零命中——而工具描述此前只写"期刊子串匹配"，等于给了模型一个静默失效的过滤器。
 - **改动**：`filterSchema.journal` 的字段说明与 `kb_search` 的 filters 说明（`plugin/host.js` 与 `npm-package/lib/index.js` 两个副本、`mcp-server/server.py` 的 `kb_search`/`kb_rag` docstring）都写明"仅 Zotero 迁移填充，`kb_ingest` 入库的文档为 `NULL`，用它过滤通常零命中，请改用 authors/year/title"；`README.md` / `README_CN.md` / `npm-package/README.md` / `mcp-server/README.md` 与 `docs/DESIGN.md`（§4、§5）同步说明。

@@ -249,6 +249,11 @@ Measured on Windows with CPU inference. Methodology and design rationale: [`docs
 |---|---|---|---|
 | `KB_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | Engine | Embedding model; downloaded to the Hugging Face cache on first use |
 | `KB_RERANK_MODEL` | `BAAI/bge-reranker-base` | Engine | Reranking model |
+| `KB_DEVICE` | `auto` | Engine | `auto` uses the GPU whenever a CUDA build of torch finds a working device; `cpu` / `cuda` / `cuda:1` / `mps` force a choice. Any device failure falls back to CPU automatically |
+| `KB_GPU_PROBE` | `1` | Engine | `0` skips the one-off "can this device actually compute?" probe (a tiny matmul) and goes straight to the model load — an escape hatch for unusual environments |
+| `KB_EMBED_BATCH` | GPU 128 / CPU 32 (tiered below 8 GB VRAM) | Engine | Embedding batch size for ingest and search. Raising it does not help on small models — measured throughput is flat from 32 to 256 |
+| `KB_RERANK_BATCH` | GPU 64 / CPU 16 (tiered below 8 GB VRAM) | Engine | Reranking batch size |
+| `KB_MODEL_RETRY_SECS` | `120` | Engine | How long a failed model load is remembered before retrying (`0` = every call, negative = never retry) |
 | `HF_ENDPOINT` | none | Engine | Set to `https://hf-mirror.com` on restricted networks |
 | `KB_AUTO_PIP` | `0` | npm package | `1` installs missing Python dependencies at startup (fixed argv; by default only the command is printed). The dynamic plugin host reports but does not install |
 | `KB_RAG_ROOT` | DSH: session workspace `.kb`; MCP: `~/.kb-rag` | MCP | Knowledge base directory; per-call override with `kb_root` |
