@@ -87,6 +87,45 @@ def run(ctx):
     ctx.check("CHUNK_AFFECTING_REVS 含 5", 5 in eng.CHUNK_AFFECTING_REVS,
               sorted(eng.CHUNK_AFFECTING_REVS))
 
+    # —— 两半边逻辑漂移：可选服务不得用属性访问 ——
+    # 背景：1.6.7 的 npm 半边把 `ctx.get('commands')` 写成了 `ctx.commands`，而该名字没在
+    # inject 里声明。Cordis 的 Guard 对未声明服务的**属性访问**直接抛错，于是整个插件树加载
+    # 失败、profile 起不来（`cannot get property "commands" without inject`）。动态半边写对了，
+    # 静态半边没有 —— 两份实现是手工并行维护的（没有生成脚本），所以会悄悄漂移。
+    # 判据：每个半边的 `ctx.<name>` 属性访问，必须能用「本文件自己声明的 inject」或
+    #       「plugin/host.js 也这么用（它在沙箱 Guard 下真跑过，用错会立刻抛）」解释。
+    # 注意必须先剥注释：注释里写的 `ctx.commands` 和 `inject: ['commands']` 会把判据带偏。
+    def _strip_js_comments(text):
+        text = re.sub(r"/\*[\s\S]*?\*/", " ", text)
+        return re.sub(r"(^|[^:])//[^\n]*", r"\1 ", text, flags=re.M)
+
+    def _prop_names(text):
+        return set(re.findall(r"\bctx\.([A-Za-z_$][\w$]*)", _strip_js_comments(text)))
+
+    def _inject_names(text):
+        out = set()
+        for m in re.finditer(r"inject\s*[:=]\s*\[([^\]]*)\]", _strip_js_comments(text)):
+            out |= set(re.findall(r"['\"]([^'\"]+)['\"]", m.group(1)))
+        return out
+
+    host_props = _prop_names((REPO / "plugin" / "host.js").read_text(encoding="utf-8"))
+    for rel in ("npm-package/lib/index.js", "plugin/client.js", "npm-package/lib/client.js"):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        unexplained = sorted(n for n in _prop_names(text)
+                             if n not in _inject_names(text) and n not in host_props)
+        ctx.check("%s 没有未声明 inject 的 ctx 属性访问（与 host.js 无漂移）" % rel,
+                  not unexplained, "、".join(unexplained))
+
+    # —— 部署指示必须带上 Node 下载器 ——
+    # 引擎的 _node_doi_pdf_script() 只在**引擎所在目录**旁找 scripts/doi_pdf.mjs（其次 tools/、同级），
+    # 而手工部署路线只把 kb_engine.py 放进工作区。漏了下载器**不会报错**，只会静默退化成内置的
+    # Python 兜底：裸 arXiv ID 直接失败、文件名丢标题、候选源与反爬处理都变弱。
+    # 所以「放引擎」这一步必须同时交代它 —— 这条断言就是替用户盯着这件事。
+    qs = (REPO / "QUICKSTART.md").read_text(encoding="utf-8")
+    step = next((l for l in qs.splitlines() if "放引擎" in l), "")
+    ctx.check("QUICKSTART 的「放引擎」步骤同时交代了 doi_pdf.mjs（否则下载器静默失效）",
+              "doi_pdf" in step, step[:140] or "没找到「放引擎」这一步")
+
     # —— 隐私约定（AGENTS.md）：tracked 文件里不得出现本机路径 ——
     tracked = subprocess.run(["git", "-C", str(REPO), "ls-files"], capture_output=True, text=True,
                              encoding="utf-8", errors="replace").stdout.split()

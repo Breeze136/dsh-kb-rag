@@ -4,7 +4,8 @@
 
 ```bash
 python tests/run.py              # 快测（不含 slow，约 1 分钟；缺模型/依赖的用例自动 SKIP）
-python tests/run.py --all        # 含 slow：全库切块健康度 + 引文关联命中率
+python tests/run.py --all        # 含 slow：全库切块健康度 + 引文关联命中率 + 下载闭环（要联网）
+python tests/run.py --only fetch # 只跑下载闭环（会真去 arxiv/出版商下 PDF，离线自动 SKIP）
 python tests/run.py --only refs  # 只跑名字含 refs 的 suite
 python tests/run.py --list       # 列出全部 suite
 python tests/run.py --fail-fast  # 首个失败即停
@@ -12,6 +13,9 @@ python tests/run.py --workers 1  # 强制串行（排查用）
 python tests/run.py --no-cache   # 忽略逐篇指标缓存，全量重算
 python tests/run.py --json out.json
 ```
+
+**想把功能验收交给框架时，跑这三条就够**：`--only functional`（入库/后台/维护闭环）、
+`--only mcp`（MCP 交付面）、`--all --only fetch`（下载）。三者都能反复跑，写操作全在沙箱临时库。
 
 **耗时（本机 316 篇真实 PDF 实测）**：快测 ~50 s ｜ `--all` 冷跑 ~130 s、热跑 ~60 s。
 （最初是单进程串行、两个 slow 套件各解析一遍全库 = 498 s；见下面的"为什么这么快"。）
@@ -52,6 +56,9 @@ python tests/run.py --json out.json
 | `bm25` | 无 | 用**独立参考实现**逐位核对 BM25（k1=1.2/b=0.75/子串 df/章节权重）+ 缓存不改变结果 + 确定性 |
 | `gpu` | 无（假模型） | 无 GPU→CPU、显式 cuda 无卡→CPU、加载期 CUDA 错→退 CPU 且**粘性关闭**、探测不被反复死磕、非设备故障不得被兜底掩盖、运行期 OOM 与非 OOM→缩批→CPU、CrossEncoder 形态的 `.to()` 兼容 |
 | `engine_loop` | 模型 | 入库 → 删向量 → `skipped` 回填 → `duplicate` 也回填 → stats/health → `reload` → `metadata_only` → `state` 读写与非法键 → `clear` 需 confirm |
+| `functional` | 模型 | **跨步骤功能闭环**（临时库）：入库四种结果各走一遍（新增/重复/跳过/更新）、改文件后新内容可检索、**库内不变量**（weight>0 的分块必须都有向量）、30 篇自动转后台 + `status` 轮询到 done、`dedup` 幂等、`metadata_only`、`rebuild` 转后台、多库互不干扰、`clear` 安全阀与真清 |
+| `mcp` | 无（离线） | **MCP 交付面**（此前零覆盖）：基线 10 工具、`kb_mcp_status` 内容、`render_fetch` 带出入库结果、引擎异常时带出 stderr 尾部、`rebuild` 走 `ingest_async`、3.9 注解为字符串，以及隔离的**真实注册结果**（子进程真 import：`KB_MCP_EXCLUDE`→8、白名单→3、`KB_MCP_NO_PROBE`→10） |
+| `fetch`（slow） | 网络 + 模型 | **下载闭环**：下载器可定位（否则静默退化成 Python 兜底）、arXiv 走 `source=arxiv`、DOI 落地页、URL 形式归一化、坏标识符给原因不误报、空列表拒绝、`ingest=true` 下载即入库；离线自动 SKIP |
 | `search` | 模型 | filters 归一化（连字符/空格/大小写/作者分词 AND/年份）、相关性地板（库内 verdict=相关 / 库外 no_hit+closest / quick 不硬判）、负结果入缓存、语料缓存命中与**条数上限**、元数据改写后不得返回旧值、**跨进程写入**必须失效 |
 | `plugin_harness` | node | stub ctx 加载插件：inject、10 个工具、描述注入、四个渲染器、`/kb` 状态卡与会话隔离、软/硬/半关闭与重新注册、深挖模式分档 |
 | `host_half` | node | **动态半边**（`plugin/host.js` 按函数体求值，harness 用真实 `sandboxDefineTool`，会校验 schema/渲染块/JSON 可克隆）：inject 不得含可选服务、10 个工具、镜像描述注入、`withNotes` 结果注入（no-hit/降级/已关闭/深挖分档）、`/kb` 三档关闭与会话隔离、`commands` 缺失兜底，以及**两半 10 个工具逐字段一致**（描述/参数/输出 schema/timeoutMs/呈现器） |
