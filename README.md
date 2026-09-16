@@ -89,7 +89,17 @@ Both the installer and the engine retry through `hf-mirror.com` when a direct do
 
 ### 2. Install
 
-**Option A — one command (recommended)**
+> **On Windows and would rather not touch a command line?** Use the companion
+> one-click installer: download the zip from the
+> [dsh-oneclick release page](https://github.com/Breeze136/dsh-oneclick/releases/latest),
+> unzip it **completely**, then double-click `install.cmd`. It fills in a missing
+> Node.js (no administrator rights), the official DSH CLI and a desktop shortcut, and
+> asks once whether you want this knowledge base — press Enter and Python, the engine
+> dependencies and the ~1.2 GB of retrieval models are installed too. Running it again
+> updates. It is a third-party helper, not published by DeepSeek: it installs the
+> official packages through their official channels.
+
+**Option A — one command (recommended if you have a terminal)**
 
 ```bash
 npx dsh-kb-rag-install

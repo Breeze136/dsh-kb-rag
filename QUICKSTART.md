@@ -6,6 +6,12 @@
 
 ## 第 1 分钟 · 一键安装（推荐）
 
+> **Windows、完全不写代码？** 走配套的一键安装器：到
+> [dsh-oneclick 发行页](https://github.com/Breeze136/dsh-oneclick/releases/latest) 下载 zip，
+> **完整解压**后双击 `install.cmd`。Node.js、官方 DSH 命令行工具、桌面快捷方式它都会装好；
+> 中途问一句要不要知识库，回车即装，Python 依赖与约 1.2 GB 检索模型一并处理。
+> 只适用于 Windows；第三方脚本，非 DeepSeek 官方发布。
+
 **方式 A · npx 一行（最快，已装 Node 即可，直接复制）**：
 
 ```bash
