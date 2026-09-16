@@ -89,7 +89,14 @@ Windows PowerShell 5.1 默认将管道编码设为 ASCII，这会把临时路径
 
 ### 2. 安装
 
-**方式 A — 一条命令（推荐）**
+> **Windows、且不想碰命令行？** 用配套的一键安装器：到
+> [dsh-oneclick 发行页](https://github.com/Breeze136/dsh-oneclick/releases/latest)
+> 下载 zip，**完整解压**后双击 `install.cmd`。它会补上缺失的 Node.js（无需管理员权限）、
+> 官方 DSH 命令行工具和桌面快捷方式；中途问一句要不要这个知识库 —— 直接回车，
+> Python、引擎依赖和约 1.2 GB 的检索模型就一并装好。重复运行即为更新。
+> 第三方辅助脚本，非 DeepSeek 官方发布 —— 它只是把官方发布的包按官方文档的方式装好。
+
+**方式 A — 一条命令（有终端时推荐）**
 
 ```bash
 npx dsh-kb-rag-install
