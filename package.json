@@ -1,0 +1,30 @@
+{
+  "name": "dsh-kb-rag",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repo-root manifest for dsh-kb-rag. The installable plugin bundle is published from npm-package/ as dsh-kb-rag; this file exists so the repository itself declares a dsh.bundle (registry tooling reads <repo>/HEAD/package.json) and points at that bundle. Not published: version is intentionally 0.0.0, the real version lives only in npm-package/package.json.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Breeze136/dsh-kb-rag.git"
+  },
+  "homepage": "https://github.com/Breeze136/dsh-kb-rag#readme",
+  "bugs": {
+    "url": "https://github.com/Breeze136/dsh-kb-rag/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./npm-package/cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "rag",
+    "knowledge-base",
+    "literature",
+    "zotero"
+  ]
+}
