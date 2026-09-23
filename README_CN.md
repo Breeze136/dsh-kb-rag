@@ -11,6 +11,8 @@
 
 kb-rag 是面向 DSH（DeepSeek Harness）以及任何支持 MCP 的 agent 的本地文献知识库。它把 PDF 与 Zotero 文库索引到同一个 SQLite 文件中，回答问题时给出的是原文段落而非改写：每条结果都携带所属章节、PDF 物理页码与可点击的 DOI，并且检索到的段落中每一处文内引用都能回溯到被引文献，同时标明该文献是否已在你的文库中。
 
+> 本仓库 `npm-package/` 即 npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 的源；与 GitHub 上同名的其他仓库无关。
+
 索引、向量化与重排全部在本地完成，没有 API 费用，也不会上传任何数据。
 
 <p align="center">

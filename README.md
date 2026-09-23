@@ -11,6 +11,8 @@
 
 kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and any MCP-capable agent. It indexes PDFs and Zotero libraries into a single SQLite file, then answers questions with passages rather than paraphrases: every result carries its section, physical PDF page, and a clickable DOI — and every in-text citation in the retrieved passage can be traced back to the referenced work, including whether that work is already in your library.
 
+> The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package) in this repository. It is not affiliated with other repositories that share the name `dsh-kb-rag`.
+
 Indexing, embedding, and reranking all run locally. There is no API cost and no upload.
 
 <p align="center">
