@@ -1,4 +1,4 @@
-# kb-rag — local literature RAG with passage-level provenance
+# kb-rag: local literature RAG with passage-level provenance
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
@@ -9,15 +9,15 @@
 
 **English** | [Chinese](./README_CN.md)
 
-kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and any MCP-capable agent. It indexes PDFs and Zotero libraries into one SQLite file and returns the passages that answer a question: section, physical page, DOI, and the citations attached to that passage, including whether the cited work is already in your library.
+kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and other MCP clients. It indexes PDFs and Zotero libraries into one SQLite file, then returns the passages that answer a question. Each result carries its section, physical page and DOI, and the citations attached to that passage, including whether the cited work is already in your library.
 
 Indexing, embedding and reranking run on your machine. There is no API cost and nothing is uploaded.
 
-The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package) in this repository; other repositories with the same name are not affiliated with it.
+The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Other repositories with the same name are not affiliated with it.
 
 ## What a result looks like
 
-A single `kb_rag` call returns evidence in this shape. The interface is in Chinese today, so the block below is a translation. `[in-library]` marks a cited work that is already indexed.
+A `kb_rag` call returns evidence in this shape. The interface is in Chinese today, so the block below is a translation. `[in-library]` marks a cited work that is already indexed.
 
 ```text
 **Knowledge base sources Top-2**
@@ -34,41 +34,35 @@ citations from this evidence ([in-library] = already held, searchable)
 - [A Practical Guide to Raman Spectroscopy of Graphene] — Author G et al. · 2020 (same author, related topic)
 ```
 
-Placeholder authors, journals and DOIs; the format is what matters. The full walkthrough is in [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md).
+Authors, journals and DOIs are placeholders; the format is real. The full walkthrough is in [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md).
 
 ## What 1.6.8 changes
 
-The release fixes the install path for DSH 0.2, so the plugin panel can install it and the tool cards render again. It also adds:
+1.6.8 fixes the install path for DSH 0.2. The peer range and the client injection list were both wrong, so the plugin was rejected during install and the tool cards stayed empty. Those are fixed.
 
-- **HTML answer pages** rendered by the engine: ten templates, comparison tables, bar and trend charts, KPI cards, process chains, and a footer that reports retrieval and render time.
-- **A cheap first look.** `probe=true` returns the top five titles in about 0.3 s. The agent can show what the library holds, ask once how deep to go, then run the full search.
-- **Visible model state.** `kb_stats` reports whether the embedding and reranking models are present, partial, or missing, instead of letting the first search stall without explanation.
-- **Honest empty results.** A `deep` query whose best reranked score stays under the floor returns `no_hit`, the closest passages and a scope hint, instead of three weak hits. `quick` returns candidates without a verdict, because its fused score is not calibrated for that call.
-- **Cache invalidation by build.** The response cache key includes a fingerprint of the engine file, so a patched engine stops serving answers produced by the previous one.
-
-Older changes are listed in [CHANGELOG.md](CHANGELOG.md).
+The release also adds HTML answer pages rendered by the engine, a title-level probe, model cache state in `kb_stats`, and a `no_hit` verdict for deep searches whose best reranked score stays below the floor. The search core is otherwise unchanged: on the same library, results line up with 1.6.7. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-The shortest path is the DSH desktop app. After installing, restart DSH and open a new session: tools are injected when a session is created, so existing sessions do not see them.
+The shortest path is the DSH desktop app. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
 
-**A. DSH desktop app (recommended, no terminal)**
+### A. DSH desktop app (no terminal)
 
 1. Open **Settings → Plugins** (设置 → 插件).
-2. Search `kb-rag`; the package is `dsh-kb-rag`, and the entry should say **1.6.8**.
+2. Search `kb-rag`. The package is `dsh-kb-rag`, and the entry should say **1.6.8**.
 3. Install, restart DSH, and start a new conversation.
 
-The desktop app must be 0.2 or newer: 1.6.7 and earlier are rejected by 0.2's compatibility check, which is what 1.6.8 fixes. The first search downloads the two models (~1.2 GB), so expect a short wait; `kb_stats` shows whether they are present.
+The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check, which is what 1.6.8 fixes. The first search downloads the two models (~1.2 GB), so expect a short wait. `kb_stats` shows whether they are present.
 
-**B. DSH CLI**
+### B. DSH CLI
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag@1.6.8
 ```
 
-Pin the version. A DSH profile is a pnpm workspace, and pnpm's `minimumReleaseAge` policy refuses packages published minutes ago; an unpinned install right after a release can quietly resolve to the previous version. Re-running the installer also works and reconciles Python dependencies.
+Pin the version. A DSH profile is a pnpm workspace, and pnpm's `minimumReleaseAge` policy refuses packages published minutes ago. An unpinned install right after a release can quietly resolve to the previous version. Re-running the installer also works and reconciles Python dependencies.
 
-**C. One-shot installer**
+### C. One-shot installer
 
 ```bash
 npx dsh-kb-rag-install
@@ -76,7 +70,7 @@ npx dsh-kb-rag-install
 
 The installer runs the chain for you: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`: one profile is used directly, several are offered as a choice, none falls back to `web`.
 
-**D. From source**
+### D. From source
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
@@ -84,16 +78,16 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 # Windows: install.cmd, or npm-package\scripts\install.ps1
 ```
 
-**Starting from nothing on Windows.** The companion [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) zip installs Node.js, the DSH CLI, a desktop shortcut, and optionally this plugin with its Python dependencies and models. Unzip it completely and double-click `install.cmd`. It is a third-party helper, not a DeepSeek release, and it installs the official packages through their official channels.
+On Windows, if DSH is not installed yet, the companion [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) zip installs Node.js, the DSH CLI, a desktop shortcut, and optionally this plugin with its Python dependencies and models. Unzip it completely and double-click `install.cmd`. It is a third-party helper, not a DeepSeek release, and it installs the official packages through their official channels.
 
-**Older desktop builds.** If the built-in plugin page cannot search npm, install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once and use its marketplace panel; kb-rag is listed there.
+If your desktop build cannot search npm, install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once and use its marketplace panel. kb-rag is listed there.
 
 > [!WARNING]
 > Do not run `npm install dsh-kb-rag` inside a DSH profile. It writes an npm-style `node_modules` next to pnpm's symlink store, and later `dsh plugin` operations become unpredictable. `npm install` is only for a deployment you manage by hand; see [npm-package/README.md](npm-package/README.md).
 
 ## Build a library
 
-In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`): it tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
+In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`). It tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
 
 Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the batch into a background job and returns a `job_id` immediately. Poll it with `kb_status` until it reports `done`; a host-side timeout does not interrupt the job. The same applies to whole-library Zotero migrations with `kb_zotero(async_mode=true)`.
 
@@ -127,32 +121,36 @@ The MCP server exposes 10 tools as well, including `kb_status` and a diagnostic 
 
 ### Engine capabilities
 
-- Section-aware chunking: abstract weighted ×1.5, methods ×1.2, inline heading detection, abstract promotion, caption blocks, paragraph merging for non-article documents.
-- Hybrid retrieval: BM25 with CJK bigram support, bge-small vector cosine, RRF fusion, section weights.
-- Reranking with bge-reranker-base (top 20 into top 3), falling back to a bge-large-en bi-encoder when the cross-encoder is unavailable.
-- Page anchors: results carry the physical PDF page and render as `section · p.N`, which maps onto Zotero's `?page=N` link.
-- Citation linking: `[n]` markers resolve to reference entries; Nature-style superscripts are detected from font metrics (`graphene1,2` becomes `graphene[1,2]`); cited works are matched by DOI, normalised title, or first author plus year, and in-library matches are marked.
-- Incremental indexing: SHA-256 hashes skip unchanged files (about 40× faster on re-runs) and catch duplicates across folders.
-- Metadata refresh and stale detection: each document records the parser revision that wrote it (`docs.indexed_with`), so `kb_stats` can report rows an older revision left behind.
-- Response cache: identical query and filters are not recomputed; any ingest or engine rebuild invalidates it.
-- Resident daemon: models load once, the daemon recovers from crashes, and it is reclaimed when the plugin stops.
-- Dimension guard: if the library was built with a different embedding model, retrieval stops with an explicit error instead of degrading silently to keyword search.
+- Chunking is section-aware: abstracts get weight 1.5, methods 1.2. It also handles inline headings, abstract promotion, caption blocks and paragraph merging for non-article documents.
+- Retrieval combines BM25 (with CJK bigrams), bge-small vector cosine, RRF fusion and section weights.
+- Reranking uses bge-reranker-base to cut the top 20 down to 3, with a bge-large-en bi-encoder as fallback.
+- Every passage carries its PDF page and section. The page renders as `section · p.N` and maps onto Zotero's `?page=N` link.
+- In-text `[n]` markers resolve to reference entries. Nature-style superscripts are detected from font metrics, so `graphene1,2` becomes `graphene[1,2]`. Cited works are matched by DOI, normalised title, or first author plus year, and in-library matches are marked.
+- SHA-256 hashes skip unchanged files (about 40× faster on re-runs) and catch duplicate copies across folders.
+- Each document records the parser revision that wrote it (`docs.indexed_with`), so `kb_stats` can report rows an older revision left behind.
+- Identical queries hit a cache. Any ingest or engine rebuild clears it.
+- The engine runs as a resident daemon. Models load once, the daemon recovers from crashes, and it is released when the plugin stops.
+- If the library's vectors were built with a different embedding model, retrieval stops with an explicit error instead of falling back to keyword search.
 
 ## Query guidance
 
-The engine receives queries verbatim. It never translates, expands or rewrites them, so retrieval depends on the query matching the language of the indexed text. A typical library is about 98% English body text, which has consequences:
+The engine passes queries through unchanged. It does not translate, expand or rewrite them, so what you type has to match the language of the indexed text. Most libraries are about 98% English, which leads to a few rules that matter in practice.
 
-- Inside a DSH session the agent writes the query, and its tool description already turns a Chinese question into an English term string. Asking in Chinese works. Write English term strings yourself only when you drive the tools directly (MCP clients, scripts, the engine CLI).
-- BM25 matches tokens. A CJK query cannot match English body text, so the keyword half of hybrid ranking contributes nothing and the hit rests on vector similarity. For the same question, an English term string retrieves better.
-- Use 3–12 words in the pattern `material/system + method/process + property/characterisation`: `graphene CVD copper single crystal nucleation suppression`, not a full sentence.
-- Put limits in `filters`, not in the query: year, journal, author, section and file kind are metadata filters. One caveat: `journal` is filled only by the Zotero migration path, so it is `NULL` for documents indexed with `kb_ingest` and filtering on it usually returns nothing. Use author, year, title or section instead.
-- Send a second query in the original language only when you want documents in that language, for example Chinese-language reviews in the same library.
+In a DSH session the agent writes the query. Its tool description already turns a Chinese question into an English term string, so asking in Chinese works. Write English term strings yourself only when you drive the tools directly (MCP clients, scripts, the engine CLI).
+
+BM25 matches tokens. A CJK query cannot match English body text, so the keyword half of hybrid ranking contributes nothing and the hit rests on vector similarity. For the same question, an English term string retrieves better.
+
+Keep queries to 3–12 words in the pattern `material/system + method/process + property/characterisation`, for example `graphene CVD copper single crystal nucleation suppression`. Do not write a full sentence.
+
+Put limits in `filters`, not in the query. Year, journal, author, section and file kind are metadata filters. One caveat: `journal` is filled only by the Zotero migration path, so it is `NULL` for documents indexed with `kb_ingest`. Filtering on it usually returns nothing. Use author, year, title or section instead.
+
+Send a second query in the original language only when you want documents in that language, for example Chinese-language reviews in the same library.
 
 When a CJK query hits an almost entirely English library, the response carries a `lang_note` and the plugin renders it with the results.
 
 ## HTML answers
 
-`kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine renders the page deterministically: no LLM in the layout path, no second round trip, no external requests.
+`kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests.
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
@@ -180,7 +178,7 @@ pip install -r mcp-server/requirements.txt
 python mcp-server/server.py
 ```
 
-Register it as a stdio server in Claude Desktop, Cherry Studio, Kimi, Cursor, DeepSeek or another MCP host. The server shares the same engine and the same `kb.sqlite`; by default it uses `~/.kb-rag` rather than the DSH workspace `.kb`, and every tool accepts `kb_root` to point elsewhere. See [mcp-server/README.md](mcp-server/README.md) for config snippets, capability quarantine and timeout behaviour.
+Register it as a stdio server in Claude Desktop, Cherry Studio, Kimi, Cursor, DeepSeek or another MCP host. The server shares the same engine and the same `kb.sqlite`. By default it uses `~/.kb-rag` rather than the DSH workspace `.kb`, and every tool accepts `kb_root` to point elsewhere. See [mcp-server/README.md](mcp-server/README.md) for config snippets, capability quarantine and timeout behaviour.
 
 ## Architecture
 
@@ -220,9 +218,9 @@ Methodology and design rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
 
 Ingestion and search share one embedding model. A CUDA build of torch is used automatically (`KB_DEVICE=auto`, the default).
 
-- The device is probed before the first model load with a tiny matmul. A driver can report a GPU and still fail at the first kernel, so the probe catches that up front and falls back to CPU with a readable reason. `KB_GPU_PROBE=0` skips the probe.
+- The device is probed before the first model load with a tiny matmul. A driver can report a GPU and still fail at the first kernel, so the probe catches that early and falls back to CPU with a readable reason. `KB_GPU_PROBE=0` skips the probe.
 - Device failures during a call degrade instead of aborting: the batch is halved, then cut to 4, then the model moves to CPU and the call finishes. The batch size that worked is remembered. Non-device errors are raised unchanged.
-- `reload` resets the device verdict after a driver fix; `drop_models=true` reloads the models onto the GPU without restarting the host.
+- `reload` resets the device verdict after a driver fix. `drop_models=true` reloads the models onto the GPU without restarting the host.
 - Batch sizes follow the device and free VRAM. `KB_EMBED_BATCH` / `KB_RERANK_BATCH` override them, but raising them does not speed up small models.
 - CPU-only is about 4× slower on the embedding step. PDF extraction, chunking and BM25 are CPU-bound either way.
 

@@ -1,4 +1,4 @@
-# kb-rag — 本地文献 RAG，提供段落级溯源
+# kb-rag：本地文献 RAG，提供段落级溯源
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
@@ -9,9 +9,9 @@
 
 [English](./README.md) | **中文**
 
-kb-rag 是面向 DSH（DeepSeek Harness）以及任何支持 MCP 的 agent 的本地文献知识库。它把 PDF 与 Zotero 文库索引进一个 SQLite 文件，回答问题时给出原文段落：所属章节、PDF 物理页码、DOI，以及这段证据附带的引用链，并标明被引文献是否已在库内。
+kb-rag 是给 DSH（DeepSeek Harness）和其他 MCP 客户端用的本地文献知识库。它把 PDF 与 Zotero 文库索引进一个 SQLite 文件，回答问题时返回原文段落，并带上章节、PDF 页码、DOI，以及这段证据附带的引用链。被引文献是否已在库内，也会标出来。
 
-索引、向量化与重排都在本机完成，没有 API 费用，也不会上传数据。
+索引、向量化和重排都在本机完成，没有 API 费用，也不上传数据。
 
 npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的 [`npm-package/`](./npm-package) 发布；GitHub 上同名的其他仓库与本项目无关。
 
@@ -34,41 +34,35 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 - [A Practical Guide to Raman Spectroscopy of Graphene] — Author G et al. · 2020（同作者 · 主题相似）
 ```
 
-作者、期刊与 DOI 均为占位数据，格式是真实输出。完整流程见 [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md)。
+作者、期刊与 DOI 都是占位数据，格式是真实输出。完整流程见 [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md)。
 
 ## 1.6.8 改了什么
 
-这个版本修好了 DSH 0.2 的安装路径，插件面板可以直接装，工具卡片也恢复显示。另外还有几处变化：
+1.6.8 修好了 DSH 0.2 的安装路径。peer 范围和客户端 inject 名单都写错了，导致安装被兼容检查拒绝、工具卡片一直是空的。这两处现在都改对了。
 
-- **引擎渲染的 HTML 答案页**：十种模板，支持对比表、数值条与趋势图、指标卡、流程链；页脚报告本次检索与渲染耗时。
-- **先花 0.3 秒看一眼。** `probe=true` 只返回前五条标题，agent 可以先说明库里有什么、问一次要多深，再跑完整检索。
-- **模型状态可见。** `kb_stats` 报告嵌入与精排模型是已下载、下了一半，还是没下载，不再让第一次检索无声地卡十几秒。
-- **空结果说实话。** `deep` 下精排最高分低于地板时返回 `no_hit`、最接近的几篇和范围提示，不再拿三条弱相关结果冒充答案；`quick` 只给候选、不宣称相关性（融合分没有标定）。
-- **缓存跟着构建走。** 响应缓存 key 并入引擎文件指纹，打过补丁的引擎不会再返回上一版算出来的答案。
-
-更早的改动见 [CHANGELOG.md](CHANGELOG.md)。
+另外加了引擎渲染的 HTML 答案页、标题级探针、`kb_stats` 里的模型缓存状态，以及“深度检索最高分低于地板就返回 `no_hit`”的行为。检索内核没动：同一个库上，结果与 1.6.7 对得上。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 安装
 
-最短的路是 DSH 桌面端。装完重启 DSH 并新建会话：工具在会话创建时注入，旧会话看不到。
+最短的路是 DSH 桌面端。装完重启 DSH 并新建会话，工具在会话创建时注入，旧会话看不到。
 
-**A. DSH 桌面端（推荐，不碰命令行）**
+### A. DSH 桌面端（不写命令）
 
 1. 打开 **设置 → 插件**。
-2. 搜索 `kb-rag`（包名是 `dsh-kb-rag`），条目版本应为 **1.6.8**。
+2. 搜索 `kb-rag`。包名是 `dsh-kb-rag`，条目版本应为 **1.6.8**。
 3. 安装，重启 DSH，新建会话。
 
-桌面端需要 0.2 及以上：1.6.7 及更早会被 0.2 的兼容检查拒绝，这正是 1.6.8 修的问题。首次检索会下载两个模型（约 1.2 GB），要等一会儿；`kb_stats` 能看到是否已就绪。
+桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝，这正是 1.6.8 修的问题。首次检索要下载两个模型（约 1.2 GB），会等一会儿；`kb_stats` 能看到是否已就绪。
 
-**B. DSH 命令行**
+### B. DSH 命令行
 
 ```bash
 dsh plugin --profile web add dsh-kb-rag@1.6.8
 ```
 
-把版本号写死。DSH profile 是 pnpm workspace，pnpm 的 `minimumReleaseAge` 策略会拒绝几分钟前刚发布的版本；不写版本号时，刚发版后安装可能悄悄解析到上一版。重跑安装器效果相同，还会顺带校正 Python 依赖。
+把版本号写死。DSH profile 是 pnpm workspace，pnpm 的 `minimumReleaseAge` 会拒绝几分钟前刚发布的版本；不写版本号时，刚发版后安装可能悄悄解析到上一版。重跑安装器效果相同，还会顺带校正 Python 依赖。
 
-**C. 一条命令安装**
+### C. 一条命令安装
 
 ```bash
 npx dsh-kb-rag-install
@@ -76,7 +70,7 @@ npx dsh-kb-rag-install
 
 安装器会依次处理 Python 依赖、引擎冒烟测试、Node/pnpm 检查、`dsh plugin add` 和模型预下载（默认开启，`--no-models` 可跳过）。不指定 profile 时它查看 `~/.dsh/profiles/`：只有一个就直接用，多个给出选择，一个都没有则回退到 `web`。
 
-**D. 从源码安装**
+### D. 从源码安装
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
@@ -84,9 +78,9 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 # Windows：install.cmd，或 npm-package\scripts\install.ps1
 ```
 
-**Windows、从零开始。** 配套的 [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) 压缩包会装好 Node.js、DSH 命令行工具、桌面快捷方式，并可顺带装本插件、Python 依赖与模型。完整解压后双击 `install.cmd`。它是第三方辅助脚本，不是 DeepSeek 官方发布，只是把官方包按官方渠道装好。
+Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) 压缩包：它会装好 Node.js、DSH 命令行工具、桌面快捷方式，并可顺带装本插件、Python 依赖与模型。完整解压后双击 `install.cmd`。它是第三方辅助脚本，不是 DeepSeek 官方发布，只是把官方包按官方渠道装好。
 
-**老版桌面端。** 如果内置插件页不能搜索 npm，先装 [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)，用它的市场面板安装，kb-rag 在列表中。
+如果桌面端内置插件页不能搜索 npm，先装 [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)，用它的市场面板安装，kb-rag 在列表中。
 
 > [!WARNING]
 > 不要在 DSH profile 里执行 `npm install dsh-kb-rag`。它会在 pnpm 的符号链接存储旁写一份 npm 风格的 `node_modules`，之后 `dsh plugin` 的行为会变得不可预测。`npm install` 只适用于完全手工管理的部署，见 [npm-package/README.md](npm-package/README.md)。
@@ -127,32 +121,36 @@ MCP 服务器同样暴露 10 个工具，包括 `kb_status` 与诊断用的 `kb_
 
 ### 引擎能力
 
-- 章节感知切分：摘要权重 ×1.5、方法 ×1.2，支持行内标题识别、摘要提升、图注块；非论文类文档做段落合并。
-- 混合检索：BM25（支持中日韩二元组）+ bge-small 向量余弦，RRF 融合，章节加权。
-- 重排：bge-reranker-base 交叉编码器把 top 20 收敛到 top 3；交叉编码器不可用时回退 bge-large-en 双编码器。
-- 页码锚点：结果携带 PDF 物理页码，渲染为 `section · p.N`，对应 Zotero 的 `?page=N` 链接。
-- 引用关联：文内 `[n]` 解析到参考文献条目；Nature 风格上标按字体度量识别（`graphene1,2` 变成 `graphene[1,2]`）；被引文献按 DOI、规范化标题或第一作者加年份匹配，库内命中会标出来。
-- 增量索引：SHA-256 哈希跳过未变文件（重跑约快 40 倍），并拦截跨路径重复。
-- 元数据刷新与陈旧检测：每篇文档记录写入它时的解析器版本（`docs.indexed_with`），`kb_stats` 能报告旧版本留下的行。
-- 响应缓存：相同查询与过滤条件不重复计算；入库或引擎重建会让缓存失效。
-- 常驻守护进程：模型只加载一次，崩溃后能恢复，插件停止时回收。
-- 维度守卫：库内向量与当前嵌入模型不匹配时直接报错，不再静默退成关键词检索。
+- 切分按章节走：摘要权重 1.5，方法 1.2；支持行内标题识别、摘要提升、图注块，非论文类文档会做段落合并。
+- 检索是 BM25（支持中日韩二元组）+ bge-small 向量余弦 + RRF 融合 + 章节加权。
+- 重排用 bge-reranker-base 把 top 20 收到 top 3，交叉编码器不可用时回退 bge-large-en 双编码器。
+- 每条结果带 PDF 页码和章节，页码渲染成 `section · p.N`，对应 Zotero 的 `?page=N` 链接。
+- 文内 `[n]` 解析到参考文献条目；Nature 风格上标按字体度量识别，`graphene1,2` 会变成 `graphene[1,2]`。被引文献按 DOI、规范化标题或第一作者加年份匹配，库内命中会标出来。
+- SHA-256 哈希跳过未变文件（重跑约快 40 倍），并拦截跨路径的重复副本。
+- 每篇文档记录写入它时的解析器版本（`docs.indexed_with`），`kb_stats` 能报告旧版本留下的行。
+- 相同查询命中缓存；入库或引擎重建会让缓存失效。
+- 引擎是常驻守护进程，模型只加载一次，崩溃后能恢复，插件停止时释放。
+- 库内向量与当前嵌入模型不匹配时，检索直接报错，不会静默退成关键词。
 
 ## 检索建议
 
-查询按原样送进引擎。它不翻译、不扩写、不改写，所以检索效果取决于查询语言与库内正文是否一致。典型文库约 98% 正文是英文，这带来几条实际规则：
+查询按原样送进引擎，不翻译、不扩写、不改写。所以查询语言要和库内正文一致。多数文库约 98% 是英文，实际会碰到几条规则。
 
-- DSH 会话里查询由 agent 写，它的工具描述已经会把中文问题转成英文术语串。直接用中文提问是正常的。只有自己直接驱动工具时（MCP 客户端、脚本、引擎 CLI），才需要手写英文术语串。
-- BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关键词路等于空转，命中只能靠向量相似度。同一个问题，英文术语串的召回明显更好。
-- 用 3–12 个词的组合 `材料/体系 + 方法/工艺 + 性质/表征`，例如 `graphene CVD copper single crystal nucleation suppression`，不要写整句。
-- 限定条件放 `filters`：年份、期刊、作者、章节、文件类型都是元数据过滤。一个注意点：`journal` 只由 Zotero 迁移填充，用 `kb_ingest` 入库的文档该字段是 `NULL`，用它过滤通常零命中。改用作者、年份、标题或章节。
-- 只有确实想要中文文献时，才用原话另发一条中文查询，例如库内还存了中文综述。
+DSH 会话里查询由 agent 写。它的工具描述已经会把中文问题转成英文术语串，直接用中文提问是正常的。只有自己直接驱动工具时（MCP 客户端、脚本、引擎 CLI），才需要手写英文术语串。
+
+BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关键词路等于空转，命中只能靠向量相似度。同一个问题，英文术语串的召回明显更好。
+
+查询控制在 3–12 个词，结构是 `材料/体系 + 方法/工艺 + 性质/表征`，例如 `graphene CVD copper single crystal nucleation suppression`，不要写整句。
+
+限定条件放 `filters`，不要写进查询。年份、期刊、作者、章节、文件类型都是元数据过滤。一个注意点：`journal` 只由 Zotero 迁移填充，用 `kb_ingest` 入库的文档该字段是 `NULL`，用它过滤通常零命中。改用作者、年份、标题或章节。
+
+只有确实想要中文文献时，才用原话另发一条中文查询，例如库内还存了中文综述。
 
 当查询含中日韩字符而库内几乎全英文时，响应会带 `lang_note`，插件会把它渲染在结果旁。
 
 ## HTML 答案页
 
-`kb_rag` 接受一个 `answer` 对象，返回一份自包含 HTML 和一张紧凑的文本卡片。页面由引擎确定性渲染：排版链路里没有 LLM，不需要第二次往返，也不发任何外部请求。
+`kb_rag` 接受一个 `answer` 对象，返回一份自包含 HTML 和一张紧凑的文本卡片。页面由引擎自己排版：不调用模型，文件也不发外部请求。
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
@@ -180,7 +178,7 @@ pip install -r mcp-server/requirements.txt
 python mcp-server/server.py
 ```
 
-把它注册成 stdio server，可用 Claude Desktop、Cherry Studio、Kimi、Cursor、DeepSeek 等宿主。服务器共用同一个引擎与同一份 `kb.sqlite`；默认库在 `~/.kb-rag`，不是 DSH 工作区的 `.kb`，每个工具都可以用 `kb_root` 指到别处。配置片段、能力隔离与超时行为见 [mcp-server/README.md](mcp-server/README.md)。
+把它注册成 stdio server，可用 Claude Desktop、Cherry Studio、Kimi、Cursor、DeepSeek 等宿主。服务器共用同一个引擎与同一份 `kb.sqlite`。默认库在 `~/.kb-rag`，不是 DSH 工作区的 `.kb`，每个工具都可以用 `kb_root` 指到别处。配置片段、能力隔离与超时行为见 [mcp-server/README.md](mcp-server/README.md)。
 
 ## 架构
 
