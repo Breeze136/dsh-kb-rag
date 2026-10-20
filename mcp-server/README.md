@@ -2,7 +2,7 @@
 
 把 kb-rag 的本地文献知识库 RAG 通过 **MCP（Model Context Protocol，stdio）** 暴露给任意支持 MCP 的桌面 agent——Claude Desktop、Cherry Studio、Kimi、DeepSeek、Cursor、Zcode、Open WebUI 等。
 
-与 DSH 插件共用同一个 `kb_engine.py` 引擎（常驻 serve daemon + JSON-lines 逐行协议；异步 job、schema v3 页码锚点、quick/deep 深度模式、引文关联等能力也都在引擎内实现）；MCP 侧只提供 `server.py` + `engine_client.py` 这一层 stdio 封装，模型也只下载/加载一份。
+与 DSH 插件共用同一个 `kb_engine.py` 引擎（常驻 serve daemon + JSON-lines 逐行协议；异步 job、schema v4、quick/deep 深度模式、引文关联等能力也都在引擎内实现）；MCP 侧只提供 `server.py` + `engine_client.py` 这一层 stdio 封装，模型也只下载/加载一份。
 
 **10 个工具**：`kb_ingest`（支持 async 后台）/ `kb_status`（后台任务轮询）/ `kb_zotero`（支持 `async_mode=true`）/ `kb_search`（默认 `depth=quick`）/ `kb_rag`（默认 `depth=deep`）/ `kb_stats` / `kb_dedup` / `kb_clear` / `kb_fetch` / `kb_mcp_status`（能力与隔离状态自检）。
 
@@ -34,6 +34,7 @@ DSH 插件共 10 个工具（上表 8 个 + `kb_scope` + `kb_status`），MCP �
 | 三档关闭 + `/kb` 命令 | `commands` 服务注册的用户命令 | MCP 无人类命令通道；关停改用 `KB_MCP_EXCLUDE` |
 | 结果层提示规则 / 节流记账 | 按规则改写结果并记账 | MCP 结果只有一份文本，没有分层提示面 |
 | 来源卡片 / 会话指示条 | 客户端半边注册插槽 | MCP 无 UI |
+| HTML 答案页（`kb_rag(answer=…)`） | 宿主侧渲染并落盘 | MCP 的 `kb_rag` 只返回文本，未暴露 `answer` 信封；需要 HTML 时用 DSH 插件或引擎 `answer` 命令 |
 | 旧解析器数据询问 / 自动刷新 | 会话内检测分块版本并询问 | 只能由调用方显式传 `metadata_only` / `rebuild` |
 
 **② 环境性不可用** —— 本机能力不足时自动隔离，缺什么就隔离什么：

@@ -63,6 +63,16 @@ def run(ctx):
         import mcp  # noqa: F401
     except ImportError:
         ctx.skip("没装 mcp SDK（pip install mcp）")
+    # mcp 2.x 把 FastMCP 改名为 MCPServer，server.py 按 1.x 的 API 编写；
+    # requirements.txt 已钉 mcp<2，环境里装成 2.x 时跳过而不是误报产品失败。
+    try:
+        from importlib.metadata import version as _dist_version
+        _mcp_major = int(_dist_version("mcp").split(".")[0])
+    except Exception:                                            # noqa: BLE001
+        _mcp_major = 1
+    if _mcp_major >= 2:
+        ctx.skip("当前环境是 mcp 2.x（FastMCP → MCPServer）；server.py 按 1.x 编写，"
+                 "requirements.txt 钉的是 mcp<2。pip install 'mcp<2' 后重跑")
 
     buf = io.StringIO()
     with redirect_stdout(buf):

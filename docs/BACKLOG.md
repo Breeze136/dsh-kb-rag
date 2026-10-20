@@ -2,11 +2,26 @@
 
 > 本文件记录**尚未修复**的已知问题、待验证项与验证方法。
 > 已发布的变更写 [`CHANGELOG.md`](../CHANGELOG.md)；发布流程与隐私约定写 [`AGENTS.md`](../AGENTS.md)。
-> 最近更新：1.6.7。
+> 最近更新：1.6.8。
 
 ---
 
-## 0. 1.6.7 处置记录（两条第三方 issue + 本轮审计）
+## 0. 1.6.8 处置记录（发布前复检留下的）
+
+1.6.8 的范围是安装修复、HTML 答案页与可见性，下面这些**明确不在本版修**。
+
+| # | 问题 | 现状 / 影响 | 1.6.9 候选方案 | 验收 |
+|---|---|---|---|---|
+| 1 | 同一论文的多个 PDF 副本重复入库 | 去重只看 sha256；248 篇的实测库里有 35 组同 DOI、47 份多余副本，检索层只折叠一部分 | 入库时按 DOI + 规范化标题聚类，保留最早一份，其余标 `duplicate_of`；`kb_dedup` 支持按 DOI 清 | 同 DOI 多副本入库后 `docs` 只增 1；检索结果不重复占 top-K |
+| 2 | Nature 式无标题正文整篇误标 Front matter | 纯正则标题识别；248 篇里 56 篇 Front matter ≥60%，127 篇没有 Body/Intro/Results/Methods | 版式级标题识别（PyMuPDF span 字号/加粗相对中位数）、摘要按位置定位、无命中默认 Body；升 `PARSER_REV` 后全库重灌 | 抽 20 篇 Nature/Nature Materials，Front matter 占比 <40%；整篇可检索率 100% |
+| 3 | 出版社自动下载被登录页拦截 | `kb_fetch` 实测 13 次成功 8 次，失败集中在 Springer Nature 系 | 先找 PMC/arXiv/机构仓储开放版；支持用户配置机构代理（只做正常抓取）；失败文案给手动路径；按域名记成功率 | 3 个已知被拦 DOI 不返回假成功；错误里有开放版链接或手动步骤 |
+| 4 | 动态插件 `plugin/host.js` 停在 1.6.7 | npm 包是主路径；`plugin/` 是旧的 `cordis_define` 形态，没有 1.6.8 的探针、卡片与答案页 | 二选一：把 host 半从 `npm-package/lib/index.js` 同步生成，或在 1.6.9 标记 deprecated 并从 README/QUICKSTART 移除 | 仓库内只有一个 host 实现；或文档明确不再支持动态形态 |
+| 5 | 报告引用可能“转述链错配” | 78 分钟实测里出现 1 次：编号对得上，但结论挂到了相邻文献 | 把“抽 3 条引用核对标题 + 年份 + DOI”写进报告验收项（流程，不是代码） | 报告模板带核对清单；抽查 3 条全部对上原文 |
+| 6 | `/kb doctor`、i18n、答案页 compact/long/print 三档 | 1.6.8 范围表里列过，未实现 | 体检命令优先（模型缓存、维度、stale、版本 skew 各给修复命令）；i18n 次之 | `/kb doctor` 在空库/正常库/维度不匹配三种状态都给出可执行建议 |
+
+---
+
+## 0b. 1.6.7 处置记录（两条第三方 issue + 本轮审计）
 
 ### 0.1 两个 issue 的处置
 
@@ -289,7 +304,9 @@
 
 ### 5.2 显示入库进度
 
-**现状**：DSH 侧 `kb_ingest` 是**同步**调用（`plugin/host.js` 给 30 分钟时限），**过程中没有任何进度输出**，只有最后一次结果。引擎内部其实已经有进度机制——`<kb_root>/.kb-jobs/<job_id>.progress.json`，原子写 `{processed, errors, chunks}`——但只有 MCP 侧用得上（`kb_status` 轮询）；**DSH 的 9 个工具里没有 `kb_status`**，所以这条能力在 DSH 侧等于不可见。
+> **已解决（1.6.6）**：DSH 侧补了 `kb_status`，`kb_ingest` 超过阈值自动转后台；1.6.8 起是 10 个工具。本节保留为当时的现状记录。
+
+**当时现状**：DSH 侧 `kb_ingest` 是**同步**调用（`plugin/host.js` 给 30 分钟时限），**过程中没有任何进度输出**，只有最后一次结果。引擎内部其实已经有进度机制——`<kb_root>/.kb-jobs/<job_id>.progress.json`，原子写 `{processed, errors, chunks}`——但只有 MCP 侧用得上（`kb_status` 轮询）；当时 DSH 的 9 个工具里没有 `kb_status`，所以这条能力在 DSH 侧等于不可见。
 
 **候选方案（按成本从低到高）**：
 

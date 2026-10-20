@@ -1,5 +1,74 @@
 # Changelog
 
+## [1.6.8] - DSH 0.2 安装修复 + HTML 答案页 + 意图探针 + 缓存/下载可见性
+
+### ⚠️ 升级须知（3 条）
+
+1. **必须重装 npm 包**：`package.json` 的 peer 范围与 `dsh.client.inject` 都改了，`lib/client.js` 也重写了卡片契约。只改版本号不重装，DSH 0.2 仍会拒绝安装或卡片空白。装完重启 DSH 并**新建会话**。
+2. **不需要重灌文库**：`PARSER_REV` 仍是 **5**，schema 仍是 **v4**，没有解析或分块口径变化。已有 `.kb` 直接可用。只有 1.6.7 之前入库、且从未 `force` 重灌过的文档，页码锚点与上标引用仍为空——那是 1.6.7 就有的口径，本次不变。
+3. **检索结果与 1.6.7 对齐**：本版定位是体验与修复，检索内核冻结。相关性判定收敛到精排分后，中文整句查询与 1.6.7 逐条一致（A/B 验证）；`quick` 仍默认不跑精排。
+
+### 修复：DSH 0.2 装不上（P0）
+
+- `peerDependencies` 从 `@deepseek-ai/dsh-tools ^0.1.0-rc.6` 改为 `>=0.2.0-rc.2 <0.3.0`。旧范围在 0.2.x 上被 `evaluatePluginCompatibility` 判为 `incompatible-version`，插件面板直接拒绝安装。
+- `dsh.client.inject` 去掉 0.2 已不存在的 `@deepseek-ai/dsh-client-runtime`，改为 `@deepseek-ai/dsh-client-ui-conversation` + `@deepseek-ai/dsh-client-ui-primitives`。
+- `lib/client.js` 按真实契约重写：读 `phase`（preparing/start/result）、`kind: "tool-result"` 与 `argsRaw`，保留 0.1.x 的 `block.type` 兼容分支。此前四张卡片恒空，而且 keyed slot 命中会替换通用工具行，`kb_ingest` / `kb_zotero` 连默认行都看不到。
+
+### 新增：HTML 答案页
+
+- `kb_rag(answer=…)` 生成自包含单文件 HTML：十种模板（instant / review / method / compare / numeric / timeline / concept / dispute / derivation / qa），由引擎确定性渲染，不经过 LLM，无外部请求。
+- 可视块：三线表（列可标 `num` / `heat` / `bar`）、数值条、趋势折线、KPI 卡、流程链、时间轴（有数值画曲线，没数值排事件）。轴范围、刻度、条长与热力档位由渲染器计算。
+- 页脚最后一行显示本次「检索 … · 渲染 …」耗时；渲染耗时先量后写，文件名摘要不含它，同一个问题不会堆重复文件。
+- 配色预设 blue / green / ink / warm：`answer` 信封的 `theme` 优先，其次 `.kb-rag/answer-theme.json`（`state.json` 的 `theme` 兜底），页脚有下拉；`accent` / `overrides` / `css` 校验后注入，夜间模式固定蓝。
+- KPI 卡支持 `display` 字段原样显示：`90–97` 这类区间不再被数值解析折成中点 `93.5`（那会把范围谎报成实测值）。
+- 数值条修复：单值条的宽度以前恒为 0（截图里四条全是空轨），现在从轴起点画到数值；对数轴的条长与刻度按 `log10` 定位；`vstats` 与证据脚的 `DOI`/`score` 之间补分隔符，不再粘成一串。
+- 对话内文本卡片覆盖所有块类型（此前 list / cards / table / rank 整块丢失，只剩两三行）。
+- 页码锚点、引文链与来源列表在答案页里保持与工具结果一致。
+
+### 新增：意图探针与客户端卡片
+
+- `probe=true`：只回 Top-5 标题级命中（约 0.3 s），agent 先说明库里有什么，再问一次粒度，然后跑 `deep`。0 命中时明确说“库里没有”，不再追问格式。
+- 探针卡保留 `scope_note` / `strict_note`；范围与严格模式在“先探后问”路径上不再丢失。
+- 等待卡（检索中 + 阶段 + 已等待秒数）、入库卡（新增/更新/跳过、块/向量、耗时）、探针卡、空态与错误态按 0.2 契约渲染。
+- `/kb format <模板|auto>` 设会话默认模板；`/kb status` / `/kb save` / `/kb policy` 可用（`policyInventory` 此前漏 import，`/kb policy` 恒失败）。
+- 软关闭统一显示“已关闭”，不再把关闭状态渲染成“0 文档 / 没有返回片段 / 入库完成 0/0/0”。
+
+### 修复：缓存与检索可见性
+
+- issue #6：补向量后响应缓存不失效。缓存 key 并入 `COUNT(vecs)`，并新增 `CACHE_SALT`（引擎文件字节的 sha1 前缀）——同版本重建、热修补丁也会让旧缓存自动失效，不必手动 `DELETE FROM cache`。
+- 相关性判定收敛到精排分：`missing` 信号只进 note，不再当闸门（中文整句不再被虚词二元组误杀）；`deep` 下精排最高分低于裸地板即 `no_hit`（结果为空 + closest），有块过地板但不足阈值才判弱相关并保留结果；`quick` 不宣称相关性（verdict=null）。
+- 精排候选池改为「RRF 前 N ∪ 关键词路前 N ∪ 向量路前 N」；`quick` 默认仍不跑精排，`rerank:true` 可显式开。
+- 维度守卫：`meta` 表记录库内嵌入模型与维度，检索前比对，不一致直接报错并给出「指回原模型或 rebuild」的文案，不再静默退成关键词。
+- 工作区级引擎配置 `.kb-rag/engine.env`（KEY=VALUE）在启动时并入环境，显式环境变量优先。
+
+### 修复：模型下载
+
+- `HF_HUB_DOWNLOAD_TIMEOUT=600` 提前到 `sentence_transformers` / `huggingface_hub` import 之前，并在 `get_embedder()` 前同步 hub 常量。旧实现写在 import 之后，hub 早已固化为 10 s。
+- 镜像回退不再永久改写 `HF_ENDPOINT`：镜像也失败时恢复直连，`reload` 与下次 retry 不受影响。
+- `kb_stats.models` 支持本地模型目录、`HF_HUB_CACHE` 优先于 `HF_HOME/hub`，半截下载报 `partial: true` 而不是 `installed: true`；工具侧终于把 `models` 渲染出来。
+- 等待卡与错误文案给出换镜像、查代理、预下载的具体命令。
+
+### 修复：其它
+
+- `quick` + `answer` 路径不再在打印 `answer_file` 之前 return（HTML 已生成但路径不回显）。
+- 块字段类型归一：`limits` 传字符串不再逐字拆成 `<li>`，`methods` 传字符串/数组/`{items}` 不再抛 `AttributeError` 并丢整页。
+- 无 `bottom_line` 且无 `summary` 的模板不再生成只有目录的 `00 结论摘要` 空节。
+- `/kb off hard|search` 文案改为“本进程所有会话”（disposer 实际是进程级）。
+- 显式 `mode:"keyword"` 不再挂“向量链路不可用”的降级提示；只有“要 hybrid 却被迫退成 keyword”才提示。
+- `/kb save` 的默认值在重启后首个会话生效（先回填持久化值，再判断是否已问过）。
+- `mcp-server/requirements.txt` 钉 `mcp<2`：mcp 2.x 把 `FastMCP` 改名为 `MCPServer`，按 1.x 写的 `server.py` 会直接 import 失败。
+- `plugin/` 动态形态冻结在 1.6.7（npm 包是主路径）。仓库测试在两半版本不一致时跳过一致性对比，并在 BACKLOG 记录 1.6.9 的处置选项（同步生成或废弃）。
+
+### 已知限制（留 1.6.9）
+
+- 同一论文的多个 PDF 副本仍按 sha256 去重，同 DOI 多副本会重复入库。
+- Nature 式无标题正文仍可能整篇标成 Front matter；需要版式级标题识别（升 `PARSER_REV` + 全库重灌）。
+- Springer Nature 系出版商落地页重定向，`kb_fetch` 自动下载失败时按手动路径处理。
+
+### 引擎版本
+
+`VERSION` 3.4.0 → **3.5.0**；`PARSER_REV` 保持 5。
+
 ## [1.6.7] - 会话级状态与 `/kb` 命令 + 相关性地板 + References 判定重做 + 工具注册竞态修复
 
 ### ⚠️ 升级须知（4 条破坏性变更，请先读这里）

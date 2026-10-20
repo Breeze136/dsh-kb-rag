@@ -281,3 +281,59 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
    （折叠/悬浮/Zotero 定位）为后续项。
 6. **引文关联库内匹配**：三种规则（DOI / 标题 / 姓+年份）均要求高置信，无标题且无 DOI
    的引文条目（部分 PRB 数字风格）可能不命中——宁缺勿错。
+
+## 8. HTML 答案页（1.6.8）
+
+工具文本之外，`kb_rag` 的 `answer` 参数会生成一份自包含 HTML。这一层不改变上面的文本格式，
+只是同一份证据的另一种呈现。
+
+### 8.1 信封
+
+```jsonc
+{ "template": "compare", "query": "…", "depth": "deep", "layout": "card",
+  "fields": { "bottom_line": {"text": "…", "refs": [1]},
+              "matrix": {"columns": [{"label": "处理方式"}, {"label": "密度", "num": true}],
+                         "rows": [["机械抛光", "10⁶–10⁷"]]} },
+  "theme": {"palette": "green"},
+  "budget": {"max_total_chars": 6000} }
+```
+
+- `fields` 的键是模板的 section id；未填的节自动省略。
+- `refs` 是本次 `evidence` 的 1 基下标，越界会在渲染前被拒绝。
+- `budget` 是整封上限；每个字段另有模板级上限（`max_chars`）。截断会写进返回的 `warnings`。
+- `theme` 只影响这一份；不传时读工作区 `.kb-rag/answer-theme.json`。
+
+### 8.2 模板与块
+
+| 模板 | 适用 | 主要块 |
+|---|---|---|
+| `instant` | 一屏直答，300 字符预算 | note/text |
+| `review` | 跨文献综述 | note / list / cards |
+| `method` | 单方法拆解 | text / flow / table / figure / list |
+| `compare` | 横向对比 | table（`num` / `heat` / `bar` 列）/ rank / list |
+| `numeric` | 数值发现 | scalars（KPI 卡）/ rank / chart / list |
+| `timeline` | 时间线 | timeline（有 `x`+`series` 画曲线，有 `year`+`text` 排事件） |
+| `concept` | 术语速查 | cards |
+| `dispute` | 争议清单 | note / dispute |
+| `derivation` | 推导 | text / deriv / figure / key / code / math |
+| `qa` | 概念答疑 | qa |
+
+图由渲染器算：轴范围、刻度、条长、热力档位、数字格式都不需要模型先算。同一信封两次渲染
+字节相同；页脚里的 `渲染 N ms` 是先量后写的，文件名摘要不包含它。
+
+### 8.3 页脚
+
+最后一行固定是本次成本：
+
+```text
+检索 1.6 s · 渲染 12 ms
+```
+
+`检索` 来自本次查询的 `ms`（MCP / CLI 直接渲染时可缺省），`渲染` 由引擎测量。打印或导出
+PDF 时这一行会一起保留。
+
+### 8.4 探针（probe）
+
+`probe=true` 不是答案，是标题级预览：Top-5 的标题、作者、年份、章节，约 0.3 s，另带
+`scope_note` / `strict_note` / `lang_note`。0 命中时渲染层明确说“库里没有”，并让 agent
+直接收尾或按 scope 转 `web_search`，不再追问答案粒度。

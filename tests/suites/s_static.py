@@ -82,7 +82,7 @@ def run(ctx):
               "注册 %s" % sorted(reg))
 
     # —— 引擎版本/解析器版本 ——
-    ctx.check("引擎 VERSION 与 package.json 同步（3.2.0）", eng.VERSION == "3.2.0", eng.VERSION)
+    ctx.check("引擎 VERSION 与 package.json 同步（3.5.0）", eng.VERSION == "3.5.0", eng.VERSION)
     ctx.check("PARSER_REV 已提升到 5（References 判定改动）", eng.PARSER_REV == 5, eng.PARSER_REV)
     ctx.check("CHUNK_AFFECTING_REVS 含 5", 5 in eng.CHUNK_AFFECTING_REVS,
               sorted(eng.CHUNK_AFFECTING_REVS))

@@ -1,7 +1,7 @@
 {
   "name": "dsh-kb-rag",
-  "version": "1.6.7",
-  "description": "Local literature knowledge-base RAG for DSH: hybrid BM25 + vector retrieval, cross-encoder reranking, cited answers with section- and page-level provenance, metadata-only refresh and background ingest with progress polling, over a SQLite index.",
+  "version": "1.6.8",
+  "description": "Literature knowledge base for DSH and MCP clients. Index PDFs or a Zotero library into one SQLite file; search and RAG tools return passages with section, page and DOI. Embedding and reranking run locally.",
   "type": "module",
   "main": "lib/index.js",
   "bin": {
@@ -57,14 +57,14 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0"
   },
   "engines": {
     "node": ">=18"

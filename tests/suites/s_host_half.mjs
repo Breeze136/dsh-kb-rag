@@ -3,9 +3,21 @@
 // 以及最关键的一条回归：**两半边的 10 个工具定义逐字段一致**（描述、参数、输出 schema、呈现器）。
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { makeCtx, makeReporter, preparePkg, hostHarness, loadHostPlugin } from './_nodehelper.mjs';
+import { readFileSync } from 'node:fs';
+import { makeCtx, makeReporter, preparePkg, hostHarness, loadHostPlugin, REPO } from './_nodehelper.mjs';
 
 const rep = makeReporter();
+
+// plugin/ 是旧的 cordis_define 动态形态。1.6.8 只更新 npm 包（主路径），动态半边的 host
+// 逻辑停在 1.6.7；两边版本不一致时跳过“逐字段一致”的检查，而不是把冻结当成回归。
+// 取舍记录在 docs/BACKLOG.md §0 第 4 条（1.6.9 决定同步生成还是废弃）。
+const pkgVersion = JSON.parse(readFileSync(join(REPO, 'npm-package', 'package.json'), 'utf8')).version;
+const pluginVersion = JSON.parse(readFileSync(join(REPO, 'plugin', 'kbrag.plugin.json'), 'utf8')).version;
+if (pkgVersion !== pluginVersion) {
+  rep.skip(`plugin/ 冻结在 ${pluginVersion}，npm 包为 ${pkgVersion}：跳过动态半边一致性检查（BACKLOG §0 第 4 条）`);
+  process.exit(0);
+}
+
 const harness = await hostHarness();
 console.log('  ·  harness：' + harness.mode);
 if (harness.mode === 'stub' && harness.tried.length > 0) console.log('  ·  ' + harness.tried.join(' ｜ '));

@@ -119,7 +119,7 @@ query → filters SQL 预过滤（authors/title/journal/kind/section/year）+ �
 - **守护进程**：`kb_engine.py serve`，JSON 行协议（`{id,command,payload}` → `{id,ok,response|error}`），stdin pipe + stdout collect(offset 读取)，串行请求队列，崩溃自愈，工作区切换自动重启，插件停止 terminate
 - **工具**：10 个（`kb_ingest` / `kb_status` / `kb_zotero` / `kb_search` / `kb_rag` / `kb_scope` / `kb_dedup` / `kb_clear` / `kb_stats` / `kb_fetch`，见 README），长任务（ingest/zotero）超时 30min，支持 exec.signal 取消
 - **后台任务与陈旧数据**：`kb_status` 轮询后台入库任务（running 返回进度，done 返回 totals 与最近文件）；`kb_stats` 返回 `stale_docs > 0` 时，插件在该会话首次检索时询问一次处理方式（暂不处理 / 仅刷新元数据 / 全量重灌）
-- **会话级状态**：`scope / depth / strict / enabled / diligence` 按会话隔离（会话键取 `exec.agent.id`），首次检索经 `userQuestions.ask` 询问范围/深度（120s 竞速，默认 kb / deep）；工作区默认值存 `<工作区>/.kb-rag/state.json`（引擎 `state` 命令代读写），只有 `/kb save` 或 `kb_scope(save=true)` 才落盘
+- **会话级状态**：`scope / depth / strict / enabled / diligence` 按会话隔离（会话键取 `exec.agent.id`），首次检索经 `userQuestions.ask` 询问范围/深度（120s 竞速，默认 kb / quick）；工作区默认值存 `<工作区>/.kb-rag/state.json`（引擎 `state` 命令代读写），只有 `/kb save` 或 `kb_scope(save=true)` 才落盘
 - **`/kb` 命令**（direct UI handler，不进模型）：`status` / `kb|both|web` / `quick|deep` / `strict on|off` / `thorough|normal` / `off [soft|hard|search]` / `on` / `save` / `policy`；三档关闭 = 软关闭（工具在、调用即返回 `kb_rag_disabled`）/ 硬关闭（运行时撤销注册）/ 半关闭（只撤 `kb_search`+`kb_rag`）
 - **输出渲染**：来源列表 Markdown（DOI 链接内联、`§章节 · p.N` 页码锚点、`[Ref n]` 引文行与「关联文献」区块；无 DOI 显示文件名）；结果层提示（无命中 / 弱相关 / 向量降级 / 已关闭 / 深挖补库指引）由 `withNotes` 追加，`undefined` 字段在动态半边返回前剔除（沙箱要求 lossless JSON）
 - **结构化元数据**：`output.presentationMeta` 投影 `sources / verdict / closest` 供客户端卡片使用；`presentCall` 给调用卡片一个标题
@@ -146,3 +146,26 @@ query → filters SQL 预过滤（authors/title/journal/kind/section/year）+ �
 | 增量重跑 | 2.17s（40×） |
 | 热检索（20k 块，deep） | 0.4–1.3s（混合+精排）；`quick` 无精排直出，亚秒级 |
 | 清空 | 177 文档/25k 块 → 278ms（含 VACUUM） |
+
+## 12. 答案渲染层（1.6.8）
+
+`kb_rag(answer=…)` 与引擎 `answer` 命令共用同一条路径：信封（evidence + fields + template）
+→ 模板 section 表 → 块渲染器 → 单文件 HTML。排版链路里没有 LLM，渲染是纯函数。
+
+- **模板**：10 个（instant / review / method / compare / numeric / timeline / concept /
+  dispute / derivation / qa）。模板声明 section 顺序、块类型与单字段上限；未填的 section 省略。
+- **块**：note/text/list/cards/table/rank/bars/chart/kpi/scalars/flow/timeline/dispute/
+  math/figure/code/key/qa/deriv。表格列可标 `num`（右对齐）/`heat`（列内热力）/`bar`
+  （格内条）；数值块由渲染器算轴界、刻度、条长，模型只给数字。
+- **确定性**：同一信封两次渲染字节相同，文件名摘要取渲染结果。唯一的例外是页脚
+  「渲染 N ms」——它先空跑一遍量时间，写进第二遍；文件名摘要用不含它的第一遍，
+  所以同一个问题不会每跑一次多一个文件。
+- **落盘**：`~/.kb-rag/answers/<日期>_<slug>-<digest>.html` + 同目录 `index.html` 画廊
+  （最近 200 份），`index.json` 记模板、判定、耗时与字节数。
+- **主题**：四套预设（blue/green/ink/warm）+ `.kb-rag/answer-theme.json` 的
+  `palette/accent/overrides/css`；`css` 拼在最后，上限 20k 字符，`</style` 会被转义。
+- **交互**：模块 hover、`data-tip` 浮层、点击高亮、入场动画、数值条生长、目录滚动高亮；
+  `prefers-reduced-motion` 与打印时全部关闭。`geometry` 测试会静态断言这些 token 真的进了产物。
+- **自检**：`_ans_validate` 校验 refs 越界与字段形状，`_ans_selfcheck` 拦外部请求
+  （`<link>` / `url(` / `http://`）与未闭合标签；渲染失败不让工具调用崩掉，返回文本卡片与错误。
+

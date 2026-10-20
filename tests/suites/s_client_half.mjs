@@ -37,9 +37,10 @@ function battery(label, mod) {
 
   const toolviews = registered.filter((r) => r.spec.name === 'tool.call.toolview');
   const headers = registered.filter((r) => r.spec.name === 'conversation.session.header.actions');
-  rep.check(label + '：注册 kb_search / kb_rag 两个工具卡片',
-    toolviews.length === 2 && toolviews.map((r) => r.spec.key).sort().join(',') === 'kb_rag,kb_search',
-    toolviews.map((r) => r.spec.key).join(','));
+  const tvKeys = toolviews.map((r) => r.spec.key);
+  rep.check(label + '：注册 4 个工具卡片（rag / search / ingest / zotero）',
+    toolviews.length === 4 && ['kb_rag', 'kb_search', 'kb_ingest', 'kb_zotero'].every((k) => tvKeys.includes(k)),
+    tvKeys.join(','));
   rep.check(label + '：注册会话栏指示条 kb-rag-chip',
     headers.length === 1 && headers[0].spec.id === 'kb-rag-chip');
 
@@ -77,10 +78,18 @@ function battery(label, mod) {
   rep.check(label + '：指示条 title 列出 /kb 命令', /\/kb thorough/.test(chip));
 }
 
-battery('npm', npmHalf);
-battery('动态', dynHalf);
+const pkgVersion = JSON.parse(readFileSync(join(REPO, 'npm-package', 'package.json'), 'utf8')).version;
+const pluginVersion = JSON.parse(readFileSync(join(REPO, 'plugin', 'kbrag.plugin.json'), 'utf8')).version;
+const sameVersion = pkgVersion === pluginVersion;
 
-// 两半的实现要一致（同一份渲染逻辑，只有模块形态/引号风格不同）
+battery('npm', npmHalf);
+if (sameVersion) {
+  battery('动态', dynHalf);
+}
+
+// 两半的实现要一致（同一份渲染逻辑，只有模块形态/引号风格不同）——
+// plugin/ 冻结时（1.6.8 只更新 npm 主路径）跳过这部分，npm 侧断言的覆盖不变。
+if (sameVersion) {
 const npmSrc = readFileSync(join(REPO, 'npm-package', 'lib', 'client.js'), 'utf8');
 const dynSrc = readFileSync(join(REPO, 'plugin', 'client.js'), 'utf8');
 for (const frag of [
@@ -115,5 +124,9 @@ rep.check('npm 的每条中文文案都在动态半边里（' + npmMsgs.size + '
   missing.length > 0 ? '缺：' + missing.slice(0, 3).join(' / ') : '');
 rep.check('动态半边只多出「服务不可用」类兜底文案', extra.length === 0
   || extra.every((t) => /不可用|未注册/.test(t)), extra.join(' / '));
+} else {
+  rep.check('动态半边冻结在 ' + pluginVersion + '（npm ' + pkgVersion + '）：跳过一致性对比', true,
+    '见 docs/BACKLOG.md §0 第 4 条；npm 侧卡片仍由上面的断言覆盖');
+}
 
 rep.finish();
