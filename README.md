@@ -159,7 +159,7 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 `kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests.
 
-The page chrome is Chinese in 1.6.8; the answer body follows the query language. [Open the interactive page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML source](docs/demo/answer-en.html)
+The page chrome is Chinese in 1.6.8; the answer body follows the query language. [Open the interactive page](https://htmlpreview.github.io/?https://github.com/Breeze136/dsh-kb-rag/blob/main/docs/demo/answer-en.html) · [HTML source](docs/demo/answer-en.html)
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",

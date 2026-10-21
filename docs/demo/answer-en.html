@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-palette="blue">
+<html lang="en" data-palette="blue">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -599,7 +599,7 @@ html.kb-js header.doc > *:nth-child(5) { animation-delay: .2s; }
 @media print{.kb-tip{display:none!important}.kb-active{outline:none!important}
   .kpi,.card,.qa,.fnode,.vrow,.ev>li,.act,.badge{transform:none!important;box-shadow:none!important}}
 
-/* ==== 整块 section 悬停：结论摘要 / 正文大卡整体抬升 ==== */
+/* ==== 整块 section 悬停：Summary / 正文大卡整体抬升 ==== */
 @media (hover:hover) and (prefers-reduced-motion:no-preference){
   .kb-motion main > section{
     transition: opacity .45s ease, transform .22s ease, box-shadow .22s ease,
@@ -658,37 +658,37 @@ html.kb-js header.doc > *:nth-child(5) { animation-delay: .2s; }
 </style>
 </head>
 <body class="layout-card tpl-compare">
-<a class="skip" href="#main">跳到正文</a>
+<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
-<div class="progress" aria-hidden="true"><i id="kb-prog"></i></div><div class="layout"><aside><p class="aside-label">目录</p><nav class="toc"><a href="#s1"><span class="n">01</span>对比表</a><a href="#s2"><span class="n">02</span>数值对比</a><a href="#s3"><span class="n">03</span>读表说明</a></nav><div class="readrail" aria-hidden="true"><div class="readbar"><i id="kb-readbar"></i></div><div class="readpct"><span>已读</span><span id="kb-readpct">0%</span></div></div><div class="aside-meta"><p class="aside-label">检索</p><dl><dt>深度</dt><dd>深度检索</dd><dt>证据</dt><dd>3 块</dd><dt>耗时</dt><dd>1480 ms</dd><dt>渲染</dt><dd>静态 HTML</dd></dl></div><p class="aside-note">答案由 kb-rag 引擎从 kb-answer 信封确定性渲染；引用编号与右侧来源一一对应。</p></aside><main id="main">
-<div class="rail"><span class="brand"><span class="mark">K</span><b>知识库答案页</b><span class="sep">·</span></span><span class="rail-right"><span class="fmt">FORMAT / ANSWER</span></span></div><header class="hero">
-<div class="eyebrow">文献检索汇总 · Comparison</div>
+<div class="progress" aria-hidden="true"><i id="kb-prog"></i></div><div class="layout"><aside><p class="aside-label">Contents</p><nav class="toc"><a href="#s1"><span class="n">01</span>Comparison table</a><a href="#s2"><span class="n">02</span>Numeric comparison</a><a href="#s3"><span class="n">03</span>Reading guide</a></nav><div class="readrail" aria-hidden="true"><div class="readbar"><i id="kb-readbar"></i></div><div class="readpct"><span>Read</span><span id="kb-readpct">0%</span></div></div><div class="aside-meta"><p class="aside-label">Retrieval</p><dl><dt>Depth</dt><dd>Deep search</dd><dt>Evidence</dt><dd>3 chunks</dd><dt>Elapsed</dt><dd>1480 ms</dd><dt>Render</dt><dd>Static HTML</dd></dl></div><p class="aside-note">Answer rendered deterministically by the kb-rag engine from the kb-answer envelope; citation numbers match the sources on the right.</p></aside><main id="main">
+<div class="rail"><span class="brand"><span class="mark">K</span><b>Knowledge base answer</b><span class="sep">·</span></span><span class="rail-right"><span class="fmt">FORMAT / ANSWER</span></span></div><header class="hero">
+<div class="eyebrow">Literature search summary · Comparison</div>
 <h1>Surface preparation vs graphene nucleation on copper</h1>
-<p class="deck">横向对比：主要结论 → 对比表（列可标注 num/heat/bar）→ 数值对比 → 读表说明</p>
-<div class="chips"><span class="chip"><span class="dot"></span>命中</span><span class="chip"><b>横向对比</b></span><span class="chip">深度检索</span><span class="chip">命中 <b>3</b> 块</span><span class="chip"><b>1480</b> ms</span><span class="chip">精排 <b>bge-reranker-base</b></span></div>
+<p class="deck">Side by side: bottom line → comparison table (num/heat/bar columns) → numeric comparison → reading guide</p>
+<div class="chips"><span class="chip"><span class="dot"></span>Hit</span><span class="chip"><b>Side by side</b></span><span class="chip">Deep search</span><span class="chip">3 chunks</span><span class="chip"><b>1480</b> ms</span><span class="chip">Reranked <b>bge-reranker-base</b></span></div>
 <div class="actions">
-<button class="iconbtn" onclick="window.print()">🖨 打印 / 导出 PDF</button>
-<button class="iconbtn" onclick="copyAll()">📋 复制全文为 Markdown</button>
+<button class="iconbtn" onclick="window.print()">🖨 Print / Export PDF</button>
+<button class="iconbtn" onclick="copyAll()">📋 Copy all as Markdown</button>
 </div>
 </header>
-<section id="s0"><div class="sec-head"><span class="sec-num">00</span><h2>结论摘要</h2><span class="sec-note">summary</span></div>
-<div class="note bluf"><span class="t">主要结论</span><p>Surface preparation shifts nucleation density by one to two orders of magnitude in reported work. Electropolishing and oxygen pre-treatment both push toward fewer, larger domains.<sup class="c">[1,2]</sup></p></div>
+<section id="s0"><div class="sec-head"><span class="sec-num">00</span><h2>Summary</h2><span class="sec-note">summary</span></div>
+<div class="note bluf"><span class="t">Bottom line</span><p>Surface preparation shifts nucleation density by one to two orders of magnitude in reported work. Electropolishing and oxygen pre-treatment both push toward fewer, larger domains.<sup class="c">[1,2]</sup></p></div>
 
 </section>
-<section id="s1"><div class="sec-head"><span class="sec-num">01</span><h2>对比表</h2><span class="sec-note">section</span></div><div class="tablewrap"><table class="book"><thead><tr><th scope="col">Pre-treatment<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Nucleation density (cm⁻²)<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Bilayer share<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Monolayer coverage<span class="ar" aria-hidden="true">↕</span></th></tr></thead><tbody><tr><td class="k">Mechanical polish</td><td>10⁵–10⁶</td><td>higher</td><td>80–90%</td></tr><tr><td class="k">Electropolish</td><td>10⁴–10⁵</td><td>medium</td><td>90–95%</td></tr><tr><td class="k">Oxygen pre-treatment</td><td>10³–10⁴</td><td>lower</td><td>95–97%</td></tr><tr><td class="k">Oxygen + electropolish</td><td>10³–10⁴</td><td>lowest</td><td>up to ~99% (reported)</td></tr></tbody></table></div></section>
-<section id="s2"><div class="sec-head"><span class="sec-num">02</span><h2>数值对比</h2><span class="sec-note">section</span></div><div class="vbars"><div class="vstats"><span>n=<b>4</b></span> · <span>最高 <b>300,000</b>（Mechanical polish）</span> · <span>最大/最小 <b>75×</b></span></div><div class="vrow head"><div class="vlbl">Surface preparation</div><div class="vnum">Nucleation density (illustrative)</div><div class="vaxhead"></div></div><div class="vrow"><div class="vlbl">Mechanical polish</div><div class="vnum">300,000<span class="unit">cm⁻²</span><span class="fold">1×</span></div><div class="vtrack"><span class="vbar mut" style="left:0.0000%;width:82.5707%"></span></div></div><div class="vrow"><div class="vlbl">Electropolish</div><div class="vnum">40,000<span class="unit">cm⁻²</span><span class="fold">7.5×</span></div><div class="vtrack"><span class="vbar" style="left:0.0000%;width:53.4020%"></span></div></div><div class="vrow"><div class="vlbl">Oxygen pre-treatment</div><div class="vnum">10,000<span class="unit">cm⁻²</span><span class="fold">30×</span></div><div class="vtrack"><span class="vbar" style="left:0.0000%;width:33.3333%"></span></div></div><div class="vrow"><div class="vlbl">Oxygen + electropolish</div><div class="vnum">4,000<span class="unit">cm⁻²</span></div><div class="vtrack"><span class="vbar hi" style="left:0.0000%;width:20.0687%"></span></div></div><div class="vaxis"><span class="tk first" style="left:0.0000%">1,000</span><span class="tk" style="left:33.3333%">10,000</span><span class="tk" style="left:66.6667%">100,000</span><span class="tk" style="left:100.0000%">1×10⁶</span></div><p class="tnote">Illustrative values: relative order between treatments, not one measured batch.</p></div></section>
-<section id="s3"><div class="sec-head"><span class="sec-num">03</span><h2>读表说明</h2><span class="sec-note">section</span></div><ul><li>The table gives reported ranges, not one experiment.</li><li>Fewer bilayer nuclei usually mean higher final monolayer coverage.</li><li>Copper melts at 1085 °C; these routes assume a solid foil below that.</li></ul></section>
+<section id="s1"><div class="sec-head"><span class="sec-num">01</span><h2>Comparison table</h2><span class="sec-note">section</span></div><div class="tablewrap"><table class="book"><thead><tr><th scope="col">Pre-treatment<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Nucleation density (cm⁻²)<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Bilayer share<span class="ar" aria-hidden="true">↕</span></th><th scope="col">Monolayer coverage<span class="ar" aria-hidden="true">↕</span></th></tr></thead><tbody><tr><td class="k">Mechanical polish</td><td>10⁵–10⁶</td><td>higher</td><td>80–90%</td></tr><tr><td class="k">Electropolish</td><td>10⁴–10⁵</td><td>medium</td><td>90–95%</td></tr><tr><td class="k">Oxygen pre-treatment</td><td>10³–10⁴</td><td>lower</td><td>95–97%</td></tr><tr><td class="k">Oxygen + electropolish</td><td>10³–10⁴</td><td>lowest</td><td>up to ~99% (reported)</td></tr></tbody></table></div></section>
+<section id="s2"><div class="sec-head"><span class="sec-num">02</span><h2>Numeric comparison</h2><span class="sec-note">section</span></div><div class="vbars"><div class="vstats"><span>n=<b>4</b></span> · <span>Highest <b>300,000</b>（Mechanical polish）</span> · <span>Max/min <b>75×</b></span></div><div class="vrow head"><div class="vlbl">Surface preparation</div><div class="vnum">Nucleation density (illustrative)</div><div class="vaxhead"></div></div><div class="vrow"><div class="vlbl">Mechanical polish</div><div class="vnum">300,000<span class="unit">cm⁻²</span><span class="fold">1×</span></div><div class="vtrack"><span class="vbar mut" style="left:0.0000%;width:82.5707%"></span></div></div><div class="vrow"><div class="vlbl">Electropolish</div><div class="vnum">40,000<span class="unit">cm⁻²</span><span class="fold">7.5×</span></div><div class="vtrack"><span class="vbar" style="left:0.0000%;width:53.4020%"></span></div></div><div class="vrow"><div class="vlbl">Oxygen pre-treatment</div><div class="vnum">10,000<span class="unit">cm⁻²</span><span class="fold">30×</span></div><div class="vtrack"><span class="vbar" style="left:0.0000%;width:33.3333%"></span></div></div><div class="vrow"><div class="vlbl">Oxygen + electropolish</div><div class="vnum">4,000<span class="unit">cm⁻²</span></div><div class="vtrack"><span class="vbar hi" style="left:0.0000%;width:20.0687%"></span></div></div><div class="vaxis"><span class="tk first" style="left:0.0000%">1,000</span><span class="tk" style="left:33.3333%">10,000</span><span class="tk" style="left:66.6667%">100,000</span><span class="tk" style="left:100.0000%">1×10⁶</span></div><p class="tnote">Illustrative values: relative order between treatments, not one measured batch.</p></div></section>
+<section id="s3"><div class="sec-head"><span class="sec-num">03</span><h2>Reading guide</h2><span class="sec-note">section</span></div><ul><li>The table gives reported ranges, not one experiment.</li><li>Fewer bilayer nuclei usually mean higher final monolayer coverage.</li><li>Copper melts at 1085 °C; these routes assume a solid foil below that.</li></ul></section>
 
-<section id="ev"><div class="sec-head"><span class="sec-num">E</span><h2>知识库来源</h2><span class="sec-note">references</span></div><ol class="ev"><li><div class="ev-t"><a href="https://doi.org/10.5555/12345678">Oxygen pre-treatment for graphene CVD on copper</a></div><div class="ev-m">Author A; Author B · 2024 · Carbon · §Results · p.4</div><div class="ev-q">Surface pre-treatment and the CH4/H2 ratio are the main knobs for nucleation density.</div><div class="ev-f"><span>DOI 10.5555/12345678</span> · <span>score 1.24</span></div></li><li><div class="ev-t"><a href="https://doi.org/10.5555/12345684">Nucleation density on electropolished copper</a></div><div class="ev-m">Author C · 2022 · Carbon · §Methods · p.112</div><div class="ev-q">Reported nucleation densities on copper span about 10^3 to 10^5 cm^-2.</div><div class="ev-f"><span>DOI 10.5555/12345684</span> · <span>score 1.08</span></div></li><li><div class="ev-t"><a href="https://doi.org/10.5555/12345690">Raman signature of layer number in CVD graphene</a></div><div class="ev-m">Author D · 2021 · Carbon · §Discussion · p.301</div><div class="ev-q">Monolayer graphene usually shows I(2D)/I(G) above 2; bilayer falls to 0.5-1.</div><div class="ev-f"><span>DOI 10.5555/12345690</span> · <span>score 0.93</span></div></li></ol></section>
+<section id="ev"><div class="sec-head"><span class="sec-num">E</span><h2>Sources</h2><span class="sec-note">references</span></div><ol class="ev"><li><div class="ev-t"><a href="https://doi.org/10.5555/12345678">Oxygen pre-treatment for graphene CVD on copper</a></div><div class="ev-m">Author A; Author B · 2024 · Carbon · §Results · p.4</div><div class="ev-q">Surface pre-treatment and the CH4/H2 ratio are the main knobs for nucleation density.</div><div class="ev-f"><span>DOI 10.5555/12345678</span> · <span>score 1.24</span></div></li><li><div class="ev-t"><a href="https://doi.org/10.5555/12345684">Nucleation density on electropolished copper</a></div><div class="ev-m">Author C · 2022 · Carbon · §Methods · p.112</div><div class="ev-q">Reported nucleation densities on copper span about 10^3 to 10^5 cm^-2.</div><div class="ev-f"><span>DOI 10.5555/12345684</span> · <span>score 1.08</span></div></li><li><div class="ev-t"><a href="https://doi.org/10.5555/12345690">Raman signature of layer number in CVD graphene</a></div><div class="ev-m">Author D · 2021 · Carbon · §Discussion · p.301</div><div class="ev-q">Monolayer graphene usually shows I(2D)/I(G) above 2; bilayer falls to 0.5-1.</div><div class="ev-f"><span>DOI 10.5555/12345690</span> · <span>score 0.93</span></div></li></ol></section>
 </main></div>
-<footer class="doc"><div class="palpick"><label for="kb-palette">配色</label><select id="kb-palette" aria-label="配色"><option value="blue" selected>蓝</option><option value="green">绿</option><option value="ink">墨</option><option value="warm">暖</option></select></div>由 kb-rag 引擎从 kb-answer 信封确定性渲染 · 协议 kb-answer v1 · 模板 compare<br>Ctrl/Cmd + P 可直接打印或导出为 PDF 分享<br>检索 1.5 s · 渲染 2 ms</footer>
+<footer class="doc"><div class="palpick"><label for="kb-palette">Palette</label><select id="kb-palette" aria-label="Palette"><option value="blue" selected>Blue</option><option value="green">Green</option><option value="ink">Ink</option><option value="warm">Warm</option></select></div>Rendered deterministically by the kb-rag engine from the kb-answer envelope · protocol kb-answer v1 · template compare<br>Ctrl/Cmd + P to print or export as PDF<br>Retrieval 1.5 s · Render 4 ms</footer>
 </div>
 <script>
 
 function copyAll(){
-  // 复制的是**正文**：把按钮、目录、跳转链接、导航这些 UI 剥掉再取文本。
-  // 旧实现直接取 document.body.innerText，会把「🖨 打印 / 导出 PDF」这类按钮文案
-  // 和整个目录一起复制进 Markdown —— 用户每次都得手工清理。
+  // 复制的是**正文**：把按钮、Contents、跳转链接、导航这些 UI 剥掉再取文本。
+  // 旧实现直接取 document.body.innerText，会把「🖨 Print / Export PDF」这类按钮文案
+  // 和整个Contents一起复制进 Markdown —— 用户每次都得手工清理。
   var root = document.querySelector('main') || document.querySelector('.wrap') || document.body;
   var clone = root.cloneNode(true);
   var drop = clone.querySelectorAll('.actions,.toc,.skip,button,.nav');
@@ -697,11 +697,11 @@ function copyAll(){
   var b = document.querySelector('.actions .act:last-child');
   if (!b) { return; }
   var o = b.textContent;
-  var done = function(){ b.textContent='✔ 已复制'; setTimeout(function(){ b.textContent=o; },1600); };
+  var done = function(){ b.textContent='✔ Copied'; setTimeout(function(){ b.textContent=o; },1600); };
   function fallback(){
     var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
     document.body.appendChild(ta); ta.select();
-    try{ document.execCommand('copy'); done(); }catch(e){ alert('复制失败，请手动选择文本。'); }
+    try{ document.execCommand('copy'); done(); }catch(e){ alert('Copy failed. Select the text manually.'); }
     document.body.removeChild(ta);
   }
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -756,7 +756,7 @@ function copyAll(){
     });
   });
 
-  // 目录滚动高亮：rootMargin 与 demo 一致
+  // Contents滚动高亮：rootMargin 与 demo 一致
   var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
   if (links.length && 'IntersectionObserver' in window) {
     var byId = {};
@@ -885,7 +885,7 @@ function copyAll(){
       if (!head || !body) return;
       Array.prototype.slice.call(head.cells).forEach(function (th, idx) {
         th.setAttribute('data-sort', '1');
-        th.setAttribute('title', '点击排序');
+        th.setAttribute('title', 'Click to sort');
         th.setAttribute('aria-sort', 'none');
         var ar = th.querySelector('.ar');
         if (!ar) {
