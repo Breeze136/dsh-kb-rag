@@ -161,7 +161,7 @@ BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关
 
 <img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
 
-*`compare` 模板的渲染预览。完整页面见 [docs/demo/answer-zh.html](docs/demo/answer-zh.html)，下载后用浏览器打开；GitHub 只显示源码。*
+*`compare` 模板的渲染预览。[打开完整页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 文件](docs/demo/answer-zh.html)*
 
 [HTML 源码](docs/demo/answer-zh.html)
 
