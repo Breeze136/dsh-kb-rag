@@ -52,6 +52,44 @@ dsh plugin --profile web remove dsh-kb-rag
 
 模型缓存在用户目录，桌面端会复用，不需要重新下载 1.2 GB。
 
+## 模型预下载（可选）
+
+默认首次检索时自动下载 `BAAI/bge-small-zh-v1.5` 和 `BAAI/bge-reranker-base`，合计约 1.2 GB。网络慢或受限时，可以先把缓存目录定好再预下载。
+
+第一步，选一个缓存目录。用户级环境变量对桌面端所有会话生效：
+
+```powershell
+[Environment]::SetEnvironmentVariable("HF_HOME", "D:\hf-cache", "User")
+```
+
+也可以只对某个工作区生效，在 `<工作区>\.kb-rag\engine.env` 写：
+
+```text
+HF_HOME=D:\hf-cache
+```
+
+第二步，新开一个 PowerShell，预下载两个模型：
+
+```powershell
+$env:HF_HOME = "D:\hf-cache"
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
+python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-base')"
+```
+
+缺少 `sentence_transformers` 时先 `pip install sentence-transformers`。第三步，完全退出并重开 DSH，调 `kb_stats` 看两个模型是否已缓存。
+
+npm 包只负责安装插件，不负责下载模型；不要用 `npm install` 去改 DSH profile。要让 agent 代劳，可以直接把下面这段发给它：
+
+```text
+请把 kb-rag 的模型预下载到 D:\hf-cache：
+1. 设置用户环境变量 HF_HOME=D:\hf-cache，并让当前 PowerShell 也生效；
+2. 用 python 分别加载 BAAI/bge-small-zh-v1.5 和 BAAI/bge-reranker-base 一次；
+3. 缺 sentence-transformers 就先 pip install；
+4. 完成后确认 D:\hf-cache\hub 下有这两个模型目录。
+不要修改 DSH profile，也不要在 profile 里执行 npm install。
+```
+
+
 ## 出问题怎么问
 
 先按 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) 查。提问时带上：
