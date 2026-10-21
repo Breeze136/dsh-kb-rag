@@ -4,6 +4,13 @@
   "private": true,
   "description": "Repo-root manifest for dsh-kb-rag. The installable plugin bundle is published from npm-package/ as dsh-kb-rag; this file exists so the repository itself declares a dsh.bundle (registry tooling reads <repo>/HEAD/package.json) and points at that bundle. Not published: version is intentionally 0.0.0, the real version lives only in npm-package/package.json.",
   "type": "module",
+  "main": "./npm-package/lib/index.js",
+  "exports": {
+    ".": "./npm-package/lib/index.js",
+    "./client": "./npm-package/lib/client.js",
+    "./cordis.patch.yml": "./npm-package/cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,7 +23,18 @@
   "dsh": {
     "bundle": {
       "patch": "./npm-package/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0"
   },
   "keywords": [
     "dsh",
