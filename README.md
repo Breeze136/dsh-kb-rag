@@ -161,9 +161,9 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 <img src="docs/assets/answer-page-en.png" alt="Rendered HTML answer page with a comparison table, value bars, sources and timing footer" width="900">
 
-*Rendered `compare` answer. The answer body follows the query language; the page chrome is Chinese in 1.6.8.*
+*Preview of a rendered `compare` answer. The [live page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) scrolls, switches colour and sorts the table; the answer body follows the query language.*
 
-[Open the interactive page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML source](docs/demo/answer-en.html)
+[HTML source](docs/demo/answer-en.html)
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",

@@ -161,9 +161,9 @@ BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关
 
 <img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
 
-*`compare` 模板的实际渲染结果，页脚带检索与渲染耗时。*
+*`compare` 模板的渲染预览。点[完整页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html)可以滚动、切换配色、点表头排序；正文语言跟随提问。*
 
-[打开可交互页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 源码](docs/demo/answer-zh.html)
+[HTML 源码](docs/demo/answer-zh.html)
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
