@@ -161,7 +161,7 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 <img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
 
-*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [Open the interactive page](https://htmlpreview.github.io/?https://github.com/Breeze136/dsh-kb-rag/blob/main/docs/demo/answer-en.html) · [HTML source](docs/demo/answer-en.html)
+*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [HTML file](docs/demo/answer-en.html) (GitHub shows the source; download and open it locally).
 
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
