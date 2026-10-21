@@ -38,13 +38,13 @@ Authors, journals and DOIs are placeholders; the format is real. The full walkth
 
 ## What 1.6.8 changes
 
-1.6.8 fixes the install path for DSH 0.2. The peer range and the client injection list were both wrong, so the plugin was rejected during install and the tool cards stayed empty. Those are fixed.
+1.6.8 fixes two things that broke the DSH 0.2 install: the peer range and the client injection list. With both wrong, the plugin was rejected during install and the tool cards stayed empty.
 
-The release also adds HTML answer pages rendered by the engine, a title-level probe, model cache state in `kb_stats`, and a `no_hit` verdict for deep searches whose best reranked score stays below the floor. The search core is otherwise unchanged: on the same library, results line up with 1.6.7. The full list is in [CHANGELOG.md](CHANGELOG.md).
+It also adds HTML answer pages rendered by the engine and a title-level probe. `kb_stats` now reports model cache state, and deep searches return `no_hit` when the best reranked score stays below the floor. The search core is otherwise unchanged: on the same library, results line up with 1.6.7. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-The shortest path is the DSH desktop app. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
+Install from the DSH desktop app, or use one of the command-line paths below. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
 
 ### A. DSH desktop app (no terminal)
 
@@ -52,7 +52,7 @@ The shortest path is the DSH desktop app. After installing, restart DSH and open
 2. Search `kb-rag`. The package is `dsh-kb-rag`, and the entry should say **1.6.8**.
 3. Install, restart DSH, and start a new conversation.
 
-The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check, which is what 1.6.8 fixes. The first search downloads the two models (~1.2 GB), so expect a short wait. `kb_stats` shows whether they are present.
+The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB), so expect a short wait. `kb_stats` shows whether they are present.
 
 ### B. DSH CLI
 
@@ -68,7 +68,7 @@ Pin the version. A DSH profile is a pnpm workspace, and pnpm's `minimumReleaseAg
 npx dsh-kb-rag-install
 ```
 
-The installer runs the chain for you: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`: one profile is used directly, several are offered as a choice, none falls back to `web`.
+The installer runs the chain: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`: one profile is used directly, several are offered as a choice, none falls back to `web`.
 
 ### D. From source
 
@@ -98,7 +98,7 @@ Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the bat
 - "Answer only from the library" → strict mode through `kb_scope` (DSH)
 - "Quick look or deep analysis?" → both tools default to `quick`; pass `depth: "deep"` for reranking, citation linking and related work, or set a session default with `/kb deep`
 
-For a formatted deliverable, `kb_rag` accepts an `answer` object and writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+For a formatted answer, `kb_rag` accepts an `answer` object and writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
 
 ## Tools
 
@@ -134,15 +134,15 @@ The MCP server exposes 10 tools as well, including `kb_status` and a diagnostic 
 
 ## Query guidance
 
-The engine passes queries through unchanged. It does not translate, expand or rewrite them, so what you type has to match the language of the indexed text. Most libraries are about 98% English, which leads to a few rules that matter in practice.
+The engine passes queries through unchanged. It does not translate, expand or rewrite them, so what you type has to match the language of the indexed text. Most libraries are about 98% English, so a few rules matter in practice.
 
 In a DSH session the agent writes the query. Its tool description already turns a Chinese question into an English term string, so asking in Chinese works. Write English term strings yourself only when you drive the tools directly (MCP clients, scripts, the engine CLI).
 
 BM25 matches tokens. A CJK query cannot match English body text, so the keyword half of hybrid ranking contributes nothing and the hit rests on vector similarity. For the same question, an English term string retrieves better.
 
-Keep queries to 3–12 words in the pattern `material/system + method/process + property/characterisation`, for example `graphene CVD copper single crystal nucleation suppression`. Do not write a full sentence.
+Keep queries to 3-12 words in the pattern `material/system + method/process + property/characterisation`, for example `graphene CVD copper single crystal nucleation suppression`. Do not write a full sentence.
 
-Put limits in `filters`, not in the query. Year, journal, author, section and file kind are metadata filters. One caveat: `journal` is filled only by the Zotero migration path, so it is `NULL` for documents indexed with `kb_ingest`. Filtering on it usually returns nothing. Use author, year, title or section instead.
+Put limits in `filters`, not in the query. Year, journal, author, section and file kind are metadata filters. `journal` is filled only by the Zotero migration path, so it is `NULL` for documents indexed with `kb_ingest`. Filtering on it usually returns nothing. Use author, year, title or section instead.
 
 Send a second query in the original language only when you want documents in that language, for example Chinese-language reviews in the same library.
 
@@ -205,7 +205,7 @@ Windows, CPU inference unless noted. Query numbers come from a 248-document / 20
 
 | Metric | Result |
 |---|---|
-| Query latency (warm) | `quick` 0.33–0.38 s; `deep` 1.4–1.9 s, median 1.6 s |
+| Query latency (warm) | `quick` 0.33-0.38 s; `deep` 1.4-1.9 s, median 1.6 s |
 | Cold first call | up to 8.9 s while models load |
 | Ingest throughput | 242 PDF/DOCX files (1.8 GB) in 85.9 s, about 355 ms per document |
 | Incremental re-run | same directory in 2.17 s, a 40× speed-up |
