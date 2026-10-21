@@ -67,3 +67,5 @@ dsh plugin --profile web remove dsh-kb-rag
 - **旧数据没有页码**：页码锚点是 schema v3 起的字段，旧行降级到章节；`kb_ingest(force=true)` 重入库后恢复。
 - **Zotero 报 missing**：附件本体缺失，正常跳过，不联网下载。
 - **工具输出不是卡片**：部分界面不渲染自定义卡片，不影响功能；用答复里的 DOI 链接与文件名。
+
+按具体报错查处理：[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。提问前带上 DSH 版本、插件版本、系统、完整报错和 `kb_stats` 输出；不要贴 `.npmrc` 或 token。

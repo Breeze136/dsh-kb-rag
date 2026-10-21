@@ -79,6 +79,18 @@ If your desktop build cannot search npm, install [dsh-plugin-registry](https://g
 > [!WARNING]
 > Do not run `npm install dsh-kb-rag` inside a DSH profile. It writes an npm-style `node_modules` next to pnpm's symlink store, and later `dsh plugin` operations become unpredictable. `npm install` is only for a deployment you manage by hand; see [npm-package/README.md](npm-package/README.md).
 
+## Troubleshooting
+
+| Symptom | What it means | Fix |
+|---|---|---|
+| Panel quotes `@1.6.7 ... incompatible` | It checks the installed 1.6.7 manifest | Uninstall 1.6.7, restart, install 1.6.8 |
+| `Cannot find package ...\dsh-kb-rag\index.js` | The GitHub repo root was installed, not npm | Uninstall it, install `dsh-kb-rag` from npm |
+| `.hotload\...\package.json` missing | Stale local-preview metadata | Reinstall 1.6.8; clear the panel cache if it persists |
+| Install worked, no `kb_*` tools | Old session, or the profile still has 1.6.7 | Restart DSH, open a new conversation, check the version |
+| Missing Python packages or models | Engine dependencies, not the plugin | Run the command in the error, or set `KB_AUTO_PIP=1`; models use `HF_ENDPOINT` |
+
+Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 ## Build a library
 
 In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`). It tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
@@ -281,6 +293,7 @@ Runtime data: the DSH plugin writes to `.kb/kb.sqlite` in the session workspace;
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | Output and citation conventions |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration, v1 through v4 |
 | [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | Upgrading from 1.6.7 when the plugin panel quotes the installed version |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-to-fix table and the before-report checklist |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Known gaps and how to verify a change |
 | [mcp-server/README.md](mcp-server/README.md) | MCP configuration, tool mapping, timeouts |
 | [npm-package/README.md](npm-package/README.md) | npm installation and troubleshooting |

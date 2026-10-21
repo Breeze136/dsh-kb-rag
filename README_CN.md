@@ -79,6 +79,18 @@ Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https:
 > [!WARNING]
 > 不要在 DSH profile 里执行 `npm install dsh-kb-rag`。它会在 pnpm 的符号链接存储旁写一份 npm 风格的 `node_modules`，之后 `dsh plugin` 的行为会变得不可预测。`npm install` 只适用于完全手工管理的部署，见 [npm-package/README.md](npm-package/README.md)。
 
+## 排错
+
+| 现象 | 实际含义 | 处理 |
+|---|---|---|
+| 面板报 `@1.6.7 ... 不兼容` | 它在检查已安装的 1.6.7 清单 | 卸载 1.6.7，重启，再装 1.6.8 |
+| `Cannot find package ...\dsh-kb-rag\index.js` | 装成了 GitHub 仓库根，不是 npm 包 | 卸载它，从 npm 装 `dsh-kb-rag` |
+| `.hotload\...\package.json` 不存在 | 旧本地预览留下的过期元数据 | 重装 1.6.8；还在就清面板缓存 |
+| 装完没有 `kb_*` 工具 | 旧会话，或 profile 里还是 1.6.7 | 重启 DSH，新建会话，核对版本 |
+| 缺 Python 包或模型 | 引擎依赖问题，不是插件本身 | 按报错里的命令装，或设 `KB_AUTO_PIP=1`；模型用 `HF_ENDPOINT` |
+
+详细步骤和提问前要带的材料：[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
+
 ## 建库
 
 在 DSH 会话里让 agent 入库一个文件夹（`kb_ingest`），或同步 Zotero（`kb_zotero`）。单篇论文可以先按 DOI / arXiv ID 取回（`kb_fetch`）：它先试出版商正式版，校园网或机构订阅可以直接下到，失败再回退开放获取。
@@ -281,6 +293,7 @@ kb-rag/
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出与引用规范 |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移，v1 到 v4 |
 | [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | 从 1.6.7 升级时面板误报已安装版本的排查 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 按现象查处理，以及提问前要带的材料 |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | 已知缺口与回归验证方法 |
 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具映射、超时 |
 | [npm-package/README.md](npm-package/README.md) | npm 安装与故障排查 |
