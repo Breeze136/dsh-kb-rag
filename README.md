@@ -162,6 +162,8 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 *Rendered `compare` answer. The answer body follows the query language; the page chrome is Chinese in 1.6.8.*
 
+[Open the interactive page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML source](docs/demo/answer-en.html)
+
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
   "answer": { "stage": "instant",                       // one screen, 300-character budget

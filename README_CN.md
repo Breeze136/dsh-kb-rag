@@ -162,6 +162,8 @@ BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关
 
 *`compare` 模板的实际渲染结果，页脚带检索与渲染耗时。*
 
+[打开可交互页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 源码](docs/demo/answer-zh.html)
+
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
   "answer": { "stage": "instant",                       // 一屏直答，300 字符预算
