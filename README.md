@@ -158,6 +158,10 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 `kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests.
 
+<img src="docs/assets/answer-page-en.png" alt="Rendered HTML answer page with a comparison table, value bars, sources and timing footer" width="900">
+
+*Rendered `compare` answer. The answer body follows the query language; the page chrome is Chinese in 1.6.8.*
+
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
   "answer": { "stage": "instant",                       // one screen, 300-character budget

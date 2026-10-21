@@ -158,6 +158,10 @@ BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关
 
 `kb_rag` 接受一个 `answer` 对象，返回一份自包含 HTML 和一张紧凑的文本卡片。页面由引擎自己排版：不调用模型，文件也不发外部请求。
 
+<img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
+
+*`compare` 模板的实际渲染结果，页脚带检索与渲染耗时。*
+
 ```jsonc
 { "query": "graphene CVD nucleation density", "depth": "quick",
   "answer": { "stage": "instant",                       // 一屏直答，300 字符预算
