@@ -11,7 +11,7 @@
 
 kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and other MCP clients. It indexes PDFs and Zotero libraries into one SQLite file, then returns the passages that answer a question. Each result carries its section, physical page and DOI, and the citations attached to that passage, including whether the cited work is already in your library.
 
-Indexing, embedding and reranking run on your machine. There is no API cost and nothing is uploaded.
+Indexing, embedding and reranking run on your machine. There is no API cost and nothing is uploaded. Warm queries take 0.33-0.38 s in `quick` mode and 1.4-1.9 s in `deep`; the first call after a restart can take up to 8.9 s while the models load.
 
 The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Other repositories with the same name are not affiliated with it.
 
@@ -157,7 +157,7 @@ When a CJK query hits an almost entirely English library, the response carries a
 
 ## HTML answers
 
-`kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests.
+`kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests. Rendering is local and deterministic: the sample pages take 2-4 ms, separate from retrieval.
 
 <img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
 
@@ -220,6 +220,7 @@ Windows, CPU inference unless noted. Query numbers come from a 248-document / 20
 | Cold first call | up to 8.9 s while models load |
 | Ingest throughput | 242 PDF/DOCX files (1.8 GB) in 85.9 s, about 355 ms per document |
 | Incremental re-run | same directory in 2.17 s, a 40× speed-up |
+| HTML answer render | 2-4 ms per page in the sample set; retrieval is timed separately |
 | Full re-index (GPU) | 316 PDFs / 23.5k chunks / 20.1k vectors in 219 s on an 8 GB consumer GPU, zero errors |
 | Embedding throughput | 164 chunks/s on GPU vs 37 chunks/s on CPU (~4.4×); flat from batch 32 to 256, so tokenisation is the limiting factor |
 
