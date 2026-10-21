@@ -86,8 +86,6 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 # Windows: install.cmd, or npm-package\scripts\install.ps1
 ```
 
-On Windows, if DSH is not installed yet, the companion [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) zip installs Node.js, the DSH CLI, a desktop shortcut, and optionally this plugin with its Python dependencies and models. Unzip it completely and double-click `install.cmd`. It is a third-party helper, not a DeepSeek release, and it installs the official packages through their official channels.
-
 If your desktop build cannot search npm, install [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry) once and use its marketplace panel. kb-rag is listed there.
 
 > [!WARNING]
@@ -129,7 +127,7 @@ In DSH, ask for one in the conversation ("write this up as a shareable HTML repo
 
 <img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
 
-*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [Open the live page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML file](docs/demo/answer-en.html)
+*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [Open the live page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html)
 
 ```jsonc
 {

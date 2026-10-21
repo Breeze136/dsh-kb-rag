@@ -86,8 +86,6 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 # Windows：install.cmd，或 npm-package\scripts\install.ps1
 ```
 
-Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https://github.com/Breeze136/dsh-oneclick/releases/latest) 压缩包：它会装好 Node.js、DSH 命令行工具、桌面快捷方式，并可顺带装本插件、Python 依赖与模型。完整解压后双击 `install.cmd`。它是第三方辅助脚本，不是 DeepSeek 官方发布，只是把官方包按官方渠道装好。
-
 如果桌面端内置插件页不能搜索 npm，先装 [dsh-plugin-registry](https://github.com/beancookie/dsh-plugin-registry)，用它的市场面板安装，kb-rag 在列表中。
 
 > [!WARNING]
@@ -129,9 +127,7 @@ Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https:
 
 <img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
 
-*`compare` 模板的完整页面渲染截图（2× PNG）。[打开实时页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 文件](docs/demo/answer-zh.html)*
-
-[HTML 源码](docs/demo/answer-zh.html)
+*`compare` 模板的完整页面渲染截图（2× PNG）。[打开实时页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html)*
 
 ```jsonc
 {

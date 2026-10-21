@@ -26,9 +26,6 @@ dsh plugin --profile web remove dsh-kb-rag
 
 面板里卸载旧版 → 重启 DSH → 安装 1.6.8。不要在同一 profile 里执行 `npm install dsh-kb-rag`：npm 与 pnpm 的目录布局会打架。1.6.8 没有 schema 变化，旧 `.kb` 直接可用。
 
-> **Windows、连 DSH 都还没装？** 到 [dsh-oneclick 发行页](https://github.com/Breeze136/dsh-oneclick/releases/latest) 下载 zip，**完整解压**后双击 `install.cmd`。Node.js、DSH 命令行工具、桌面快捷方式它会装好；第三方脚本，非 DeepSeek 官方发布。
-
-
 ## 第 2 分钟 · 建库
 
 - **文件/文件夹**：说“把 `papers/` 入库” → `kb_ingest(paths=[...])`。内容未变的文件自动跳过；同一内容（sha256 相同）在其他路径已入库的标记 duplicate。
