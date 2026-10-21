@@ -54,6 +54,20 @@ kb-rag runs in the DSH desktop app. Install it from the plugin panel. The comman
 
 The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB). `kb_stats` shows whether they are present.
 
+#### Model cache (optional)
+
+On a slow network, point `HF_HOME` at a directory you choose and pre-download both models before the first search:
+
+```powershell
+[Environment]::SetEnvironmentVariable("HF_HOME", "<cache-dir>", "User")
+# new shell
+$env:HF_HOME = "<cache-dir>"
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
+python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-base')"
+```
+
+Install `sentence-transformers` first if Python reports it missing. `kb_stats` reports whether both models are cached. Full notes: [docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md#模型预下载可选).
+
 Already on 1.6.7? The plugin panel checks the installed 1.6.7 manifest, so installing 1.6.8 can fail with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8.
 
 ### B. Coming from DSH web
