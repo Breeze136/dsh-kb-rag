@@ -6285,7 +6285,7 @@ def _ans_blk_table(v, spec, env):
     head = []
     for j, c in enumerate(cols):
         c = c if isinstance(c, dict) else {"label": str(c)}
-        head.append('<th scope="col"%s>%s</th>'
+        head.append('<th scope="col"%s>%s<span class="ar" aria-hidden="true">↕</span></th>'
                     % (' class="num"' if (col_num.get(j) or j in bar_cols) else "",
                        _ans_esc(c.get("label", c.get("id", "")))))
     rows = []
@@ -7294,7 +7294,9 @@ def _ans_blk_kpi(v, spec, env):
                         ('<span class="ksrc">%s</span>' % refs) if refs else ""))
     if not cards:
         return ""
-    return ('<div class="kpis%s">%s</div>' % (" one" if len(cards) == 1 else "", "".join(cards)))
+    _n = len(cards)
+    _cls = " one" if _n == 1 else (" n4" if _n == 4 else "")
+    return ('<div class="kpis%s">%s</div>' % (_cls, "".join(cards)))
 
 
 def _ans_blk_flow(v, spec, env):
@@ -8269,12 +8271,26 @@ _ans_JS_FX2 = r"""
       Array.prototype.slice.call(head.cells).forEach(function (th, idx) {
         th.setAttribute('data-sort', '1');
         th.setAttribute('title', '点击排序');
+        th.setAttribute('aria-sort', 'none');
+        var ar = th.querySelector('.ar');
+        if (!ar) {
+          ar = document.createElement('span');
+          ar.className = 'ar';
+          ar.setAttribute('aria-hidden', 'true');
+          ar.textContent = '↕';
+          th.appendChild(ar);
+        }
         th.addEventListener('click', function () {
           var dir = th.classList.contains('asc') ? -1 : 1;
           Array.prototype.slice.call(head.cells).forEach(function (o) {
             o.classList.remove('asc'); o.classList.remove('desc');
+            o.setAttribute('aria-sort', 'none');
+            var oa = o.querySelector('.ar');
+            if (oa) oa.textContent = '↕';
           });
           th.classList.add(dir === 1 ? 'asc' : 'desc');
+          th.setAttribute('aria-sort', dir === 1 ? 'ascending' : 'descending');
+          ar.textContent = dir === 1 ? '↑' : '↓';
           var num = function (s) { var m = String(s).replace(/,/g, '').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : null; };
           Array.prototype.slice.call(body.rows).sort(function (a, b) {
             var va = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
@@ -8411,6 +8427,25 @@ _ans_CSS_PALETTE = r"""
   .palpick{display:flex;justify-content:center;align-items:center;gap:8px;margin:0 0 10px;font:12px var(--mono);color:var(--muted)}
   .palpick select{font:12px var(--mono);color:var(--ink-2);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
   @media print{.palpick{display:none!important}}
+"""
+
+_ans_CSS_TABLE = r"""
+  /* 表格：长表保持表头可见，窄屏横向滚动；排序箭头由 th 里的 .ar 提供 */
+  .tablewrap{overflow:auto;max-height:min(76vh,820px);-webkit-overflow-scrolling:touch}
+  thead th{position:sticky;top:0;z-index:2;background:var(--paper)}
+  table th .ar{display:inline-block;margin-left:5px;font-size:10px;opacity:.4}
+  table th.asc .ar,table th.desc .ar{opacity:1;color:var(--accent)}
+  @media print{.tablewrap{overflow:visible;max-height:none} thead th{position:static}}
+"""
+
+_ans_CSS_KPI = r"""
+  /* KPI 卡：demo 样式用上下细线拼成表格，4 个指标会排成 3+1，第二行右边两块是
+     空白网格，看起来像一张没画完的表。改回独立卡片后，任意数量换行都不出现空洞。 */
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;border-top:0}
+  .kpis.n4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  @media (min-width:1100px){.kpis.n4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  .kpi{background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;
+    padding:14px 16px}
 """
 
 _ans_CSS_BARS = r"""
@@ -8618,7 +8653,8 @@ def _ans_render(env: dict) -> str:
     layout = env.get("layout") or "card"
     # CSS_V2 追加在最后：同特异性下后写的胜出，覆盖层才能盖住布局 CSS
     css = (_ans_CSS_DEMOALL + _ans_CSS_MOTION + _ans_CSS_INTERACT
-           + _ans_CSS_SECTION + _ans_CSS_PALETTE + _ans_CSS_BARS + "\n" + _theme_css)
+           + _ans_CSS_SECTION + _ans_CSS_PALETTE + _ans_CSS_BARS + _ans_CSS_KPI
+           + _ans_CSS_TABLE + "\n" + _theme_css)
     # 只有真的出现公式时才引入 MathJax —— 不带公式的输出保持零外部请求
     use_math = 'class="tex"' in body
     head_extra = _ans_MATH_HEAD if use_math else ""
