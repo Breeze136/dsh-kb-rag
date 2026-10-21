@@ -93,7 +93,7 @@ If your desktop build cannot search npm, install [dsh-plugin-registry](https://g
 > [!WARNING]
 > Do not run `npm install dsh-kb-rag` inside a DSH profile. It writes an npm-style `node_modules` next to pnpm's symlink store, and later `dsh plugin` operations become unpredictable. `npm install` is only for a deployment you manage by hand; see [npm-package/README.md](npm-package/README.md).
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | What it means | Fix |
 |---|---|---|
@@ -106,20 +106,101 @@ If your desktop build cannot search npm, install [dsh-plugin-registry](https://g
 
 Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
-## Build a library
+## User manual
+
+### Build a library
 
 In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`). It tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
 
 Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the batch into a background job and returns a `job_id` immediately. Poll it with `kb_status` until it reports `done`; a host-side timeout does not interrupt the job. The same applies to whole-library Zotero migrations with `kb_zotero(async_mode=true)`.
 
-## Ask
+### Ask
 
 - "Which papers discuss graphene growth on copper?" → `kb_search`
 - "Which page states this?" → the `page` field on the evidence, or the Zotero page link
 - "Answer only from the library" → strict mode through `kb_scope` (DSH)
 - "Quick look or deep analysis?" → both tools default to `quick`; pass `depth: "deep"` for reranking, citation linking and related work, or set a session default with `/kb deep`
 
-For a formatted answer, `kb_rag` accepts an `answer` object and writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+For a formatted answer, say "generate an HTML report": the agent passes an `answer` object and the engine writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+
+### HTML answers
+
+In DSH, ask for one in the conversation ("write this up as a shareable HTML report"); the agent passes an `answer` object to `kb_rag`. A plain `kb_rag` call returns evidence for the model to answer from and writes no file. The engine lays out the page itself: there is no model call, and rendering the sample pages takes 2-4 ms, separate from retrieval. The result's `answer_file` object carries `path`, `url`, `bytes`, `template`, `layout` and `warnings`.
+
+<img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
+
+*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [Open the live page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML file](docs/demo/answer-en.html)
+
+```jsonc
+{
+  "query": "graphene CVD nucleation density on copper",
+  "depth": "quick",
+  "answer": {
+    "template": "compare",                    // review is the default
+    "fields": {
+      "bottom_line": {
+        "text": "Pre-treatment changes nucleation density by up to two orders of magnitude; oxygen plasma gives the lowest density and the highest monolayer coverage.",
+        "refs": [1, 2]                        // 1-based indexes into this call's evidence
+      },
+      "matrix": {
+        "columns": [
+          { "label": "Pre-treatment" },
+          { "label": "Density (cm⁻²)", "num": true },
+          { "label": "Monolayer coverage", "num": true }
+        ],
+        "rows": [
+          ["Mechanical polish", "10⁶–10⁷", "80–90%"],
+          ["Electropolishing", "10⁶–10⁷", "90–95%"],
+          ["Oxygen plasma", "10⁵–10⁶", "95–97%"]
+        ]
+      },
+      "reading": ["Ranges come from different experiments; compare within a column, not across rows."]
+    }
+  }
+}
+```
+
+**Templates.** The template fixes the sections, their order and each block's renderer; fields it does not define are ignored, and empty ones are skipped.
+
+| `template` | Use it for | Main fields |
+| --- | --- | --- |
+| `instant` | one-screen answer to a single question | `answer`, `limit`, `followup` |
+| `review` | synthesis across several papers | `bottom_line`, `state`, `methods`, `limits`, `takeaway` |
+| `method` | one method end to end | `what`, `when`, `steps`, `params`, `figure`, `caveats` |
+| `compare` | side-by-side comparison | `bottom_line`, `matrix`, `numbers`, `reading` |
+| `numeric` | when the numbers are the point | `bottom_line`, `kpis`, `numbers`, `trend`, `reading` |
+| `timeline` | how a line of work developed | `bottom_line`, `line` |
+| `concept` | terms and definitions | `cards` |
+| `dispute` | papers that disagree | `bottom_line`, `issues` |
+| `derivation` | a derivation with a checkable result | `conventions`, `deriv`, `figure`, `result`, `code`, `verify`, `pitfalls` |
+| `qa` | a concept explained in Q&A form | `intro`, `questions`, `summary` |
+
+`stage: "instant"` is a shortcut: it selects `instant`, sets a 300-character budget, and forces `quick`. `layout: "doc"` switches from the card layout to long-form. `summary` supplies a one-line lead when the template has no `bottom_line`, or that field is empty.
+
+**Fields.** A section takes a string, `{ text, refs }`, an array, a table (`{ columns: [{ label, num, heat, bar }], rows: [[...]] }` or a markdown pipe table), `{ items: [{ label, value, unit }] }` for `rank` and `kpis`, `{ x, series }` for `chart`, and `{ nodes, edges }` for `flow`. `refs` are 1-based indexes into this call's evidence; a number outside that range is reported in `warnings` and renders as a marker with no source. Write numbers and units as the paper gives them; the renderer derives axis ranges, ticks, bar lengths, heat levels and sort order, so do not pre-compute them. Fields are clipped at the template limit, and the whole envelope at `budget.max_total_chars` when set; every clip is listed in `warnings`.
+
+**Files.** Pages land in `~/.kb-rag/answers/` as `<date>_<question-slug>-<hash8>.html`, next to `index.html` (a gallery of the latest 200 answers, newest first) and `index.json`. Set `answer_dir` on the call (an absolute path, or one starting with `~`), or `KB_ANSWER_DIR` in the environment, to move the folder. The filename carries a content hash, so re-rendering the same envelope on the same day overwrites one file instead of adding another.
+
+**Open, print, share.** Open the file in any browser; it needs no server and no network. Formula pages are the one exception: they load MathJax from jsDelivr and fall back to raw TeX if that request fails. Two buttons at the top print or export to PDF and copy the body as Markdown; Ctrl/Cmd+P works too, and the layout holds down to phone width. The footer ends with the retrieval and render time for that answer:
+
+```text
+检索 1.6 s · 渲染 12 ms
+```
+
+Text-only clients still get the compact card; the HTML file is an addition, not a dependency.
+
+**Colours.** Four presets (blue, green, ink, warm) are switchable from a control at the bottom and are remembered in that browser. To pin a default for the workspace, create `.kb-rag/answer-theme.json` next to `.kb`; a `theme` object on the call overrides it.
+
+**Limits in 1.6.8.** The page chrome is Chinese; English chrome is planned for the next release. Unknown `template` names fall back to `review` in the engine; the DSH tool schema rejects them first.
+
+| Symptom | Fix |
+| --- | --- |
+| Text answer only, no file | `answer` was not passed; ask for a report explicitly |
+| `answer_file.ok` is false | the error text names the cause; fix it and re-run |
+| A section is missing | its field was empty; empty sections are omitted |
+| A field ends in `…` | the field hit its limit; `warnings` says which one |
+| A citation marker has no source | its `refs` number is outside this call's evidence; `warnings` names it |
+| Chinese labels in an English report | 1.6.8 chrome is Chinese; the body text is unchanged |
 
 ## Tools
 
@@ -168,33 +249,6 @@ Put limits in `filters`, not in the query. Year, journal, author, section and fi
 Send a second query in the original language only when you want documents in that language, for example Chinese-language reviews in the same library.
 
 When a CJK query hits an almost entirely English library, the response carries a `lang_note` and the plugin renders it with the results.
-
-## HTML answers
-
-`kb_rag` accepts an `answer` object and returns a self-contained HTML file plus a compact text card. The engine lays out the page itself; there is no model call and the file makes no external requests. Rendering is local and deterministic: the sample pages take 2-4 ms, separate from retrieval.
-
-<img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
-
-*Rendered `compare` answer in English. The localized chrome is a preview of the next release; 1.6.8 ships Chinese chrome.* [Open the live page](https://breeze136.github.io/dsh-kb-rag/demo/answer-en.html) · [HTML file](docs/demo/answer-en.html)
-
-```jsonc
-{ "query": "graphene CVD nucleation density", "depth": "quick",
-  "answer": { "stage": "instant",                       // one screen, 300-character budget
-              "template": "compare",                    // review | method | compare | numeric | timeline | concept | dispute | derivation | qa
-              "fields": { "bottom_line": { "text": "…", "refs": [1] },
-                          "matrix": { "columns": [{ "label": "Pre-treatment" }, { "label": "Density", "num": true }],
-                                      "rows": [["Mechanical polish", "10⁶–10⁷"]] } } } }
-```
-
-`refs` are 1-based indexes into the call's `evidence`; out-of-range ones are rejected before rendering. Each field is capped by the template's limit and the envelope by `budget.max_total_chars`. Figures are computed from the numbers you supply: the renderer picks axis ranges, tick spacing, bar lengths and heat levels, so do not pre-compute them.
-
-The page has four colour presets (blue, green, ink, warm), switchable from a control at the bottom or fixed for the workspace in `.kb-rag/answer-theme.json`. The footer ends with the retrieval and render time for that answer:
-
-```text
-检索 1.6 s · 渲染 12 ms
-```
-
-Files land in `~/.kb-rag/answers/` (override with `KB_ANSWER_DIR` or `answer_dir`) next to an `index.html` gallery. Text-only clients still get the card; the HTML file is an addition, not a dependency.
 
 ## MCP
 

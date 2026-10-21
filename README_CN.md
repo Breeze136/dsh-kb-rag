@@ -93,7 +93,7 @@ Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https:
 > [!WARNING]
 > 不要在 DSH profile 里执行 `npm install dsh-kb-rag`。它会在 pnpm 的符号链接存储旁写一份 npm 风格的 `node_modules`，之后 `dsh plugin` 的行为会变得不可预测。`npm install` 只适用于完全手工管理的部署，见 [npm-package/README.md](npm-package/README.md)。
 
-## 排错
+### 排错
 
 | 现象 | 实际含义 | 处理 |
 |---|---|---|
@@ -106,20 +106,103 @@ Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https:
 
 详细步骤和提问前要带的材料：[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
-## 建库
+## 用户手册
+
+### 建库
 
 在 DSH 会话里让 agent 入库一个文件夹（`kb_ingest`），或同步 Zotero（`kb_zotero`）。单篇论文可以先按 DOI / arXiv ID 取回（`kb_fetch`）：它先试出版商正式版，校园网或机构订阅可以直接下到，失败再回退开放获取。
 
 待处理文件超过 `KB_ASYNC_THRESHOLD`（默认 25）时，`kb_ingest` 会把这一批 fork 成后台任务，立刻返回 `job_id`。用 `kb_status` 轮询到 `done`；宿主调用超时不会中断任务。整库 Zotero 迁移用 `kb_zotero(async_mode=true)`，行为一致。
 
-## 提问
+### 提问
 
 - “库里哪些论文讨论铜上石墨烯生长？” → `kb_search`
 - “这是哪篇的哪一页？” → 看证据里的 `page` 字段，或点 Zotero 页码链接
 - “只依据库内文献回答” → 用 `kb_scope` 开严格模式（DSH）
 - “快速看一眼还是深入分析？” → 两个工具默认 `quick`；传 `depth: "deep"` 开重排、引用关联与相关文献，或用 `/kb deep` 设会话默认
 
-需要一份能发出去的成品时，给 `kb_rag` 传 `answer` 对象，引擎会写一份自包含 HTML 答案页，并在同目录维护历史答案画廊。十种模板覆盖一屏直答、综述、方法拆解、横向对比、数值发现、时间线、术语卡、争议清单、推导与问答。见 [HTML 答案页](#html-答案页)。
+需要一份能发出去的成品时，直接说「生成 HTML 报告」（generate an HTML report）：agent 会给 `kb_rag` 传 `answer` 对象，引擎写一份自包含 HTML 答案页，并在同目录维护历史答案画廊。十种模板覆盖一屏直答、综述、方法拆解、横向对比、数值发现、时间线、术语卡、争议清单、推导与问答。见 [HTML 答案页](#html-答案页)。
+
+### HTML 答案页
+
+在对话里直接说「把这个问题整理成一份可分享的 HTML 报告」，agent 就会给 `kb_rag` 传一个 `answer` 对象。普通 `kb_rag` 调用只返回证据，不落文件。页面由引擎自己排版：不调用模型；示例页渲染约 2-4 ms，不计检索时间。返回里的 `answer_file` 带 `path`、`url`、`bytes`、`template`、`layout` 和 `warnings`。
+
+<img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
+
+*`compare` 模板的完整页面渲染截图（2× PNG）。[打开实时页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 文件](docs/demo/answer-zh.html)*
+
+[HTML 源码](docs/demo/answer-zh.html)
+
+```jsonc
+{
+  "query": "graphene CVD nucleation density on copper",
+  "depth": "quick",
+  "answer": {
+    "template": "compare",                    // 默认 review
+    "fields": {
+      "bottom_line": {
+        "text": "不同预处理之间成核密度相差可达两个数量级；氧气等离子处理的成核密度最低、单层覆盖率最高。",
+        "refs": [1, 2]                        // 本次 evidence 的 1 基下标
+      },
+      "matrix": {
+        "columns": [
+          { "label": "预处理方式" },
+          { "label": "成核密度 (cm⁻²)", "num": true },
+          { "label": "单层覆盖率", "num": true }
+        ],
+        "rows": [
+          ["机械抛光", "10⁶–10⁷", "80–90%"],
+          ["电抛光", "10⁶–10⁷", "90–95%"],
+          ["氧气等离子", "10⁵–10⁶", "95–97%"]
+        ]
+      },
+      "reading": ["各行数据来自不同实验；只在同一列内比较，不要跨行当成一组序列。"]
+    }
+  }
+}
+```
+
+**模板。** 模板决定有哪些节、顺序和每块的渲染器；模板没定义的字段会被忽略，空字段自动省略。
+
+| `template` | 适合 | 主要字段 |
+| --- | --- | --- |
+| `instant` | 一屏直答单个问题 | `answer`、`limit`、`followup` |
+| `review` | 多篇文献综合 | `bottom_line`、`state`、`methods`、`limits`、`takeaway` |
+| `method` | 单个方法从头到尾 | `what`、`when`、`steps`、`params`、`figure`、`caveats` |
+| `compare` | 横向对比 | `bottom_line`、`matrix`、`numbers`、`reading` |
+| `numeric` | 结论就是数字 | `bottom_line`、`kpis`、`numbers`、`trend`、`reading` |
+| `timeline` | 一条研究线怎么发展 | `bottom_line`、`line` |
+| `concept` | 术语与定义 | `cards` |
+| `dispute` | 文献互相矛盾 | `bottom_line`、`issues` |
+| `derivation` | 有可核对结果的推导 | `conventions`、`deriv`、`figure`、`result`、`code`、`verify`、`pitfalls` |
+| `qa` | 用问答解释概念 | `intro`、`questions`、`summary` |
+
+`stage: "instant"` 是捷径：选 `instant`，把整封预算设为 300 字符，并强制 `quick`。`layout: "doc"` 从卡片式切到长文式。模板没有 `bottom_line`、或该字段为空时，`summary` 提供一句结论。
+
+**字段。** 每一节接受字符串、`{ text, refs }`、数组、表格（`{ columns: [{ label, num, heat, bar }], rows: [[...]] }` 或 markdown 管道表）、`rank`/`kpis` 的 `{ items: [{ label, value, unit }] }`、`chart` 的 `{ x, series }`、`flow` 的 `{ nodes, edges }`。`refs` 是本次 `evidence` 的 1 基下标；超出范围会写进 `warnings`，页面上留一个没有来源的编号，分享前先改掉。数字和单位照论文原样写；轴范围、刻度、条长、热力档位和排序都由渲染器算，不要自己先算。字段按模板上限裁剪，整封按 `budget.max_total_chars` 收口（如果设了）；每一处裁剪都会列在 `warnings` 里。
+
+**文件。** 落在 `~/.kb-rag/answers/`，文件名 `<日期>_<问题片段>-<hash8>.html`，同目录有 `index.html`（最近 200 份，按时间倒序）和 `index.json`。用调用上的 `answer_dir`（绝对路径，或以 `~` 开头）或环境变量 `KB_ANSWER_DIR` 换目录。文件名里带内容哈希，所以同一封信封在同一天重新渲染会覆盖同一个文件，不会越堆越多。
+
+**打开、打印、分享。** 用任意浏览器打开，不需要服务器，也不需要网络。含公式的页面是唯一例外：会从 jsDelivr 加载 MathJax，加载失败时退回原始 TeX。页首两个按钮分别是打印/导出 PDF 和复制正文为 Markdown；Ctrl/Cmd+P 也能打印；布局在手机宽度下也能正常显示。页脚最后一行是这份答案的检索与渲染耗时：
+
+```text
+检索 1.6 s · 渲染 12 ms
+```
+
+纯文本客户端仍然拿到紧凑卡片；HTML 是附加产物，不是依赖。
+
+**配色。** 四套预设（blue、green、ink、warm）可在页底切换，选择存在这个浏览器里。要给工作区固定一套，在 `.kb` 旁建 `.kb-rag/answer-theme.json`；调用上的 `theme` 优先级更高。
+
+**1.6.8 的边界。** 页面 chrome 是中文，英文 chrome 计划在下一版。未知的 `template` 在引擎里回落到 `review`；DSH 的工具 schema 会先拦下。
+
+| 现象 | 处理 |
+| --- | --- |
+| 只有文字答案，没有文件 | 没传 `answer`；明确要一份报告 |
+| `answer_file.ok` 为 false | 错误文案会说明原因；修好后重跑 |
+| 某一节没出现 | 该字段为空；空节不会渲染 |
+| 字段内容以 `…` 结尾 | 碰到字段上限；`warnings` 会指出是哪个 |
+| 引注编号在来源里找不到 | `refs` 超出本次 evidence 范围；`warnings` 会点出来 |
+| 英文报告里出现中文标签 | 1.6.8 的 chrome 是中文；正文不受影响 |
 
 ## 工具
 
@@ -168,35 +251,6 @@ BM25 按词元匹配。中文查询匹配不上英文正文，混合检索的关
 只有确实想要中文文献时，才用原话另发一条中文查询，例如库内还存了中文综述。
 
 当查询含中日韩字符而库内几乎全英文时，响应会带 `lang_note`，插件会把它渲染在结果旁。
-
-## HTML 答案页
-
-`kb_rag` 接受一个 `answer` 对象，返回一份自包含 HTML 和一张紧凑的文本卡片。页面由引擎自己排版：不调用模型，文件也不发外部请求。渲染在本地完成且结果确定：示例页约 2-4 ms，不计检索时间。
-
-<img src="docs/assets/answer-page-zh.png" alt="HTML 答案页示例：对比表、数值条、来源与页脚耗时" width="900">
-
-*`compare` 模板的完整页面渲染截图（2× PNG）。[打开实时页面](https://breeze136.github.io/dsh-kb-rag/demo/answer-zh.html) · [HTML 文件](docs/demo/answer-zh.html)*
-
-[HTML 源码](docs/demo/answer-zh.html)
-
-```jsonc
-{ "query": "graphene CVD nucleation density", "depth": "quick",
-  "answer": { "stage": "instant",                       // 一屏直答，300 字符预算
-              "template": "compare",                    // review | method | compare | numeric | timeline | concept | dispute | derivation | qa
-              "fields": { "bottom_line": { "text": "…", "refs": [1] },
-                          "matrix": { "columns": [{ "label": "Pre-treatment" }, { "label": "Density", "num": true }],
-                                      "rows": [["Mechanical polish", "10⁶–10⁷"]] } } } }
-```
-
-`refs` 是本次 `evidence` 的 1 基下标，越界的会在渲染前被拒绝。每个字段受模板上限约束，整封受 `budget.max_total_chars` 约束。图由你给的数字算出来：轴范围、刻度、条长、热力档位都由渲染器决定，不要自己先算。
-
-页面有四套配色（blue、green、ink、warm），可在页底切换，也可以在工作区 `.kb-rag/answer-theme.json` 里固定。页脚最后一行是这份答案的检索与渲染耗时：
-
-```text
-检索 1.6 s · 渲染 12 ms
-```
-
-文件落在 `~/.kb-rag/answers/`（可用 `KB_ANSWER_DIR` 或 `answer_dir` 改），同目录有 `index.html` 画廊。纯文本客户端仍然拿到卡片；HTML 是附加产物，不是依赖。
 
 ## MCP
 

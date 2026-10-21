@@ -17,7 +17,7 @@
 
 ### 新增：HTML 答案页
 
-- `kb_rag(answer=…)` 生成自包含单文件 HTML：十种模板（instant / review / method / compare / numeric / timeline / concept / dispute / derivation / qa），由引擎确定性渲染，不经过 LLM，无外部请求。
+- `kb_rag(answer=…)` 生成自包含单文件 HTML：十种模板（instant / review / method / compare / numeric / timeline / concept / dispute / derivation / qa），由引擎确定性渲染，不经过 LLM，无外部请求（含公式的页面会从 jsDelivr 取 MathJax）。
 - 可视块：三线表（列可标 `num` / `heat` / `bar`）、数值条、趋势折线、KPI 卡、流程链、时间轴（有数值画曲线，没数值排事件）。轴范围、刻度、条长与热力档位由渲染器计算。
 - 页脚最后一行显示本次「检索 … · 渲染 …」耗时；渲染耗时先量后写，文件名摘要不含它，同一个问题不会堆重复文件。
 - 配色预设 blue / green / ink / warm：`answer` 信封的 `theme` 优先，其次 `.kb-rag/answer-theme.json`（`state.json` 的 `theme` 兜底），页脚有下拉；`accent` / `overrides` / `css` 校验后注入，夜间模式固定蓝。

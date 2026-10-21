@@ -299,7 +299,7 @@ ALTER TABLE chunks ADD COLUMN para_end INTEGER;     -- 该块结束段落序号�
 ```
 
 - `fields` 的键是模板的 section id；未填的节自动省略。
-- `refs` 是本次 `evidence` 的 1 基下标，越界会在渲染前被拒绝。
+- `refs` 是本次 `evidence` 的 1 基下标；越界会写进返回的 `warnings`，页面上留一个没有来源的编号。
 - `budget` 是整封上限；每个字段另有模板级上限（`max_chars`）。截断会写进返回的 `warnings`。
 - `theme` 只影响这一份；不传时读工作区 `.kb-rag/answer-theme.json`。
 

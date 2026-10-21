@@ -32,7 +32,72 @@ Citations render as `[authors, year, journal](https://doi.org/DOI)` when a DOI e
 
 ### HTML answers
 
-Pass an `answer` object to `kb_rag` and the engine writes a self-contained HTML page: ten templates (instant, review, method, compare, numeric, timeline, concept, dispute, derivation, qa), comparison tables with heat or bars, trend charts, KPI cards and process chains. The footer reports retrieval and render time. Files go to `~/.kb-rag/answers/` next to a gallery; `answer_dir` overrides the location.
+Ask for one in the conversation ("write this up as a shareable HTML report"); the agent passes an `answer` object to `kb_rag`. A plain `kb_rag` call returns evidence for the model to answer from and writes no file. The engine lays out the page itself, with no model call and no second round trip, and the `answer_file` object carries `path`, `url`, `bytes`, `template`, `layout` and `warnings`.
+
+```jsonc
+{
+  "query": "graphene CVD nucleation density on copper",
+  "depth": "quick",
+  "answer": {
+    "template": "compare",                    // review is the default
+    "fields": {
+      "bottom_line": {
+        "text": "Pre-treatment changes nucleation density by up to two orders of magnitude; oxygen plasma gives the lowest density and the highest monolayer coverage.",
+        "refs": [1, 2]                        // 1-based indexes into this call's evidence
+      },
+      "matrix": {
+        "columns": [
+          { "label": "Pre-treatment" },
+          { "label": "Density (cm⁻²)", "num": true },
+          { "label": "Monolayer coverage", "num": true }
+        ],
+        "rows": [
+          ["Mechanical polish", "10⁶–10⁷", "80–90%"],
+          ["Electropolishing", "10⁶–10⁷", "90–95%"],
+          ["Oxygen plasma", "10⁵–10⁶", "95–97%"]
+        ]
+      },
+      "reading": ["Ranges come from different experiments; compare within a column, not across rows."]
+    }
+  }
+}
+```
+
+**Templates.** The template fixes the sections, their order and each block's renderer; fields it does not define are ignored, and empty ones are skipped.
+
+| `template` | Use it for | Main fields |
+| --- | --- | --- |
+| `instant` | one-screen answer to a single question | `answer`, `limit`, `followup` |
+| `review` | synthesis across several papers | `bottom_line`, `state`, `methods`, `limits`, `takeaway` |
+| `method` | one method end to end | `what`, `when`, `steps`, `params`, `figure`, `caveats` |
+| `compare` | side-by-side comparison | `bottom_line`, `matrix`, `numbers`, `reading` |
+| `numeric` | when the numbers are the point | `bottom_line`, `kpis`, `numbers`, `trend`, `reading` |
+| `timeline` | how a line of work developed | `bottom_line`, `line` |
+| `concept` | terms and definitions | `cards` |
+| `dispute` | papers that disagree | `bottom_line`, `issues` |
+| `derivation` | a derivation with a checkable result | `conventions`, `deriv`, `figure`, `result`, `code`, `verify`, `pitfalls` |
+| `qa` | a concept explained in Q&A form | `intro`, `questions`, `summary` |
+
+`stage: "instant"` is a shortcut: it selects `instant`, sets a 300-character budget, and forces `quick`. `layout: "doc"` switches from the card layout to long-form. `summary` supplies a one-line lead when the template has no `bottom_line`, or that field is empty.
+
+**Fields.** A section takes a string, `{ text, refs }`, an array, a table (`{ columns: [{ label, num, heat, bar }], rows: [[...]] }` or a markdown pipe table), `{ items: [{ label, value, unit }] }` for `rank` and `kpis`, `{ x, series }` for `chart`, and `{ nodes, edges }` for `flow`. Write numbers and units as the paper gives them; the renderer derives axis ranges, ticks, bar lengths, heat levels and sort order, so do not pre-compute them. Fields are clipped at the template limit, and the whole envelope at `budget.max_total_chars` when set; every clip is listed in `warnings`.
+
+**Files.** Pages land in `~/.kb-rag/answers/` as `<date>_<question-slug>-<hash8>.html`, next to `index.html` (a gallery of the latest 200 answers, newest first) and `index.json`. Set `answer_dir` on the call (an absolute path, or one starting with `~`), or `KB_ANSWER_DIR` in the environment, to move the folder. The filename carries a content hash, so re-rendering the same envelope on the same day overwrites one file instead of adding another.
+
+**Open, print, share.** Open the file in any browser; it needs no server and no network. Formula pages are the one exception: they load MathJax from jsDelivr and fall back to raw TeX if that request fails. Two buttons at the top print or export to PDF and copy the body as Markdown; Ctrl/Cmd+P works too, the layout holds down to phone width, and the footer reports retrieval and render time. Text-only clients still get the compact card; the file is an addition, not a dependency.
+
+**Colours.** Four presets, blue, green, ink and warm, switch from the footer control and are remembered in that browser. To pin a default for a workspace, create `.kb-rag/answer-theme.json` next to `.kb`; a `theme` object on the call overrides it.
+
+**Limits in 1.6.8.** The page chrome is Chinese; English chrome is planned for the next release. A `refs` number outside this call's evidence is reported in `warnings` and renders as a marker with no source, so fix it before sharing. Unknown `template` names fall back to `review` in the engine; the DSH tool schema rejects them first.
+
+| Symptom | Fix |
+| --- | --- |
+| Text answer only, no file | `answer` was not passed; ask for a report explicitly |
+| `answer_file.ok` is false | the error text names the cause; fix it and re-run |
+| A section is missing | its field was empty; empty sections are omitted |
+| A field ends in `…` | the field hit its limit; `warnings` says which one |
+| A citation marker has no source | its `refs` number is outside this call's evidence; `warnings` names it |
+| Chinese labels in an English report | 1.6.8 chrome is Chinese; the body text is unchanged |
 
 ### Engine capabilities
 
@@ -168,6 +233,7 @@ Peer dependencies: `@deepseek-ai/cordis` ^4, `@deepseek-ai/dsh-tools` (0.2.x).
 3. `kb_search(query="graphene domain coalescence during CVD growth on copper", top_k=5, filters={year: ">=2018"})`.
 4. `kb_rag(query="How is layer thickness determined from the Raman 2D peak?", strict=true)`.
 5. `kb_scope(scope="both")`; `kb_stats()` shows what is in the library.
+6. Add `answer={...}` to a `kb_rag` call for an HTML report; open `answer_file.path`, or browse the gallery at `~/.kb-rag/answers/index.html`.
 
 Data persists in the session workspace `/.kb` by default; every tool accepts `kb_root` to override.
 
