@@ -54,6 +54,8 @@ Start with the desktop app if you have it. The command-line paths are below. Aft
 
 The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB). `kb_stats` shows whether they are present.
 
+Already on 1.6.7? The plugin panel checks the installed 1.6.7 manifest, so installing 1.6.8 can fail with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8. On a web profile, `dsh plugin --profile web add dsh-kb-rag@1.6.8` replaces it in one step.
+
 ### B. DSH CLI
 
 ```bash
@@ -286,6 +288,7 @@ Runtime data: the DSH plugin writes to `.kb/kb.sqlite` in the session workspace;
 | [docs/DESIGN.md](docs/DESIGN.md) | Storage model, chunking, retrieval pipeline, engine protocol |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | Output and citation conventions |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration, v1 through v4 |
+| [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | Upgrading from 1.6.7 when the plugin panel quotes the installed version |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Known gaps and how to verify a change |
 | [mcp-server/README.md](mcp-server/README.md) | MCP configuration, tool mapping, timeouts |
 | [npm-package/README.md](npm-package/README.md) | npm installation and troubleshooting |

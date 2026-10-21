@@ -54,6 +54,8 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 
 桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。首次检索要下载两个模型（约 1.2 GB）；`kb_stats` 能看到是否已就绪。
 
+已经装了 1.6.7 的话：插件面板会拿已安装的 1.6.7 清单做兼容检查，装 1.6.8 时可能报 1.6.7 不兼容。先在面板卸载 1.6.7，再装 1.6.8；web profile 可以直接 `dsh plugin --profile web add dsh-kb-rag@1.6.8` 一步替换。
+
 ### B. DSH 命令行
 
 ```bash
@@ -286,6 +288,7 @@ kb-rag/
 | [docs/DESIGN.md](docs/DESIGN.md) | 存储模型、切分、检索流水线、引擎协议 |
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出与引用规范 |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移，v1 到 v4 |
+| [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | 从 1.6.7 升级时面板误报已安装版本的排查 |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | 已知缺口与回归验证方法 |
 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具映射、超时 |
 | [npm-package/README.md](npm-package/README.md) | npm 安装与故障排查 |

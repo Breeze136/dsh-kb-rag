@@ -67,6 +67,8 @@ Pick one path. After installing, restart DSH and open a new session; tools are i
 
 Open **Settings → Plugins** (设置 → 插件), search `kb-rag`, and install **1.6.8**. Restart DSH and start a new conversation. The desktop app must be 0.2 or newer; 1.6.7 and earlier are rejected by 0.2's compatibility check, which is what this release fixes.
 
+Upgrading from 1.6.7: the panel evaluates the installed 1.6.7 manifest and can refuse 1.6.8 with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8. On a web profile, the CLI command below replaces it directly.
+
 ### Option 1 — `dsh plugin` (DSH CLI)
 
 The package declares `dsh.bundle`, so this installs and activates it in one step:
