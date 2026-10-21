@@ -40,11 +40,11 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 
 1.6.8 修的是 DSH 0.2 安装路径上的两个错误：peer 范围和客户端 inject 名单。两处都错，于是安装被兼容检查拒绝、工具卡片一直是空的。
 
-另外加了引擎渲染的 HTML 答案页和标题级探针。`kb_stats` 现在会报告模型缓存状态；深度检索最高分低于地板时返回 `no_hit`。检索内核没动：同一个库上，结果与 1.6.7 对得上。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
+这个版本还加了引擎渲染的 HTML 答案页和标题级探针。`kb_stats` 现在会报告模型缓存状态；深度检索最高分低于地板时返回 `no_hit`。检索内核没动：同一个库上，结果与 1.6.7 对得上。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 安装
 
-从 DSH 桌面端安装最省事。装完重启 DSH 并新建会话，工具在会话创建时注入，旧会话看不到。
+有桌面端就从桌面端装，命令行路径在下面。装完重启 DSH 并新建会话，工具在会话创建时注入，旧会话看不到。
 
 ### A. DSH 桌面端（不写命令）
 
@@ -52,7 +52,7 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 2. 搜索 `kb-rag`。包名是 `dsh-kb-rag`，条目版本应为 **1.6.8**。
 3. 安装，重启 DSH，新建会话。
 
-桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。首次检索要下载两个模型（约 1.2 GB），会等一会儿；`kb_stats` 能看到是否已就绪。
+桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。首次检索要下载两个模型（约 1.2 GB）；`kb_stats` 能看到是否已就绪。
 
 ### B. DSH 命令行
 
@@ -68,7 +68,7 @@ dsh plugin --profile web add dsh-kb-rag@1.6.8
 npx dsh-kb-rag-install
 ```
 
-安装器会依次处理 Python 依赖、引擎冒烟测试、Node/pnpm 检查、`dsh plugin add` 和模型预下载（默认开启，`--no-models` 可跳过）。不指定 profile 时它查看 `~/.dsh/profiles/`：只有一个就直接用，多个给出选择，一个都没有则回退到 `web`。
+安装器会依次处理 Python 依赖、引擎冒烟测试、Node/pnpm 检查、`dsh plugin add` 和模型预下载（默认开启，`--no-models` 可跳过）。不指定 profile 时它查看 `~/.dsh/profiles/`。只有一个就直接用，多个给出选择，一个都没有则回退到 `web`。
 
 ### D. 从源码安装
 

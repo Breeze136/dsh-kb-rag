@@ -40,11 +40,11 @@ Authors, journals and DOIs are placeholders; the format is real. The full walkth
 
 1.6.8 fixes two things that broke the DSH 0.2 install: the peer range and the client injection list. With both wrong, the plugin was rejected during install and the tool cards stayed empty.
 
-It also adds HTML answer pages rendered by the engine and a title-level probe. `kb_stats` now reports model cache state, and deep searches return `no_hit` when the best reranked score stays below the floor. The search core is otherwise unchanged: on the same library, results line up with 1.6.7. The full list is in [CHANGELOG.md](CHANGELOG.md).
+The release also adds HTML answer pages rendered by the engine and a title-level probe. `kb_stats` now reports model cache state, and deep searches return `no_hit` when the best reranked score stays below the floor. The search core is otherwise unchanged: on the same library, results line up with 1.6.7. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-Install from the DSH desktop app, or use one of the command-line paths below. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
+Start with the desktop app if you have it. The command-line paths are below. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
 
 ### A. DSH desktop app (no terminal)
 
@@ -52,7 +52,7 @@ Install from the DSH desktop app, or use one of the command-line paths below. Af
 2. Search `kb-rag`. The package is `dsh-kb-rag`, and the entry should say **1.6.8**.
 3. Install, restart DSH, and start a new conversation.
 
-The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB), so expect a short wait. `kb_stats` shows whether they are present.
+The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB). `kb_stats` shows whether they are present.
 
 ### B. DSH CLI
 
@@ -68,7 +68,7 @@ Pin the version. A DSH profile is a pnpm workspace, and pnpm's `minimumReleaseAg
 npx dsh-kb-rag-install
 ```
 
-The installer runs the chain: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`: one profile is used directly, several are offered as a choice, none falls back to `web`.
+The installer runs the chain: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`. One profile is used directly, several are offered as a choice, and none falls back to `web`.
 
 ### D. From source
 
