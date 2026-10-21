@@ -13,7 +13,7 @@ kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and other
 
 Indexing, embedding and reranking run on your machine. There is no API cost and nothing is uploaded. Warm queries take 0.33-0.38 s in `quick` mode and 1.4-1.9 s in `deep`; the first call after a restart can take up to 8.9 s while the models load.
 
-The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Other repositories with the same name are not affiliated with it.
+The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Forks and similarly named repositories are not release sources; the canonical repository is [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag).
 
 ## What a result looks like
 

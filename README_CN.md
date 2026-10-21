@@ -13,7 +13,7 @@ kb-rag 是给 DSH（DeepSeek Harness）和其他 MCP 客户端用的本地文献
 
 索引、向量化和重排都在本机完成，没有 API 费用，也不上传数据。热态查询 `quick` 约 0.33-0.38 s，`deep` 约 1.4-1.9 s；重启后的首次调用要加载模型，最高约 8.9 s。
 
-npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的 [`npm-package/`](./npm-package) 发布；GitHub 上同名的其他仓库与本项目无关。
+npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的 [`npm-package/`](./npm-package) 发布。同名 fork 和名称相近的仓库都不是发布源，以 [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag) 为准。
 
 ## 输出示例
 
