@@ -8,25 +8,7 @@ check is looking at the wrong copy.
 This affects upgrades, not fresh installs. A profile with no `dsh-kb-rag` installs 1.6.8
 normally.
 
-## Web profile
-
-Replace 1.6.7 in one step:
-
-```bash
-dsh plugin --profile web add dsh-kb-rag@1.6.8
-```
-
-Then restart DSH and open a new session. Verify:
-
-```bash
-dsh plugin --profile web list | grep kb-rag
-```
-
-The installed `node_modules/dsh-kb-rag/package.json` should report `1.6.8`.
-
-## Desktop profile
-
-The desktop profile is managed by the Electron app, so the CLI refuses it. Use the panel:
+## DSH desktop app (supported)
 
 1. Quit DSH completely.
 2. Reopen DSH and go to **Settings → Plugins**.
@@ -41,7 +23,7 @@ $d = "$env:APPDATA\@deepseek-ai\dsh-desktop"
 Remove-Item -Recurse -Force "$d\Cache","$d\Code Cache","$d\GPUCache","$d\Network" -ErrorAction SilentlyContinue
 ```
 
-## Manual fallback for the desktop profile
+### Manual fallback
 
 Only needed when the panel will not install at all. Quit DSH first.
 
@@ -56,8 +38,25 @@ cd $p
 pnpm install --no-frozen-lockfile --config.confirmModulesPurge=false
 ```
 
-Start DSH and check that a new conversation exposes `kb_ingest`, `kb_search`, `kb_rag`,
-`kb_stats` and the other `kb_*` tools.
+## Coming from a web profile
+
+The web profile is not a supported install target. Install the DSH desktop app, then follow
+**DSH desktop app** above. The knowledge base (`.kb`) stays where it is; only the plugin host
+changes.
+
+Remove the old web-profile copy so the two do not drift:
+
+```bash
+dsh plugin --profile web remove dsh-kb-rag
+```
+
+If a headless or web deployment has to keep working for now, the legacy in-place upgrade is:
+
+```bash
+dsh plugin --profile web add dsh-kb-rag@1.6.8
+```
+
+That path is maintenance-only; new users should not start there.
 
 ## Why this is not fixed in 1.6.8 itself
 
@@ -67,3 +66,8 @@ DSH plugin-manager behaviour, not something a plugin can override from its own m
 
 The practical fix for users is the uninstall/reinstall above. The long-term fix belongs in
 DSH: check the version being installed, not only the version already present.
+
+## Verify
+
+Start DSH and check that a new conversation exposes `kb_ingest`, `kb_search`, `kb_rag`,
+`kb_stats` and the other `kb_*` tools.

@@ -44,9 +44,9 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 
 ## 安装
 
-有桌面端就从桌面端装，命令行路径在下面。装完重启 DSH 并新建会话，工具在会话创建时注入，旧会话看不到。
+kb-rag 面向 DSH 桌面端，从插件面板安装。命令行路径只留给维护者和旧的 web 部署，新用户不需要。
 
-### A. DSH 桌面端（不写命令）
+### A. DSH 桌面端
 
 1. 打开 **设置 → 插件**。
 2. 搜索 `kb-rag`。包名是 `dsh-kb-rag`，条目版本应为 **1.6.8**。
@@ -54,25 +54,17 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 
 桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。首次检索要下载两个模型（约 1.2 GB）；`kb_stats` 能看到是否已就绪。
 
-已经装了 1.6.7 的话：插件面板会拿已安装的 1.6.7 清单做兼容检查，装 1.6.8 时可能报 1.6.7 不兼容。先在面板卸载 1.6.7，再装 1.6.8；web profile 可以直接 `dsh plugin --profile web add dsh-kb-rag@1.6.8` 一步替换。
+已经装了 1.6.7 的话：插件面板会拿已安装的 1.6.7 清单做兼容检查，装 1.6.8 时可能报 1.6.7 不兼容。先在面板卸载 1.6.7，再装 1.6.8。
 
-### B. DSH 命令行
+### B. 从 DSH web 迁过来
 
-```bash
-dsh plugin --profile web add dsh-kb-rag@1.6.8
-```
-
-把版本号写死。DSH profile 是 pnpm workspace，pnpm 的 `minimumReleaseAge` 会拒绝几分钟前刚发布的版本；不写版本号时，刚发版后安装可能悄悄解析到上一版。重跑安装器效果相同，还会顺带校正 Python 依赖。
-
-### C. 一条命令安装
+web profile 不再是受支持的安装目标。装 DSH 桌面端，按 A 安装。知识库（`.kb`）留在原处，变的只是插件宿主。把 web profile 里的旧副本删掉，避免两边漂移：
 
 ```bash
-npx dsh-kb-rag-install
+dsh plugin --profile web remove dsh-kb-rag
 ```
 
-安装器会依次处理 Python 依赖、引擎冒烟测试、Node/pnpm 检查、`dsh plugin add` 和模型预下载（默认开启，`--no-models` 可跳过）。不指定 profile 时它查看 `~/.dsh/profiles/`。只有一个就直接用，多个给出选择，一个都没有则回退到 `web`。
-
-### D. 从源码安装
+### C. 从源码安装（维护者）
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag

@@ -44,9 +44,9 @@ The release also adds HTML answer pages rendered by the engine and a title-level
 
 ## Install
 
-Start with the desktop app if you have it. The command-line paths are below. After installing, restart DSH and open a new session. Tools are injected when a session is created, so existing sessions do not see them.
+kb-rag runs in the DSH desktop app. Install it from the plugin panel. The command-line routes exist for maintainers and old web deployments; new users do not need them.
 
-### A. DSH desktop app (no terminal)
+### A. DSH desktop app
 
 1. Open **Settings → Plugins** (设置 → 插件).
 2. Search `kb-rag`. The package is `dsh-kb-rag`, and the entry should say **1.6.8**.
@@ -54,25 +54,17 @@ Start with the desktop app if you have it. The command-line paths are below. Aft
 
 The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB). `kb_stats` shows whether they are present.
 
-Already on 1.6.7? The plugin panel checks the installed 1.6.7 manifest, so installing 1.6.8 can fail with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8. On a web profile, `dsh plugin --profile web add dsh-kb-rag@1.6.8` replaces it in one step.
+Already on 1.6.7? The plugin panel checks the installed 1.6.7 manifest, so installing 1.6.8 can fail with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8.
 
-### B. DSH CLI
+### B. Coming from DSH web
 
-```bash
-dsh plugin --profile web add dsh-kb-rag@1.6.8
-```
-
-Pin the version. A DSH profile is a pnpm workspace, and pnpm's `minimumReleaseAge` policy refuses packages published minutes ago. An unpinned install right after a release can quietly resolve to the previous version. Re-running the installer also works and reconciles Python dependencies.
-
-### C. One-shot installer
+The web profile is not a supported install target. Install the DSH desktop app, then follow A. The knowledge base (`.kb`) stays where it is; only the plugin host changes. Remove the old web-profile copy so the two do not drift:
 
 ```bash
-npx dsh-kb-rag-install
+dsh plugin --profile web remove dsh-kb-rag
 ```
 
-The installer runs the chain: Python dependencies, an engine smoke test, a Node/pnpm check, `dsh plugin add`, and model pre-download (on by default; `--no-models` skips it). With no profile argument it looks at `~/.dsh/profiles/`. One profile is used directly, several are offered as a choice, and none falls back to `web`.
-
-### D. From source
+### C. From source (maintainers)
 
 ```bash
 git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag

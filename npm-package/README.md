@@ -67,9 +67,11 @@ Pick one path. After installing, restart DSH and open a new session; tools are i
 
 Open **Settings → Plugins** (设置 → 插件), search `kb-rag`, and install **1.6.8**. Restart DSH and start a new conversation. The desktop app must be 0.2 or newer; 1.6.7 and earlier are rejected by 0.2's compatibility check, which is what this release fixes.
 
-Upgrading from 1.6.7: the panel evaluates the installed 1.6.7 manifest and can refuse 1.6.8 with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8. On a web profile, the CLI command below replaces it directly.
+Upgrading from 1.6.7: the panel evaluates the installed 1.6.7 manifest and can refuse 1.6.8 with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8.
 
-### Option 1 — `dsh plugin` (DSH CLI)
+### Option 1 — `dsh plugin` (legacy web profile)
+
+New DSH users should use the desktop app above. The web profile is no longer a supported install target; this route stays for existing web or headless deployments.
 
 The package declares `dsh.bundle`, so this installs and activates it in one step:
 
@@ -79,9 +81,9 @@ dsh plugin --profile web add dsh-kb-rag@1.6.8
 
 Pin the version. pnpm's `minimumReleaseAge` refuses packages published minutes ago, so an unpinned install right after a release can resolve to the previous version while looking successful. pnpm must be on PATH (`npm install -g pnpm` once).
 
-### Option 1b — one-shot installer via npx
+### Option 1b — one-shot installer via npx (legacy web/headless)
 
-Runs the bundled `scripts/install.ps1` / `install.sh`: Python dependencies, engine smoke test, Node/pnpm check, `dsh plugin add`, and model pre-download.
+Runs the bundled `scripts/install.ps1` / `install.sh`: Python dependencies, engine smoke test, Node/pnpm check, `dsh plugin add`, and model pre-download. It targets a DSH profile, so it is not the desktop path.
 
 ```bash
 npx dsh-kb-rag-install
