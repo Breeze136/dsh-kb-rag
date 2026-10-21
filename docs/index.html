@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kb-rag · HTML answer pages</title>
+<style>
+  :root{
+    --bg:#e7e1d5; --paper:#fbf9f4; --card:#fffdf8; --ink:#191c1e; --ink-2:#3b4144;
+    --muted:#757065; --line:#ddd5c6; --line-2:#ece6d9; --accent:#0d5c50;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15.5px/1.7 "Times New Roman",Times,"Microsoft YaHei","微软雅黑","PingFang SC",sans-serif}
+  .wrap{max-width:1080px;margin:48px auto 64px;padding:0 24px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:28px}
+  .eyebrow{margin:0 0 10px;font:11px var(--mono,Consolas,monospace);letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted)}
+  h1{font-family:"Times New Roman",Times,serif;font-weight:600;font-size:clamp(28px,4vw,44px);
+    line-height:1.15;letter-spacing:-.01em;margin:0 0 10px}
+  p.lead{margin:0;max-width:44em;color:var(--ink-2)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+  a.card{display:block;background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:16px;text-decoration:none;color:inherit;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+  a.card:hover{transform:translateY(-2px);box-shadow:0 16px 36px -20px rgba(45,38,24,.45);border-color:var(--accent)}
+  a.card img{display:block;width:100%;height:auto;border:1px solid var(--line-2);border-radius:8px;background:var(--card)}
+  a.card h2{font-family:"Times New Roman",Times,serif;font-size:22px;margin:14px 0 4px;font-weight:600}
+  a.card p{margin:0;color:var(--muted);font-size:13.5px}
+  footer{margin-top:36px;border-top:1px solid var(--line);padding-top:16px;
+    font:11.5px/1.7 Consolas,monospace;color:var(--muted)}
+  code{font:12px Consolas,monospace;background:var(--card);border:1px solid var(--line-2);
+    border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">kb-rag · answer pages</p>
+    <h1>HTML answer pages</h1>
+    <p class="lead">Two self-contained pages rendered by the kb-rag engine from the same <code>kb-answer</code>
+      envelope. No model call, no external requests. Open one and scroll; the table sorts, the
+      palette switches, and the footer reports retrieval and render time.</p>
+  </header>
+
+  <div class="grid">
+    <a class="card" href="demo/answer-en.html">
+      <img src="assets/answer-page-en.png" alt="English answer page: comparison table, value bars, sources and timing footer">
+      <h2>English</h2>
+      <p>Comparison template, English chrome and body. Illustrative graphene data, placeholder DOIs.</p>
+    </a>
+
+    <a class="card" href="demo/answer-zh.html">
+      <img src="assets/answer-page-zh.png" alt="中文答案页：对比表、数值条、来源与页脚耗时">
+      <h2>中文</h2>
+      <p>对比模板，中文界面与正文。石墨烯示例数据，DOI 为占位符。</p>
+    </a>
+  </div>
+
+  <footer>
+    kb-rag · MIT · Pages host this directory; the pages themselves are plain HTML files in
+    <code>docs/demo/</code>.
+  </footer>
+</div>
+</body>
+</html>
