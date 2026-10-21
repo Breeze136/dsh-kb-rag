@@ -87,6 +87,7 @@ Windows 上如果连 DSH 都还没装，可以用配套的 [dsh-oneclick](https:
 | `Cannot find package ...\dsh-kb-rag\index.js` | 装成了 GitHub 仓库根，不是 npm 包 | 卸载它，从 npm 装 `dsh-kb-rag` |
 | `.hotload\...\package.json` 不存在 | 旧本地预览留下的过期元数据 | 重装 1.6.8；还在就清面板缓存 |
 | 装完没有 `kb_*` 工具 | 旧会话，或 profile 里还是 1.6.7 | 重启 DSH，新建会话，核对版本 |
+| 新会话里 `/kb` 不显示 | 命令列表还没刷新 | 先发一条消息，再输入 `/kb`；工具本身不受影响 |
 | 缺 Python 包或模型 | 引擎依赖问题，不是插件本身 | 按报错里的命令装，或设 `KB_AUTO_PIP=1`；模型用 `HF_ENDPOINT` |
 
 详细步骤和提问前要带的材料：[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。

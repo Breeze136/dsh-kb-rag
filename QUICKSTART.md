@@ -62,6 +62,7 @@ dsh plugin --profile web remove dsh-kb-rag
 ## 第 5 分钟 · 常见坑
 
 - **装完工具不出现**：工具在会话创建时注入 → 重启 DSH 并开**新**会话。
+- **新会话里 `/kb` 不显示**：命令列表还没刷新，先随便发一条消息，再输入 `/kb`；工具调用本身不受影响。
 - **插件面板装不上**：1.6.7 及更早的 peer 范围与 0.2 不兼容，装 1.6.8；已装 1.6.7 的先卸载再装。确认 `node_modules/dsh-kb-rag/package.json` 的版本是 1.6.8。
 - **首次检索慢（约 10–15 秒）**：模型加载；守护进程只加载一次，之后热态 `quick` 0.3 s 左右、`deep` 1.5 s 左右。看 `kb_stats` 的 `models` 判断是没下载还是没加载。
 - **模型下载卡住**：设 `HF_ENDPOINT=https://hf-mirror.com` 与 `KB_HF_MIRROR_FIRST=1`，或预下载；`HF_HUB_DOWNLOAD_TIMEOUT` 默认 600 秒。

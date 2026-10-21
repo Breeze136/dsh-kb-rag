@@ -68,6 +68,12 @@ Check, in order:
 If all four hold, open a new conversation and call `kb_stats`. A response with document
 counts means the plugin is loaded.
 
+## `/kb` does not appear in a brand-new session
+
+The command list can lag until the session's first turn completes. Send one message, then
+type `/kb`. The `kb_*` tools work without the command, and `kb_scope` exposes the same
+scope, depth, strict and diligence settings.
+
 ## `desktop` profile is managed exclusively by the Electron application
 
 That is expected. The desktop profile cannot be changed with `dsh plugin`; use

@@ -87,6 +87,7 @@ If your desktop build cannot search npm, install [dsh-plugin-registry](https://g
 | `Cannot find package ...\dsh-kb-rag\index.js` | The GitHub repo root was installed, not npm | Uninstall it, install `dsh-kb-rag` from npm |
 | `.hotload\...\package.json` missing | Stale local-preview metadata | Reinstall 1.6.8; clear the panel cache if it persists |
 | Install worked, no `kb_*` tools | Old session, or the profile still has 1.6.7 | Restart DSH, open a new conversation, check the version |
+| `/kb` missing in a brand-new session | The command list has not refreshed yet | Send one message, then type `/kb`; the tools work without it |
 | Missing Python packages or models | Engine dependencies, not the plugin | Run the command in the error, or set `KB_AUTO_PIP=1`; models use `HF_ENDPOINT` |
 
 Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
