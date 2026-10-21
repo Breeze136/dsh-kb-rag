@@ -293,6 +293,7 @@ kb-rag/
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | 输出与引用规范 |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema 迁移，v1 到 v4 |
 | [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | 从 1.6.7 升级时面板误报已安装版本的排查 |
+| [docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md) | 老用户迁移：桌面端升级、web 转桌面、数据与验证 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 按现象查处理，以及提问前要带的材料 |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | 已知缺口与回归验证方法 |
 | [mcp-server/README.md](mcp-server/README.md) | MCP 配置、工具映射、超时 |

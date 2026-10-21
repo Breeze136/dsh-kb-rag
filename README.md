@@ -293,6 +293,7 @@ Runtime data: the DSH plugin writes to `.kb/kb.sqlite` in the session workspace;
 | [docs/OUTPUT-FORMAT.md](docs/OUTPUT-FORMAT.md) | Output and citation conventions |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | Schema migration, v1 through v4 |
 | [docs/UPGRADE-1.6.8.md](docs/UPGRADE-1.6.8.md) | Upgrading from 1.6.7 when the plugin panel quotes the installed version |
+| [docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md) | Migration notes for existing users (Chinese) |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-to-fix table and the before-report checklist |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Known gaps and how to verify a change |
 | [mcp-server/README.md](mcp-server/README.md) | MCP configuration, tool mapping, timeouts |

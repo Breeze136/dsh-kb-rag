@@ -14,11 +14,13 @@
 
 ### 从 DSH web 迁过来
 
-web profile 不再是受支持的安装目标。装 DSH 桌面端，按上面装插件；知识库（`.kb`）留在原处不动。把 web profile 里的旧副本删掉：
+web profile 不再是受支持的安装目标。装 DSH 桌面端，按上面装插件；知识库（`.kb`）留在原处不动。桌面端要打开同一个项目文件夹，或者调用时用 `kb_root` 指向旧路径。把 web profile 里的旧副本删掉：
 
 ```bash
 dsh plugin --profile web remove dsh-kb-rag
 ```
+
+完整迁移说明：[docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md)。
 
 ### 升级
 
