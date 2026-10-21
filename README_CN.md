@@ -36,7 +36,7 @@ npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的
 
 作者、期刊与 DOI 都是占位数据，格式是真实输出。完整流程见 [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md)。
 
-## 1.6.8 改了什么
+## 1.6.8 改动
 
 1.6.8 修的是 DSH 0.2 安装路径上的两个错误：peer 范围和客户端 inject 名单。两处都错，于是安装被兼容检查拒绝、工具卡片一直是空的。
 
