@@ -80,12 +80,21 @@ That is expected. The desktop profile cannot be changed with `dsh plugin`; use
 **Settings → Plugins**. The CLI route is for the web profile only, which is not a supported
 install target.
 
-## Python dependencies or models
+## Model download stalls (the most common install blocker)
+
+The first search pulls `BAAI/bge-small-zh-v1.5` and `BAAI/bge-reranker-base`, about
+1.2 GB. If it hangs or fails partway, you can let the plugin retry, or pre-download to a
+directory you choose. The commands and `HF_HOME` setup are in the install section of the
+README and in [MIGRATION-1.6.8.md](MIGRATION-1.6.8.md#模型预下载可选).
+
+For a blocked network, set `HF_ENDPOINT=https://hf-mirror.com` and
+`KB_HF_MIRROR_FIRST=1`, restart DSH, and retry. A partial download resumes on the next run.
+`kb_stats` shows which of the two models is still missing.
+
+## Python dependencies
 
 If a tool reports missing Python packages, run the command printed in the error, or set
-`KB_AUTO_PIP=1` so startup installs the pinned dependencies. A missing model is different:
-set `HF_ENDPOINT=https://hf-mirror.com` and `KB_HF_MIRROR_FIRST=1`, then retry. `kb_stats`
-shows whether each model is present.
+`KB_AUTO_PIP=1` so startup installs the pinned dependencies.
 
 ## Before opening an issue
 

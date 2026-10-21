@@ -52,11 +52,11 @@ kb-rag 面向 DSH 桌面端，从插件面板安装。命令行路径只留给�
 2. 搜索 `kb-rag`。包名是 `dsh-kb-rag`，条目版本应为 **1.6.8**。
 3. 安装，重启 DSH，新建会话。
 
-桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。首次检索要下载两个模型（约 1.2 GB）；`kb_stats` 能看到是否已就绪。
+桌面端需要 0.2 及以上。1.6.7 及更早会被 0.2 的兼容检查拒绝；1.6.8 是第一个能通过的版本。
 
-#### 模型预下载（可选）
+#### 模型下载（最容易卡住的一步）
 
-慢网建议先把 `HF_HOME` 指到任意目录，再预下载两个模型：
+首次检索要下载两个模型（约 1.2 GB），这是整个安装流程里最容易卡住的地方。可以让插件在首次检索时自己下，也可以先下到指定目录：
 
 ```powershell
 [Environment]::SetEnvironmentVariable("HF_HOME", "<缓存目录>", "User")
@@ -66,7 +66,7 @@ python -c "from sentence_transformers import SentenceTransformer; SentenceTransf
 python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-base')"
 ```
 
-缺 `sentence-transformers` 时先 `pip install sentence-transformers`。下完 `kb_stats` 会显示两个模型已缓存。完整说明：[docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md#模型预下载可选)。
+缺 `sentence-transformers` 时先 `pip install sentence-transformers`。下完 `kb_stats` 会显示两个模型已缓存。默认下载卡住时，设 `HF_ENDPOINT=https://hf-mirror.com` 和 `KB_HF_MIRROR_FIRST=1`，重启 DSH 再试。完整说明：[docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md#模型预下载可选)。
 
 已经装了 1.6.7 的话：插件面板会拿已安装的 1.6.7 清单做兼容检查，装 1.6.8 时可能报 1.6.7 不兼容。**先在面板卸载 1.6.7，再装 1.6.8。**
 

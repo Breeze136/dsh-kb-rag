@@ -65,7 +65,7 @@ dsh plugin --profile web remove dsh-kb-rag
 - **新会话里 `/kb` 不显示**：命令列表还没刷新，先随便发一条消息，再输入 `/kb`；工具调用本身不受影响。
 - **插件面板装不上**：1.6.7 及更早的 peer 范围与 0.2 不兼容，装 1.6.8；已装 1.6.7 的先卸载再装。确认 `node_modules/dsh-kb-rag/package.json` 的版本是 1.6.8。
 - **首次检索慢（约 10–15 秒）**：模型加载；守护进程只加载一次，之后热态 `quick` 0.3 s 左右、`deep` 1.5 s 左右。看 `kb_stats` 的 `models` 判断是没下载还是没加载。
-- **模型下载卡住**：设 `HF_ENDPOINT=https://hf-mirror.com` 与 `KB_HF_MIRROR_FIRST=1`，或预下载；`HF_HUB_DOWNLOAD_TIMEOUT` 默认 600 秒。
+- **模型下载卡住（最常见）**：设 `HF_ENDPOINT=https://hf-mirror.com` 与 `KB_HF_MIRROR_FIRST=1`，或按安装段的命令预下载；`HF_HUB_DOWNLOAD_TIMEOUT` 默认 600 秒。
 - **工具报缺少 Python 依赖**：按返回里的命令装，或设 `KB_AUTO_PIP=1`。
 - **旧数据没有页码**：页码锚点是 schema v3 起的字段，旧行降级到章节；`kb_ingest(force=true)` 重入库后恢复。
 - **Zotero 报 missing**：附件本体缺失，正常跳过，不联网下载。

@@ -52,11 +52,11 @@ kb-rag runs in the DSH desktop app. Install it from the plugin panel. The comman
 2. Search `kb-rag`. The package is `dsh-kb-rag`, and the entry should say **1.6.8**.
 3. Install, restart DSH, and start a new conversation.
 
-The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it. The first search downloads the two models (~1.2 GB). `kb_stats` shows whether they are present.
+The desktop app needs to be 0.2 or newer. 1.6.7 and earlier fail that version's compatibility check; 1.6.8 is the first release that passes it.
 
-#### Model cache (optional)
+#### Model download (the usual blocker)
 
-On a slow network, point `HF_HOME` at a directory you choose and pre-download both models before the first search:
+The first search downloads the two models (~1.2 GB). This is the step most likely to stall. Let the plugin fetch them, or pre-download to a directory you choose:
 
 ```powershell
 [Environment]::SetEnvironmentVariable("HF_HOME", "<cache-dir>", "User")
@@ -66,7 +66,7 @@ python -c "from sentence_transformers import SentenceTransformer; SentenceTransf
 python -c "from sentence_transformers import CrossEncoder; CrossEncoder('BAAI/bge-reranker-base')"
 ```
 
-Install `sentence-transformers` first if Python reports it missing. `kb_stats` reports whether both models are cached. Full notes: [docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md#模型预下载可选).
+Install `sentence-transformers` first if Python reports it missing. `kb_stats` reports whether both models are cached. If the default download stalls, set `HF_ENDPOINT=https://hf-mirror.com` and `KB_HF_MIRROR_FIRST=1`, restart DSH, and retry. Full notes: [docs/MIGRATION-1.6.8.md](docs/MIGRATION-1.6.8.md#模型预下载可选).
 
 Already on 1.6.7? The plugin panel checks the installed 1.6.7 manifest, so installing 1.6.8 can fail with an error that quotes 1.6.7. Uninstall 1.6.7 first, then install 1.6.8.
 
