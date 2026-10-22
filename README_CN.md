@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/cover-zh-dark.png">
+    <img src="docs/assets/brand/cover-zh-light.png" width="880"
+         alt="kb-rag 封面：kb-rag 字标与标语，右侧是蓝色 K 图标——本地文献知识库，段落级溯源">
+  </picture>
+</p>
+
 # kb-rag：本地文献 RAG，提供段落级溯源
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)

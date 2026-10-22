@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/cover-en-dark.png">
+    <img src="docs/assets/brand/cover-en-light.png" width="880"
+         alt="kb-rag cover: the wordmark and tagline beside the blue K icon plate — local literature RAG with passage-level provenance">
+  </picture>
+</p>
+
 # kb-rag: local literature RAG with passage-level provenance
 
 [![npm version](https://img.shields.io/npm/v/dsh-kb-rag)](https://www.npmjs.com/package/dsh-kb-rag)
