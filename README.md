@@ -23,6 +23,22 @@ Indexing, embedding and reranking run on your machine. There is no API cost and 
 
 The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Forks and similarly named repositories are not release sources; the canonical repository is [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag).
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-en-dark.png">
+    <img src="docs/assets/brand/explainer-en-light.png" width="880"
+         alt="Explainer: ask your own PDFs; a highlighted answer line is tied by [1] to the quoted passage from your library, with its section, page, DOI and citation chain">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-how-en-dark.png">
+    <img src="docs/assets/brand/explainer-how-en-light.png" width="880"
+         alt="How it works: PDFs and Zotero are chunked and embedded into one local SQLite file, searched by keywords and vectors, reranked, and returned as a passage with section, page and DOI">
+  </picture>
+</p>
+
 ## What a result looks like
 
 A `kb_rag` call returns evidence in this shape. The interface is in Chinese today, so the block below is a translation. `[in-library]` marks a cited work that is already indexed.
@@ -114,6 +130,14 @@ Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLES
 
 ## User manual
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-flow-en-dark.png">
+    <img src="docs/assets/brand/explainer-flow-en-light.png" width="880"
+         alt="Three steps: ingest PDFs and Zotero into one local library, ask in the chat and get passages, then export a self-contained HTML answer">
+  </picture>
+</p>
+
 ### Build a library
 
 In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`). It tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
@@ -128,6 +152,14 @@ Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the bat
 - "Quick look or deep analysis?" → both tools default to `quick`; pass `depth: "deep"` for reranking, citation linking and related work, or set a session default with `/kb deep`
 
 For a formatted answer, say "generate an HTML report": the agent passes an `answer` object and the engine writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-templates-en-dark.png">
+    <img src="docs/assets/brand/explainer-templates-en-light.png" width="880"
+         alt="Four of the ten answer templates: instant one-screen card, comparison table with bottom line, numeric KPIs with bars, timeline with events or a curve">
+  </picture>
+</p>
 
 ### HTML answers
 

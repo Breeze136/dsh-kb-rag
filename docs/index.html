@@ -4,10 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kb-rag · HTML answer pages</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/brand/icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/brand/icon-180.png">
 <style>
   :root{
     --bg:#e7e1d5; --paper:#fbf9f4; --card:#fffdf8; --ink:#191c1e; --ink-2:#3b4144;
-    --muted:#757065; --line:#ddd5c6; --line-2:#ece6d9; --accent:#0d5c50;
+    --muted:#757065; --line:#ddd5c6; --line-2:#ece6d9; --accent:#1f5fa8;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
@@ -16,6 +19,7 @@
   header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:28px}
   .eyebrow{margin:0 0 10px;font:11px var(--mono,Consolas,monospace);letter-spacing:.14em;
     text-transform:uppercase;color:var(--muted)}
+  .eyebrow img{width:18px;height:18px;vertical-align:-3px;margin-right:6px}
   h1{font-family:"Times New Roman",Times,serif;font-weight:600;font-size:clamp(28px,4vw,44px);
     line-height:1.15;letter-spacing:-.01em;margin:0 0 10px}
   p.lead{margin:0;max-width:44em;color:var(--ink-2)}
@@ -35,7 +39,7 @@
 <body>
 <div class="wrap">
   <header>
-    <p class="eyebrow">kb-rag · answer pages</p>
+    <p class="eyebrow"><img src="assets/brand/icon-32.png" alt="" width="18" height="18">kb-rag · answer pages</p>
     <h1>HTML answer pages</h1>
     <p class="lead">Two self-contained pages rendered by the kb-rag engine from the same <code>kb-answer</code>
       envelope. No model call, no external requests. Open one and scroll; the table sorts, the

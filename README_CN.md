@@ -23,6 +23,22 @@ kb-rag 是给 DSH（DeepSeek Harness）和其他 MCP 客户端用的本地文献
 
 npm 包 [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) 由本仓库的 [`npm-package/`](./npm-package) 发布。同名 fork 和名称相近的仓库都不是发布源，以 [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag) 为准。
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-zh-dark.png">
+    <img src="docs/assets/brand/explainer-zh-light.png" width="880"
+         alt="示意图：直接问你的 PDF；答案里高亮的一句用 [1] 连到文献库中被引用的原文段落，并标出章节、页码、DOI 与引文链">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-how-zh-dark.png">
+    <img src="docs/assets/brand/explainer-how-zh-light.png" width="880"
+         alt="怎么做到：PDF 与 Zotero 分块并本地向量化，进一个 SQLite 文件；关键词 + 向量混合检索、本地精排，最后返回带章节、页码与 DOI 的原文段落">
+  </picture>
+</p>
+
 ## 输出示例
 
 一次 `kb_rag` 调用返回的证据如下。界面文案目前是中文，`[库内]` 表示该文献已在库内、可以直接检索：
@@ -114,6 +130,14 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 
 ## 用户手册
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-flow-zh-dark.png">
+    <img src="docs/assets/brand/explainer-flow-zh-light.png" width="880"
+         alt="三步：把 PDF 与 Zotero 入库到本地文库，在对话里提问并拿到原文段落，再把答案导出成自包含 HTML 页">
+  </picture>
+</p>
+
 ### 建库
 
 在 DSH 会话里让 agent 入库一个文件夹（`kb_ingest`），或同步 Zotero（`kb_zotero`）。单篇论文可以先按 DOI / arXiv ID 取回（`kb_fetch`）：它先试出版商正式版，校园网或机构订阅可以直接下到，失败再回退开放获取。
@@ -128,6 +152,14 @@ git clone https://github.com/Breeze136/dsh-kb-rag.git && cd dsh-kb-rag
 - “快速看一眼还是深入分析？” → 两个工具默认 `quick`；传 `depth: "deep"` 开重排、引用关联与相关文献，或用 `/kb deep` 设会话默认
 
 需要一份能发出去的成品时，直接说「生成 HTML 报告」（generate an HTML report）：agent 会给 `kb_rag` 传 `answer` 对象，引擎写一份自包含 HTML 答案页，并在同目录维护历史答案画廊。十种模板覆盖一屏直答、综述、方法拆解、横向对比、数值发现、时间线、术语卡、争议清单、推导与问答。见 [HTML 答案页](#html-答案页)。
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-templates-zh-dark.png">
+    <img src="docs/assets/brand/explainer-templates-zh-light.png" width="880"
+         alt="十种答案模板里的四种：一屏直答卡、对比表加结论、指标卡加数值条、时间线（事件或曲线）">
+  </picture>
+</p>
 
 ### HTML 答案页
 
