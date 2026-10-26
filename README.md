@@ -21,7 +21,7 @@ kb-rag is a local literature knowledge base for DSH (DeepSeek Harness) and other
 
 Indexing, embedding and reranking run on your machine. There is no API cost and nothing is uploaded. Warm queries take 0.33-0.38 s in `quick` mode and 1.4-1.9 s in `deep`; the first call after a restart can take up to 8.9 s while the models load.
 
-The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). Forks and similarly named repositories are not release sources; the canonical repository is [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag).
+The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is published from [`npm-package/`](./npm-package). One-page overview: [docs/promo.html](docs/promo.html). Forks and similarly named repositories are not release sources; the canonical repository is [Breeze136/dsh-kb-rag](https://github.com/Breeze136/dsh-kb-rag).
 
 <p align="center">
   <picture>
@@ -30,6 +30,7 @@ The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is publ
          alt="Explainer: ask your own PDFs; a highlighted answer line is tied by [1] to the quoted passage from your library, with its section, page, DOI and citation chain">
   </picture>
 </p>
+<p align="center"><sub><b>Figure 1</b>　Every answer line traces back to a passage in your library: section, page, DOI, and who that passage cites.</sub></p>
 
 <p align="center">
   <picture>
@@ -38,6 +39,7 @@ The npm package [`dsh-kb-rag`](https://www.npmjs.com/package/dsh-kb-rag) is publ
          alt="How it works: PDFs and Zotero are chunked and embedded into one local SQLite file, searched by keywords and vectors, reranked, and returned as a passage with section, page and DOI">
   </picture>
 </p>
+<p align="center"><sub><b>Figure 2</b>　All of it runs on your machine: chunking, embedding, keyword plus vector search, then a local rerank.</sub></p>
 
 ## What a result looks like
 
@@ -59,6 +61,31 @@ citations from this evidence ([in-library] = already held, searchable)
 ```
 
 Authors, journals and DOIs are placeholders; the format is real. The full walkthrough is in [`docs/OUTPUT-FORMAT.md`](docs/OUTPUT-FORMAT.md).
+
+### Follow the citations
+
+A passage keeps the citation marks printed in the PDF. kb-rag resolves each mark against the
+library, so `[4, 7]` becomes two entries: one you already hold, with its own page number, and
+one that is still outside — a lead to fetch rather than a dead end.
+
+<p align="center">
+  <img src="docs/assets/fig-b-en.png" width="880"
+       alt="A passage with citation marks [4, 7]; mark 4 resolves to a work in the library with its page, mark 7 to an entry outside the library, and a related work is listed separately as not a citation">
+</p>
+<p align="center"><sub><b>Figure 3</b>　Solid arrows are citations the parser resolved; the line at the bottom is a related work, not a citation.</sub></p>
+
+### Refilling is a loop
+
+Add an outside reference — by DOI with `kb_fetch`, or by dropping the PDF into the folder and
+ingesting again — and its own reference list enters the next search. The same question then
+returns more evidence and a longer chain to follow. Indexing stays incremental: unchanged files
+are skipped, nothing is rebuilt.
+
+<p align="center">
+  <img src="docs/assets/fig-e-en.png" width="880"
+       alt="Ref 7 is added to the library and opens at PDF page 9; its reference list splits into works already held (Ref 2) and one still outside (Ref 9), which feeds the next round of search">
+</p>
+<p align="center"><sub><b>Figure 4</b>　Ref 7 was outside the library; after refilling it opens at p.9, and its own Ref 9 becomes the next lead.</sub></p>
 
 ## What 1.6.8 changes
 
@@ -130,6 +157,45 @@ Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLES
 
 ## User manual
 
+### Build a library
+
+Three ways in, depending on where the paper lives right now:
+
+**Zotero library (do this first).** Preview before syncing, so a whole library does not move in by accident:
+
+> Show me which Zotero items with PDF attachments can be ingested, without running it yet.
+
+That is `kb_zotero(dry_run=true)`. Drop `dry_run` to run it; add `async_mode=true` for a whole-library migration. Zotero's title, authors, year, journal and DOI are written into the search results; items without a local PDF attachment are skipped, and nothing is downloaded for you. If auto-detection fails, pass the `zotero.sqlite` path explicitly.
+
+**A folder of PDFs.**
+
+> Add this graphene literature folder to the knowledge base and tell me how many files were added, skipped and failed.
+
+Pass the folder path along; the agent calls `kb_ingest`, which handles PDF, TXT, MD and DOCX. Unchanged files are skipped by SHA-256; identical copies are recognised by hash and not indexed twice; a file is only re-parsed when its content changes.
+
+**A single paper.** Give `kb_fetch` a DOI or arXiv ID and it downloads and indexes in one step:
+
+> Use kb_fetch to fetch 10.5555/12345678, then ingest it.
+
+Above `KB_ASYNC_THRESHOLD` (default 25) pending files, the batch forks into a background job and returns a `job_id` immediately. Poll it with `kb_status` until it reports `done`; a host-side timeout does not interrupt the job.
+
+**Prefer PDFs that have a text layer.** A scanned PDF has none, so parsing fails with `no text extracted`; the engine does not OCR. Run such files through an OCR tool first, then ingest the result.
+
+### Ask
+
+- "Which papers discuss graphene growth on copper?" → `kb_search`
+- "Which page states this?" → the `page` field on the evidence, or the Zotero page link
+- "Answer only from the library" → strict mode through `kb_scope` (DSH)
+
+Two retrieval modes, `quick` by default:
+
+- **`quick` (default)** — find papers, look up terms, locate a passage fast. Hybrid recall, with no reranking, citation linking or related work.
+- **`deep`** — compare methods across papers, build a review, follow a citation chain. Adds a reranker on top of hybrid recall, plus citation links and related work.
+
+**Start with `quick`.** Its job is to confirm the library is built and returns grounded passages (0.2-0.4 s warm); once that checks out, switch to `deep` (1-2 s warm) for cross-paper comparison or citation chains. Switch in the conversation, set a session default with `/kb deep`, or pass `depth: "deep"` in MCP.
+
+For a formatted answer, say "generate an HTML report": the agent passes an `answer` object and the engine writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/explainer-flow-en-dark.png">
@@ -137,21 +203,7 @@ Details and the before-report checklist: [docs/TROUBLESHOOTING.md](docs/TROUBLES
          alt="Three steps: ingest PDFs and Zotero into one local library, ask in the chat and get passages, then export a self-contained HTML answer">
   </picture>
 </p>
-
-### Build a library
-
-In a DSH conversation, ask the agent to ingest a folder (`kb_ingest`) or to sync Zotero (`kb_zotero`). Papers can be fetched by DOI or arXiv ID first (`kb_fetch`). It tries the publisher version, which works on campus or through an institutional subscription, then falls back to open access.
-
-Above `KB_ASYNC_THRESHOLD` (default 25) pending files, `kb_ingest` forks the batch into a background job and returns a `job_id` immediately. Poll it with `kb_status` until it reports `done`; a host-side timeout does not interrupt the job. The same applies to whole-library Zotero migrations with `kb_zotero(async_mode=true)`.
-
-### Ask
-
-- "Which papers discuss graphene growth on copper?" → `kb_search`
-- "Which page states this?" → the `page` field on the evidence, or the Zotero page link
-- "Answer only from the library" → strict mode through `kb_scope` (DSH)
-- "Quick look or deep analysis?" → both tools default to `quick`; pass `depth: "deep"` for reranking, citation linking and related work, or set a session default with `/kb deep`
-
-For a formatted answer, say "generate an HTML report": the agent passes an `answer` object and the engine writes a self-contained HTML page next to a gallery of earlier answers. Ten templates cover an instant one-screen card, a review, a method breakdown, a comparison, numeric findings, a timeline, a glossary, disputes, a derivation, and Q&A. See [HTML answers](#html-answers).
+<p align="center"><sub><b>Figure 5</b>　Three steps: build the library, ask in the chat, export a self-contained HTML answer. The index is built once.</sub></p>
 
 <p align="center">
   <picture>
@@ -160,10 +212,11 @@ For a formatted answer, say "generate an HTML report": the agent passes an `answ
          alt="Four of the ten answer templates: instant one-screen card, comparison table with bottom line, numeric KPIs with bars, timeline with events or a curve">
   </picture>
 </p>
+<p align="center"><sub><b>Figure 6</b>　Four of the ten answer templates: instant card, comparison, numeric KPIs, timeline.</sub></p>
 
 ### HTML answers
 
-In DSH, ask for one in the conversation ("write this up as a shareable HTML report"); the agent passes an `answer` object to `kb_rag`. A plain `kb_rag` call returns evidence for the model to answer from and writes no file. The engine lays out the page itself: there is no model call, and rendering the sample pages takes 2-4 ms, separate from retrieval. The result's `answer_file` object carries `path`, `url`, `bytes`, `template`, `layout` and `warnings`.
+When a chat reply gets long and hard to scan, ask for an HTML report instead: in DSH, say "write this up as a shareable HTML report" and the agent passes an `answer` object to `kb_rag`. A plain `kb_rag` call returns evidence for the model to answer from and writes no file. The engine lays out the page itself: there is no model call, and rendering the sample pages takes 2-4 ms, separate from retrieval. The result's `answer_file` object carries `path`, `url`, `bytes`, `template`, `layout` and `warnings`.
 
 <img src="docs/assets/answer-page-en.png" alt="Rendered English answer page with a comparison table, value bars, sources and timing footer" width="900">
 
@@ -238,7 +291,7 @@ Text-only clients still get the compact card; the HTML file is an addition, not 
 | A section is missing | its field was empty; empty sections are omitted |
 | A field ends in `…` | the field hit its limit; `warnings` says which one |
 | A citation marker has no source | its `refs` number is outside this call's evidence; `warnings` names it |
-| Chinese labels in an English report | 1.6.8 chrome is Chinese; the body text is unchanged |
+| Chinese labels in an English report | The chrome is Chinese; the body text is unchanged |
 
 ## Tools
 
@@ -274,19 +327,14 @@ The MCP server exposes 10 tools as well, including `kb_status` and a diagnostic 
 
 ## Query guidance
 
-The engine passes queries through unchanged. It does not translate, expand or rewrite them, so what you type has to match the language of the indexed text. Most libraries are about 98% English, so a few rules matter in practice.
+Ask in whatever language you think in. The agent rewrites your question into an English term string before it reaches the engine — most libraries are around 98% English — and adds a query in your own words when you want documents in that language.
 
-In a DSH session the agent writes the query. Its tool description already turns a Chinese question into an English term string, so asking in Chinese works. Write English term strings yourself only when you drive the tools directly (MCP clients, scripts, the engine CLI).
+Two things are worth doing:
 
-BM25 matches tokens. A CJK query cannot match English body text, so the keyword half of hybrid ranking contributes nothing and the hit rests on vector similarity. For the same question, an English term string retrieves better.
+- **Ask one thing at a time**, naming the material, method and property together. That retrieves far better than "summarise this for me".
+- **Say the limits out loud** — "only papers from 2020 on", "just this journal". The agent turns them into `filters` rather than stuffing them into the query.
 
-Keep queries to 3-12 words in the pattern `material/system + method/process + property/characterisation`, for example `graphene CVD copper single crystal nucleation suppression`. Do not write a full sentence.
-
-Put limits in `filters`, not in the query. Year, journal, author, section and file kind are metadata filters. `journal` is filled only by the Zotero migration path, so it is `NULL` for documents indexed with `kb_ingest`. Filtering on it usually returns nothing. Use author, year, title or section instead.
-
-Send a second query in the original language only when you want documents in that language, for example Chinese-language reviews in the same library.
-
-When a CJK query hits an almost entirely English library, the response carries a `lang_note` and the plugin renders it with the results.
+The mechanics — why a CJK keyword query cannot match English body text, which fields `filters` supports, what `lang_note` means — are in [docs/DESIGN.md](docs/DESIGN.md), section 5.
 
 ## MCP
 
@@ -390,8 +438,7 @@ Runtime data: the DSH plugin writes to `.kb/kb.sqlite` in the session workspace;
 - Scanned PDFs are not supported. Documents without a text layer are skipped; OCR is out of scope.
 - Page anchors are PDF-only. TXT, MD and DOCX files, and documents indexed before schema v3, fall back to section-level location until re-ingested with `force`.
 - Citation linking requires a re-ingest. Superscript detection and reference splitting run at parse time.
-- Metadata can be misread. When PDF metadata is missing, title and year are inferred from page text; Zotero metadata overrides this.
-- Cross-language retrieval is weak at the engine level. The engine never translates; a CJK query against English text leans on the vector path and the response carries a `lang_note`. The agent layer compensates by rewriting the query.
+- Metadata is only as good as the PDF. It is never 100% accurate; when it is missing, title and year are judged from the cover page, and existing Zotero metadata is preferred.
 - Captions are searchable as text; content that exists only inside a figure is not.
 - Keyword matching is in memory. Beyond a few hundred thousand chunks, FAISS HNSW or SQLite FTS5 would be the next step.
 - Some publishers redirect automated PDF requests to a login page. `kb_fetch` reports the failure and leaves the manual path (download, then `kb_ingest`) as the fallback.

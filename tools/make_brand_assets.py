@@ -92,7 +92,7 @@ EXPLAIN = {
     ),
     "zh": dict(
         eyebrow="本地文献知识库",
-        title=["直接问你的 PDF。", "出处再也不会丢。"],
+        title=["直接问你的 PDF，出处再也不会丢。"],
         sub="检索你自己的 PDF 与 Zotero 文库——每条答案都落在原文段落上，并带章节、页码与 DOI。",
         answer_label="答案",
         answer_bars=((452, False), (340, True), (420, False), (268, False)),
@@ -110,8 +110,8 @@ EXPLAIN = {
 HOW = {
     "en": dict(
         eyebrow="HOW IT WORKS",
-        title=["From PDFs to passages,", "on your machine."],
-        sub="Index once, then every question runs hybrid keyword + vector search and a local reranker.",
+        title=["Data never leaves your machine.", "Retrieval costs zero tokens."],
+        sub="Quick search 0.2–0.4 s, deep search 1–2 s. Index once — no model API.",
         s1=("PDF · Zotero", "your library"),
         s2=("chunks + vectors", "one SQLite file"),
         s3=("hybrid + rerank", "keyword + vector"),
@@ -120,8 +120,8 @@ HOW = {
     ),
     "zh": dict(
         eyebrow="怎么做到",
-        title=["从 PDF 到原文段落，", "全在本机。"],
-        sub="索引只做一次；之后每次提问都走关键词 + 向量混合检索，再本地精排。",
+        title=["数据不上传，检索 0 token。"],
+        sub="快速检索 0.2–0.4 秒，深度检索 1–2 秒；索引只做一次，不调用模型 API。",
         s1=("PDF · Zotero", "你的文库"),
         s2=("分块 + 向量", "一个 SQLite 文件"),
         s3=("混合检索 + 精排", "关键词 + 向量"),
@@ -135,7 +135,7 @@ HOW = {
 FLOW = {
     "en": dict(
         eyebrow="HOW YOU USE IT",
-        title=["Add your PDFs. Ask.", "Share the answer."],
+        title=["Built-in HTML reports, instant and readable."],
         sub="Index once; every question returns a passage you can point at, and any answer can become a shareable page.",
         p1=("your library", "PDF · Zotero", "kb_ingest"),
         p2=("ask in the chat", "one question → passages", "kb_search · kb_rag"),
@@ -144,7 +144,7 @@ FLOW = {
     ),
     "zh": dict(
         eyebrow="怎么用",
-        title=["把 PDF 放进来，提问，", "把答案发出去。"],
+        title=["内置 HTML 生成器，超快渲染，报告更好读。"],
         sub="文库只索引一次；每次提问都返回一段能指认的原文，任何答案都能变成一份可分享的页面。",
         p1=("你的文库", "PDF · Zotero", "kb_ingest"),
         p2=("在对话里提问", "一句话 → 原文段落", "kb_search · kb_rag"),
@@ -164,7 +164,7 @@ TEMPLATES = {
     ),
     "zh": dict(
         eyebrow="答案模板",
-        title=["十种模板，", "一个引擎。"],
+        title=["十种模板，一个引擎。"],
         sub="章节、表格、数值条、曲线、指标卡、时间线都由引擎排版，不调用模型。十种里的四种：",
         tiles=(("instant", "一屏直答"), ("compare", "对比表 + 结论"),
                ("numeric", "指标卡 + 数值条"), ("timeline", "时间线")),
@@ -172,6 +172,179 @@ TEMPLATES = {
 }
 TEMPLATE_IDS = ("instant · review · method · compare · numeric · timeline · "
                 "concept · dispute · derivation · qa")
+
+# 下一版故事（4 页）：问题 → 单元 → 并置 → 增量。
+# 每页只讲一件事：标题 + 一句副标题 + 少量图内标签，信息分散而不是堆在一张图里。
+LEDGER_P1 = {
+    "en": dict(
+        eyebrow="THE PROBLEM",
+        title=["You read the paper.", "You keep the headline."],
+        sub="Conditions, values and caveats sit in single sentences that never reach the abstract — and rarely survive the week.",
+        left_caption="day 0 · what the paper says",
+        right_caption="day 7 · what you recall",
+        lost=("conditions", "values", "caveats"),
+        arrow_label="one week",
+        footer="the narrative stays; the details stay in the PDF",
+    ),
+    "zh": dict(
+        eyebrow="问题",
+        title=["论文读过了，", "记住的只有主线。"],
+        sub="条件、数值与边界散落在单句里，不进摘要，也很难留过一周。",
+        left_caption="第 0 天 · 论文里写的",
+        right_caption="第 7 天 · 你还记得的",
+        lost=("条件", "数值", "边界"),
+        arrow_label="一周后",
+        footer="主线留下了，细节还在 PDF 里",
+    ),
+}
+
+LEDGER_P2 = {
+    "en": dict(
+        eyebrow="THE EVIDENCE",
+        title=["One passage.", "The result, and where it sits."],
+        sub="The card carries the metadata; the right side is the paragraph in the PDF, matched sentence in place.",
+        result_label="RESULT",
+        meta="Author A · 2024 · Carbon",
+        quote="annealed at 900 °C for 10 min",
+        quote_hi="900 °C",
+        result_chip="matched in full text",
+        pdf_label="IN THE PDF",
+        page="p.4",
+        connector="verbatim",
+        footer="the snippet is not a summary; it is the paragraph, highlighted",
+    ),
+    "zh": dict(
+        eyebrow="证据",
+        title=["一段原文。", "结果卡片，和它在论文里的位置。"],
+        sub="左边是结果卡片，右边是 PDF 里的那段原文，命中的句子还在原位。",
+        result_label="结果",
+        meta="Author A · 2024 · Carbon",
+        quote="在 900 °C 退火 10 min",
+        quote_hi="900 °C",
+        result_chip="全文命中",
+        pdf_label="论文原文",
+        page="p.4",
+        connector="逐字一致",
+        footer="片段不是摘要，就是原文那一段，命中的句子还在原位",
+    ),
+}
+
+LEDGER_P3 = {
+    "en": dict(
+        eyebrow="THE CHAIN",
+        title=["What the passage cites,", "and what you already hold."],
+        sub="Markers in the passage resolve to reference entries; cited works already in your library are marked.",
+        passage_label="PASSAGE · p.4",
+        citation_label="CITATIONS FROM THIS PASSAGE",
+        line1="Oxidation above 800 °C",
+        line2="has been reported [1,2].",
+        line2_hi="[1,2]",
+        note="in-text [n] → reference list → a DOI or a page",
+        rows=(("Ref 1", "Author C · 2010 · Carbon", "in library", "open in Zotero"),
+              ("Ref 2", "Author D · 2012 · Carbon", "not indexed", "")),
+        collapsed="3 further citations · Ref 6-8",
+        footer="in-library means the cited paper is indexed here and can be searched",
+    ),
+    "zh": dict(
+        eyebrow="引文链",
+        title=["这段原文引了谁，", "谁已经在你库里。"],
+        sub="正文里的 [n] 会解析到参考文献条目；被引文献若已在库内，会直接标出来。",
+        passage_label="原文 · 第 4 页",
+        citation_label="这段原文的引文",
+        line1="已有工作报道",
+        line2="800 °C 以上会氧化 [1,2]。",
+        line2_hi="[1,2]",
+        note="正文 [n] → 参考文献条目 → DOI 或页码",
+        rows=(("Ref 1", "Author C · 2010 · Carbon", "库内", "在 Zotero 中打开"),
+              ("Ref 2", "Author D · 2012 · Carbon", "未入库", "")),
+        collapsed="另有 3 条引文 · Ref 6-8",
+        footer="「库内」表示这篇被引文献已经入库，可以直接检索",
+    ),
+}
+
+LEDGER_P4 = {
+    "en": dict(
+        eyebrow="SIDE BY SIDE",
+        title=["Four papers, one grid.", "Conflicts included."],
+        sub="Conditions, values, limits and counterexamples line up. A blank cell means the text does not report it.",
+        meta="Zotero · 37 papers · 4 shown",
+        cols=("PAPER", "CONDITIONS", "VALUE", "BOUNDARY", "COUNTEREXAMPLE"),
+        empty="not reported",
+        rows=(
+            ("Paper A", [("900 °C · 1 mbar", "p.4", "conf"), ("4×10⁴/cm²", "p.6", ""),
+                         ("≤ 5 layers", "p.7", ""), None]),
+            ("Paper B", [("700 °C · APCVD", "p.3", ""), ("3×10³/cm²", "p.5", ""),
+                         ("monolayer", "p.5", ""), ("> 800 °C oxidises", "p.8", "conf")]),
+            ("Paper C", [("plasma, 30 s", "p.2", ""), ("97 %", "p.6", ""),
+                         None, ("not on Si", "p.9", "")]),
+            ("Paper D", [("LPCVD 850 °C", "p.3", ""), None,
+                         ("≤ 3 layers", "p.6", ""), None]),
+        ),
+        footer="≠ marks a conflict · blank means the text does not report it",
+    ),
+    "zh": dict(
+        eyebrow="并置",
+        title=["四篇论文，", "一张表。"],
+        sub="条件、数值、边界与反例并排；空白表示原文没有报告。",
+        meta="Zotero · 37 篇 · 展示 4 篇",
+        cols=("论文", "条件", "数值", "边界", "反例"),
+        empty="未报告",
+        rows=(
+            ("论文 A", [("900 °C · 1 mbar", "p.4", "conf"), ("4×10⁴/cm²", "p.6", ""),
+                        ("≤ 5 层", "p.7", ""), None]),
+            ("论文 B", [("700 °C · APCVD", "p.3", ""), ("3×10³/cm²", "p.5", ""),
+                        ("单层", "p.5", ""), (">800 °C 会氧化", "p.8", "conf")]),
+            ("论文 C", [("等离子 30 s", "p.2", ""), ("97 %", "p.6", ""),
+                        None, ("硅基底不适用", "p.9", "")]),
+            ("论文 D", [("LPCVD 850 °C", "p.3", ""), None,
+                        ("≤ 3 层", "p.6", ""), None]),
+        ),
+        footer="≠ 表示两篇结论冲突 · 空白表示原文未报告",
+    ),
+}
+
+LEDGER_P5 = {
+    "en": dict(
+        eyebrow="IT GROWS",
+        title=["A new paper fills cells.", "It does not rewrite rows."],
+        sub="When the library grows, only the affected cells change; a disagreement is reported, not averaged away.",
+        meta="Zotero · 38 papers · 1 new",
+        cols=("PAPER", "CONDITIONS", "VALUE", "BOUNDARY", "COUNTEREXAMPLE"),
+        empty="not reported",
+        new="NEW",
+        rows=(
+            ("Paper A", [("900 °C · 1 mbar", "p.4", "conf"), ("4×10⁴/cm²", "p.6", ""),
+                         ("≤ 5 layers", "p.7", ""), None]),
+            ("Paper B", [("700 °C · APCVD", "p.3", ""), ("3×10³/cm²", "p.5", ""),
+                         ("monolayer", "p.5", ""), ("> 800 °C oxidises", "p.8", "conf")]),
+            ("Paper C", [("plasma, 30 s", "p.2", ""), ("97 %", "p.6", ""),
+                         None, ("not on Si", "p.9", "")]),
+            ("Paper D", [("850 °C · LPCVD", "p.3", ""), ("6×10⁴/cm²", "p.5", ""),
+                         ("≤ 3 layers", "p.6", ""), ("900 °C works", "p.9", "conf")]),
+        ),
+        footer="a new paper fills the cells it touches; nothing else moves",
+    ),
+    "zh": dict(
+        eyebrow="会长",
+        title=["新论文补格，", "不改写旧行。"],
+        sub="文库增长时只更新受影响的单元格；和已有结论冲突就标出来，不取平均。",
+        meta="Zotero · 38 篇 · 新增 1 篇",
+        cols=("论文", "条件", "数值", "边界", "反例"),
+        empty="未报告",
+        new="新增",
+        rows=(
+            ("论文 A", [("900 °C · 1 mbar", "p.4", "conf"), ("4×10⁴/cm²", "p.6", ""),
+                        ("≤ 5 层", "p.7", ""), None]),
+            ("论文 B", [("700 °C · APCVD", "p.3", ""), ("3×10³/cm²", "p.5", ""),
+                        ("单层", "p.5", ""), (">800 °C 会氧化", "p.8", "conf")]),
+            ("论文 C", [("等离子 30 s", "p.2", ""), ("97 %", "p.6", ""),
+                        None, ("硅基底不适用", "p.9", "")]),
+            ("论文 D", [("850 °C · LPCVD", "p.3", ""), ("6×10⁴/cm²", "p.5", ""),
+                        ("≤ 3 层", "p.6", ""), ("900 °C 可行", "p.9", "conf")]),
+        ),
+        footer="新论文只补它碰到的格子，其余不动",
+    ),
+}
 
 # ---------------------------------------------------------------- 字体
 WINDIR = Path(os.environ.get("WINDIR", r"C:\Windows"))
@@ -388,7 +561,8 @@ def render_explainer(lang, theme):
         cv.text((96, 88), c["eyebrow"], mono(17 * S), p["accent"], tracking=4)
     for i, line in enumerate(c["title"]):
         cv.text((96, 164 + i * 62), line, serif(56 * S, "SemiBold"), p["ink"])
-    cv.text((96, 276), c["sub"], serif(24 * S), p["ink2"])
+    cv.text((96, 236 if len(c["title"]) == 1 else 276), c["sub"],
+            serif(24 * S), p["ink2"])
 
     left = (96, 326, 736, 686)
     right = (800, 326, 1504, 686)
@@ -443,7 +617,8 @@ def story_header(cv, p, lang, c):
         cv.text((96, 88), c["eyebrow"], mono(17 * S), p["accent"], tracking=4)
     for i, line in enumerate(c["title"]):
         cv.text((96, 164 + i * 62), line, serif(56 * S, "SemiBold"), p["ink"])
-    cv.text((96, 276), c["sub"], serif(24 * S), p["ink2"])
+    cv.text((96, 236 if len(c["title"]) == 1 else 276), c["sub"],
+            serif(24 * S), p["ink2"])
 
 
 def story_footer(cv, p, lang, text):
@@ -674,6 +849,287 @@ def render_templates(lang, theme):
     return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
 
 
+# ---------------------------------------------------------------- 正文图 5：细节表（4 页）
+def _dash_seg(cv, x0, y0, x1, y1, color, width=1, dash=8, gap=6):
+    """虚线段：PIL 没有 dash 支持，用短线段拼。"""
+    total = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    if total <= 0:
+        return
+    ux, uy = (x1 - x0) / total, (y1 - y0) / total
+    t = 0.0
+    while t < total:
+        e = min(t + dash, total)
+        cv.line((x0 + ux * t, y0 + uy * t, x0 + ux * e, y0 + uy * e), color, width)
+        t = e + gap
+
+
+def _dash_rect(cv, box, color, width=1, dash=8, gap=6):
+    x0, y0, x1, y1 = box
+    _dash_seg(cv, x0, y0, x1, y0, color, width, dash, gap)
+    _dash_seg(cv, x1, y0, x1, y1, color, width, dash, gap)
+    _dash_seg(cv, x1, y1, x0, y1, color, width, dash, gap)
+    _dash_seg(cv, x0, y1, x0, y0, color, width, dash, gap)
+
+
+def _tag(cv, x, y, text, p, lang="en"):
+    """实心小标签（accent 底、反白字），用于"新增"这类状态。"""
+    f = serif(13 * S, "Medium") if lang == "zh" else mono(13 * S)
+    w = cv.width(text, f) + 22
+    cv.rounded((x, y - 2, x + w, y + 26), 6, fill=p["accent"])
+    cv.text((x + 11, y + 17), text, f, p["bg"], tracking=0 if lang == "zh" else 0.6)
+
+
+def _paper_card(cv, box, p, lang, solid, lost):
+    """一张论文缩略：标题与摘要是"会记住的"，下方三行细节是"会丢的"。"""
+    x0, y0, x1, y1 = box
+    shadow(cv, box, 14, (0, 12), 16, p["shadow"])
+    cv.rounded(box, 14, fill=p["card"], outline=p["line"], width=1)
+    pad = 32
+    cv.rounded((x0 + pad, y0 + 34, x0 + pad + 320, y0 + 46), 3, fill=p["ink"])
+    for i, w in enumerate((470, 430, 452)):
+        y = y0 + 72 + i * 22
+        cv.rounded((x0 + pad, y, x0 + pad + w, y + 9), 3, fill=p["bar"])
+    cv.line((x0 + pad, y0 + 152, x1 - pad, y0 + 152), p["line"], 1)
+    for i, label in enumerate(lost):
+        y = y0 + 176 + i * 38
+        f = serif(15 * S) if lang == "zh" else mono(13 * S)
+        cv.text((x0 + pad, y + 11), label, f, p["muted"],
+                tracking=0 if lang == "zh" else 0.6)
+        bx = x0 + pad + 130
+        if solid:
+            cv.rounded((bx, y, bx + 296, y + 12), 3, fill=p["bar"])
+        else:
+            _dash_rect(cv, (bx, y, bx + 296, y + 12), p["muted"], 1, 8, 6)
+
+
+def _ledger_cell(cv, x0, x1, y0, y1, cell, p, lang, empty_label):
+    """一个单元格：有值画值 + 页码；冲突加 ≠ 角标；没有值画"未报告"。"""
+    if cell is None:
+        cv.rect((x0 + 4, y0 + 4, x1 - 4, y1 - 4), fill=p["bg"])
+        f = serif(15 * S) if lang == "zh" else mono(13 * S)
+        cv.text(((x0 + x1) / 2, y0 + 40), empty_label, f, p["muted"], anchor="ms")
+        return
+    text, page, flag = cell
+    if flag == "conf":
+        cv.rounded((x0 + 6, y0 + 6, x1 - 6, y1 - 6), 8, fill=p["tint"])
+        bx, by = x1 - 36, y0 + 23
+        cv.d.ellipse(cv.box((bx - 14, by - 14, bx + 14, by + 14)), fill=p["accent"])
+        cv.text((bx, by), "≠", mono(16 * S), p["bg"], anchor="mm")
+    value_f = serif(19 * S)
+    cv.text((x0 + 20, y0 + 42), text, value_f, p["ink"])
+    cv.text((x0 + 20 + cv.width(text, value_f) + 12, y0 + 42), page,
+            mono(13 * S), p["muted"], tracking=0.3)
+
+
+def _ledger_table(cv, p, c, lang, highlight_new=False):
+    """表格本体：页 3（并置）与页 4（增量）共用；页 4 把最后一行标成新增。"""
+    top, row_h = 336, 74
+    bottom = top + 50 + 4 * row_h
+    box = (96, top, 1504, bottom)
+    shadow(cv, box, 16, (0, 14), 18, p["shadow"])
+    cv.rounded(box, 16, fill=p["card"], outline=p["line"], width=1)
+
+    meta = c.get("meta")
+    if meta:
+        f = serif(15 * S) if lang == "zh" else mono(13 * S)
+        tr = 1.0 if lang == "zh" else 0.8
+        w = cv.width(meta, f) + tr * max(0, len(meta) - 1)
+        cv.text((1504 - w, top - 20), meta, f, p["muted"], tracking=tr)
+
+    xs = (96, 316, 616, 896, 1176, 1504)
+    for x in xs[1:-1]:
+        cv.line((x, top + 2, x, bottom - 2), p["line"], 1)
+
+    head_f = serif(15 * S) if lang == "zh" else mono(13 * S)
+    for i, label in enumerate(c["cols"]):
+        cv.text((xs[i] + 20, top + 36), label, head_f, p["muted"],
+                tracking=2 if lang == "zh" else 1.2)
+    cv.line((98, top + 50, 1502, top + 50), p["line"], 1)
+
+    for r, (paper, cells) in enumerate(c["rows"]):
+        y0 = top + 50 + r * row_h
+        y1 = y0 + row_h
+        new = highlight_new and r == len(c["rows"]) - 1
+        if new:
+            cv.rect((99, y0 + 1, 1501, y1 - 1), fill=p["tint"])
+            cv.rect((99, y0 + 1, 103, y1 - 1), fill=p["accent"])
+            for x in xs[1:-1]:
+                cv.line((x, y0, x, y1), p["line"], 1)
+        if r:
+            cv.line((98, y0, 1502, y0), p["line"], 1)
+        pf = serif(19 * S, "Medium") if lang == "zh" else mono(16 * S)
+        cv.text((xs[0] + 20, y0 + 44), paper, pf, p["ink"],
+                tracking=0 if lang == "zh" else 0.5)
+        if new:
+            _tag(cv, xs[0] + 20 + cv.width(paper, pf) + 14, y0 + 18, c["new"], p, lang)
+        for i, cell in enumerate(cells):
+            _ledger_cell(cv, xs[i + 1], xs[i + 2], y0, y1, cell, p, lang, c["empty"])
+
+
+def render_ledger_forget(lang, theme):
+    """页 1：读过不等于记住——第 0 天细节都在，第 7 天只剩主线。"""
+    p = PALETTES[theme]
+    c = LEDGER_P1[lang]
+    cv = Canvas(EXP_W, EXP_H, bg=p["bg"])
+    cv.rect((0.5, 0.5, EXP_W - 0.5, EXP_H - 0.5), outline=p["edge"], width=1)
+    story_header(cv, p, lang, c)
+
+    cap_f = serif(17 * S) if lang == "zh" else mono(14 * S)
+    cv.text((96, 320), c["left_caption"], cap_f, p["muted"],
+            tracking=0 if lang == "zh" else 0.8)
+    cv.text((884, 320), c["right_caption"], cap_f, p["muted"],
+            tracking=0 if lang == "zh" else 0.8)
+
+    _paper_card(cv, (96, 336, 716, 660), p, lang, True, c["lost"])
+    _paper_card(cv, (884, 336, 1504, 660), p, lang, False, c["lost"])
+    arrow(cv, 728, 872, 498, p)
+    cv.text((800, 482), c["arrow_label"],
+            serif(14 * S) if lang == "zh" else mono(12 * S), p["muted"], anchor="ms")
+
+    story_footer(cv, p, lang, c["footer"])
+    return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
+
+
+def _quote_run(cv, x, y, quote, hi, p, size=22):
+    """画一句原文，命中的片段垫 tint；返回整句宽度。左右两卡共用，保证逐字对齐。"""
+    f = serif(size * S)
+    pre = quote.split(hi)[0]
+    w_pre, w_hi = cv.width(pre, f), cv.width(hi, f)
+    cv.rounded((x + w_pre - 4, y - 19, x + w_pre + w_hi + 4, y + 5), 4, fill=p["tint"])
+    cv.text((x, y), quote, f, p["ink"])
+    return cv.width(quote, f)
+
+
+def render_ledger_evidence(lang, theme):
+    """页 2：左边一条检索结果，右边它在论文里的原位段落。"""
+    p = PALETTES[theme]
+    c = LEDGER_P2[lang]
+    cv = Canvas(EXP_W, EXP_H, bg=p["bg"])
+    cv.rect((0.5, 0.5, EXP_W - 0.5, EXP_H - 0.5), outline=p["edge"], width=1)
+    story_header(cv, p, lang, c)
+
+    left, right = (96, 336, 760, 660), (864, 336, 1504, 660)
+    for box in (left, right):
+        shadow(cv, box, 14, (0, 12), 16, p["shadow"])
+        cv.rounded(box, 14, fill=p["card"], outline=p["line"], width=1)
+
+    lab_f = serif(16 * S) if lang == "zh" else mono(13 * S)
+    cv.text((132, 388), c["result_label"], lab_f, p["muted"],
+            tracking=0 if lang == "zh" else 1.2)
+    # 结果卡片：标题用实心条代替（不放真实论文标题），下面是元数据与命中句
+    cv.rounded((132, 412, 572, 424), 3, fill=p["ink"])
+    cv.rounded((132, 436, 452, 446), 3, fill=p["ink"])
+    cv.text((132, 486), c["meta"], mono(14 * S), p["muted"], tracking=0.5)
+    w = _quote_run(cv, 132, 528, c["quote"], c["quote_hi"], p)
+    cv.text((132 + w + 12, 528), "[1]", serif(15 * S, "SemiBold"), p["accent"])
+    chip(cv, 132, 574, c["result_chip"],
+         serif(17 * S) if lang == "zh" else mono(14 * S), p)
+
+    # 论文原位：页码 + 前后段落条，命中句保持原位
+    cv.text((900, 388), c["pdf_label"], lab_f, p["muted"],
+            tracking=0 if lang == "zh" else 1.2)
+    cv.text((1468, 388), c["page"], mono(12 * S), p["muted"], anchor="rs")
+    for y, bw in ((436, 420), (458, 470)):
+        cv.rounded((900, y, 900 + bw, y + 10), 3, fill=p["bar"])
+    _quote_run(cv, 900, 528, c["quote"], c["quote_hi"], p)
+    for y, bw in ((556, 440), (578, 360)):
+        cv.rounded((900, y, 900 + bw, y + 10), 3, fill=p["bar"])
+
+    _dash_seg(cv, 766, 528, 858, 528, p["muted"], 1, 7, 6)
+    cv.text((812, 512), c["connector"],
+            serif(14 * S) if lang == "zh" else mono(12 * S), p["muted"], anchor="ms")
+
+    story_footer(cv, p, lang, c["footer"])
+    return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
+
+
+def _badge(cv, x, y, text, p, lang, solid=True):
+    """状态徽标：实心=库内，描边=未入库。宽度随文案，右对齐时先算宽。"""
+    f = serif(14 * S) if lang == "zh" else mono(11 * S)
+    w = cv.width(text, f) + (46 if solid else 40)
+    if solid:
+        cv.rounded((x, y, x + w, y + 30), 9, fill=p["tint"])
+        cv.d.ellipse(cv.box((x + 14, y + 12, x + 20, y + 18)), fill=p["accent"])
+        cv.text((x + 30, y + 21), text, f, p["accent"],
+                tracking=0 if lang == "zh" else 0.5)
+    else:
+        cv.rounded((x, y, x + w, y + 30), 9, outline=p["line"], width=1)
+        cv.text((x + 14, y + 21), text, f, p["muted"],
+                tracking=0 if lang == "zh" else 0.5)
+    return w
+
+
+def render_ledger_chain(lang, theme):
+    """页 3：引文链——正文里的 [n] 解析到参考文献，库内条目直接标出来。"""
+    p = PALETTES[theme]
+    c = LEDGER_P3[lang]
+    cv = Canvas(EXP_W, EXP_H, bg=p["bg"])
+    cv.rect((0.5, 0.5, EXP_W - 0.5, EXP_H - 0.5), outline=p["edge"], width=1)
+    story_header(cv, p, lang, c)
+
+    left, right = (96, 336, 700, 660), (764, 336, 1504, 660)
+    for box in (left, right):
+        shadow(cv, box, 14, (0, 12), 16, p["shadow"])
+        cv.rounded(box, 14, fill=p["card"], outline=p["line"], width=1)
+
+    lab_f = serif(16 * S) if lang == "zh" else mono(13 * S)
+    cv.text((132, 388), c["passage_label"], lab_f, p["muted"],
+            tracking=0 if lang == "zh" else 1.2)
+    cv.text((132, 440), "“", serif(36 * S), p["muted"])
+    lf = serif(24 * S)
+    cv.text((170, 492), c["line1"], lf, p["ink"])
+    pre = c["line2"].split(c["line2_hi"])[0]
+    wpre = cv.width(pre, lf)
+    cv.text((170, 534), pre, lf, p["ink"])
+    cv.text((170 + wpre, 534), c["line2_hi"], serif(24 * S, "SemiBold"), p["accent"])
+    cv.text((170, 590), c["note"],
+            serif(14 * S) if lang == "zh" else mono(12 * S), p["muted"],
+            tracking=0 if lang == "zh" else 0.4)
+
+    head_f = serif(16 * S) if lang == "zh" else mono(13 * S)
+    cv.text((800, 388), c["citation_label"], head_f, p["muted"],
+            tracking=0 if lang == "zh" else 1.2)
+    for i, (ref, meta, status, extra) in enumerate(c["rows"]):
+        y = 424 + i * 96
+        cv.text((800, y + 26), ref, mono(12 * S), p["accent"], tracking=0.5)
+        cv.rounded((866, y + 16, 1250, y + 24), 3, fill=p["bar"])
+        cv.text((866, y + 48), meta, mono(12 * S), p["muted"], tracking=0.4)
+        f = serif(14 * S) if lang == "zh" else mono(11 * S)
+        bw = cv.width(status, f) + (46 if i == 0 else 40)
+        _badge(cv, 1468 - bw, y + 6, status, p, lang, solid=(i == 0))
+        if extra:
+            cv.text((1468, y + 54), extra,
+                    serif(13 * S) if lang == "zh" else mono(11 * S), p["accent"], anchor="rs")
+    cv.text((800, 632), c["collapsed"],
+            serif(14 * S) if lang == "zh" else mono(12 * S), p["muted"],
+            tracking=0 if lang == "zh" else 0.3)
+
+    story_footer(cv, p, lang, c["footer"])
+    return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
+
+def render_ledger_grid(lang, theme):
+    """页 3：并置——四篇一张表，冲突与空白都在表上。"""
+    p = PALETTES[theme]
+    c = LEDGER_P4[lang]
+    cv = Canvas(EXP_W, EXP_H, bg=p["bg"])
+    cv.rect((0.5, 0.5, EXP_W - 0.5, EXP_H - 0.5), outline=p["edge"], width=1)
+    story_header(cv, p, lang, c)
+    _ledger_table(cv, p, c, lang)
+    story_footer(cv, p, lang, c["footer"])
+    return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
+
+
+def render_ledger_grow(lang, theme):
+    """页 4：增量——新论文只补它碰到的格子，冲突照报。"""
+    p = PALETTES[theme]
+    c = LEDGER_P5[lang]
+    cv = Canvas(EXP_W, EXP_H, bg=p["bg"])
+    cv.rect((0.5, 0.5, EXP_W - 0.5, EXP_H - 0.5), outline=p["edge"], width=1)
+    story_header(cv, p, lang, c)
+    _ledger_table(cv, p, c, lang, highlight_new=True)
+    story_footer(cv, p, lang, c["footer"])
+    return cv.im.convert("RGB").resize((EXP_W, EXP_H), Image.LANCZOS)
+
 # ---------------------------------------------------------------- 图标
 ICON_BLUE = "#1F5FA8"
 ICON_PAPER = "#FBF9F4"
@@ -760,6 +1216,16 @@ def build():
                 OUT / ("explainer-flow-%s-%s.png" % (lang, theme)), optimize=True)
             render_templates(lang, theme).save(
                 OUT / ("explainer-templates-%s-%s.png" % (lang, theme)), optimize=True)
+            render_ledger_forget(lang, theme).save(
+                OUT / ("explainer-ledger-1-%s-%s.png" % (lang, theme)), optimize=True)
+            render_ledger_evidence(lang, theme).save(
+                OUT / ("explainer-ledger-2-%s-%s.png" % (lang, theme)), optimize=True)
+            render_ledger_chain(lang, theme).save(
+                OUT / ("explainer-ledger-3-%s-%s.png" % (lang, theme)), optimize=True)
+            render_ledger_grid(lang, theme).save(
+                OUT / ("explainer-ledger-4-%s-%s.png" % (lang, theme)), optimize=True)
+            render_ledger_grow(lang, theme).save(
+                OUT / ("explainer-ledger-5-%s-%s.png" % (lang, theme)), optimize=True)
     render_icon(512, 0.094, 0.52).save(OUT / "icon-512.png", optimize=True)
     render_icon(180, 0.094, 0.52).save(OUT / "icon-180.png", optimize=True)
     render_icon(32, 0.050, 0.58).save(OUT / "icon-32.png", optimize=True)

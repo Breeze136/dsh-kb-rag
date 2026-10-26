@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="t d">
+  <title id="t">One model manager behind the installers, the npm entry point and the runtime loader</title>
+  <desc id="d">Three callers (install.sh / install.ps1, npx dsh-kb-rag-install, and the runtime get_embedder / get_reranker) all call one model manager in kb_engine.py, which resolves the Hugging Face cache, verifies files, downloads with resume and endpoint fallback, and reports ready, partial or missing for the 95 MB embedding model and the 1.1 GB reranker.</desc>
+
+  <rect width="1200" height="440" fill="#fbf9f4"/>
+
+  <!-- ============ callers ============ -->
+  <text x="40" y="62" font-family="Consolas, Menlo, monospace" font-size="12" letter-spacing="2" fill="#757065">CALLERS</text>
+
+  <g font-family="Consolas, Menlo, monospace" font-size="13" fill="#191c1e">
+    <rect x="40" y="80" width="270" height="46" rx="9" fill="#fffdf8" stroke="#ddd5c6"/>
+    <text x="58" y="108">install.sh / install.ps1</text>
+
+    <rect x="40" y="136" width="270" height="46" rx="9" fill="#fffdf8" stroke="#ddd5c6"/>
+    <text x="58" y="164">npx dsh-kb-rag-install</text>
+
+    <rect x="40" y="192" width="270" height="46" rx="9" fill="#fffdf8" stroke="#ddd5c6"/>
+    <text x="58" y="220">get_embedder() · get_reranker()</text>
+  </g>
+
+  <!-- arrows: callers -> manager -->
+  <!-- 三个调用方先并到一根竖总线，再单独一个箭头进管理器（原来三条曲线在入口挤成一团） -->
+  <g stroke="#1f5fa8" stroke-width="1.6" fill="none" opacity="0.75"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M310 103 H 362"/>
+    <path d="M310 159 H 362"/>
+    <path d="M310 215 H 362"/>
+    <path d="M362 103 V 215"/>
+    <path d="M362 159 H 392"/>
+  </g>
+  <path d="M402 159 l -10 -4.5 v 9 z" fill="#1f5fa8" opacity="0.75"/>
+
+  <!-- ============ manager ============ -->
+  <rect x="412" y="70" width="300" height="196" rx="14" fill="#e8f0fa" stroke="#1f5fa8" stroke-width="1.4"/>
+  <text x="432" y="100" font-family="Consolas, Menlo, monospace" font-size="14" font-weight="bold" fill="#1f5fa8">kb_engine.py models</text>
+
+  <g font-family="Consolas, Menlo, monospace" font-size="13" fill="#191c1e">
+    <rect x="432" y="116" width="118" height="34" rx="8" fill="#fffdf8" stroke="#c9d9ee"/>
+    <text x="450" y="138">status</text>
+
+    <rect x="562" y="116" width="130" height="34" rx="8" fill="#fffdf8" stroke="#c9d9ee"/>
+    <text x="580" y="138">download</text>
+
+    <rect x="432" y="160" width="118" height="34" rx="8" fill="#fffdf8" stroke="#c9d9ee"/>
+    <text x="450" y="182">verify</text>
+
+    <text x="566" y="176" font-size="11.5" fill="#3b4144">--set embed</text>
+    <text x="566" y="190" font-size="11.5" fill="#3b4144">      all / none</text>
+  </g>
+
+  <text x="432" y="222" font-family="Times New Roman, Noto Serif SC, serif" font-size="12.5" fill="#3b4144">cache lookup → file check → download</text>
+  <text x="432" y="240" font-family="Times New Roman, Noto Serif SC, serif" font-size="12.5" fill="#3b4144">resume → endpoint fallback → report</text>
+
+  <!-- arrows: manager -> cache -->
+  <g stroke="#1f5fa8" stroke-width="1.6" fill="none" opacity="0.75">
+    <path d="M712 168 L 800 168" marker-end="url(#a)"/>
+  </g>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f5fa8"/>
+    </marker>
+  </defs>
+
+  <!-- ============ cache & state ============ -->
+  <text x="812" y="62" font-family="Consolas, Menlo, monospace" font-size="12" letter-spacing="2" fill="#757065">CACHE &amp; STATE</text>
+
+  <rect x="812" y="78" width="348" height="188" rx="14" fill="#fffdf8" stroke="#ddd5c6"/>
+  <text x="832" y="106" font-family="Consolas, Menlo, monospace" font-size="12" fill="#3b4144">HF_HUB_CACHE &gt; HF_HOME/hub</text>
+
+  <!-- embed row -->
+  <circle cx="842" cy="140" r="5" fill="#1f5fa8"/>
+  <text x="858" y="145" font-family="Consolas, Menlo, monospace" font-size="13" fill="#191c1e">embed</text>
+  <text x="948" y="145" font-family="Consolas, Menlo, monospace" font-size="13" fill="#757065">95 MB</text>
+  <text x="1032" y="145" font-family="Consolas, Menlo, monospace" font-size="12" fill="#1f5fa8">ready</text>
+
+  <!-- rerank row -->
+  <circle cx="842" cy="172" r="5" fill="none" stroke="#b9b2a4" stroke-width="1.6"/>
+  <text x="858" y="177" font-family="Consolas, Menlo, monospace" font-size="13" fill="#191c1e">rerank</text>
+  <text x="948" y="177" font-family="Consolas, Menlo, monospace" font-size="13" fill="#757065">1.1 GB</text>
+  <text x="1032" y="177" font-family="Consolas, Menlo, monospace" font-size="12" fill="#757065">missing</text>
+
+  <!-- partial row -->
+  <circle cx="842" cy="204" r="5" fill="#c98b2e"/>
+  <text x="858" y="209" font-family="Consolas, Menlo, monospace" font-size="13" fill="#191c1e">snapshot</text>
+  <text x="948" y="209" font-family="Consolas, Menlo, monospace" font-size="13" fill="#757065">partial</text>
+  <text x="1032" y="209" font-family="Consolas, Menlo, monospace" font-size="12" fill="#c98b2e">resume</text>
+
+  <text x="832" y="242" font-family="Times New Roman, Noto Serif SC, serif" font-size="12.5" fill="#3b4144">commit recorded per snapshot · local dirs accepted</text>
+
+  <!-- footer rules -->
+  <line x1="40" y1="300" x2="1160" y2="300" stroke="#ece6d9"/>
+  <text x="40" y="330" font-family="Times New Roman, Noto Serif SC, serif" font-size="14" fill="#3b4144">Only network errors switch endpoints — twice at most, and never to the same address twice.</text>
+  <text x="40" y="356" font-family="Times New Roman, Noto Serif SC, serif" font-size="14" fill="#3b4144">404, 401/403, a full disk or a broken cache stop immediately with the command that fixes it.</text>
+  <text x="40" y="382" font-family="Times New Roman, Noto Serif SC, serif" font-size="14" fill="#3b4144">Interrupted downloads resume from the .incomplete shards; nothing starts over.</text>
+  <text x="40" y="410" font-family="Consolas, Menlo, monospace" font-size="12" fill="#757065">$ python kb_engine.py models status --set embed</text>
+</svg>
